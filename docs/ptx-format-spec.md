@@ -2685,3 +2685,18 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
   - `+2` (=z+9, u16): a volatile per-file counter, NOT the session version. Ranges 0..823 across the corpus (mean ~77, 212 distinct values in 800 files); stable within a backup series, occasionally +1 on save. The 'session format version (05 00 = version 5)' reading is a COGNAC-only coincidence (COGNAC payload=5 is PT 11.3.2; Reverse Rewire payload=124/125 is PT 10.3.5; Quality Time payload=2 is PT 10.3.5). The real version is parsed from the 0x1F header block.
 - **Notes:** Do NOT model 0x2298 as a block type. It is the offset-0x14 header stub whose z+7 word is a per-file (content-derived checksum-like) value that only reads as 0x2298 in one session. The z+9 word is a save-counter-like field, not the session format version. xor note: for xor_type=5, bytes < 0x1000 use key index 0 → key 0, so 0x14..0x1F are raw (verified byte-identical to on-disk); the same handling applies to xor_type=1 after unxor.
 - **Confidence:** HIGH (refutation confirmed). Verified via 19 fully-loaded corpus sessions with deep block enumeration + 800 randomly-sampled files from the 43k-file backup corpus.
+
+### 0x260A — track automation breakpoint block
+
+- **kind:** LEAF. Child of a per-lane automation record (`0x2611` insert entry / lane subtree).
+- **size:** two forms. **Empty** = fixed 39-byte span (the overwhelming default, 4863/4894 in the corpus) — a lane with no breakpoints. **Populated** = variable, span grows with the breakpoint count (observed up to 651 bytes / 99 breakpoints).
+- **header (payload-relative, = zmark+9; confirmed 31/31 populated blocks):**
+  - `+0` 4 B magic `01 46 01 00` (shared with the `0x260B` family).
+  - `+4` u32 `size` = `payload_len − 10` (the block's own length-tail).
+  - `+8` u16 `flag` = 1 (tick-present).
+  - `+10` u32 `count` = number of breakpoints (observed 3, 5, 6, 9, … 99).
+  - `+14` u16 `type` = 2 (parameter/lane kind).
+  - `+16` u16 (varies; role unconfirmed).
+  - `+18` the breakpoint array begins.
+- **breakpoint array:** the **first** breakpoint carries an **absolute 5-byte conductor tick** (`0xE8D4A51000` = bar 1 when the lane starts at the top, otherwise the lane's start tick), followed by an s16-ish **value** (observed swinging between `0xFF9C` = −100 and `0x0064` = +100 → a normalized pan/level scale). **Subsequent** breakpoints are **delta-encoded** — the average bytes-per-breakpoint shrinks as the count rises (≈8.4 B/pt at count 5 down to ≈6.3 B/pt at count 99), so the records are NOT fixed-stride. Automation is in the "leave intact" set for clip/track edits, so a full per-breakpoint delta decode is deferred (needed only for an automation *editor*).
+- **confidence:** HIGH on the header (magic + `size == payload_len − 10` hold 31/31); MEDIUM on the array (count and absolute-first-tick confirmed; the delta encoding is inferred from the variable stride); LOW on the exact per-breakpoint byte layout and value scaling.
