@@ -182,3 +182,14 @@ payloads/the file header — a correct parser recurses by grammar, not raw `0x5A
 `docs/content-type-coverage.md` is the live ✓/phantom/undocumented checklist. Reimplementation
 fidelity: full-file load→re-encrypt 26/26 byte-exact, index `serialize(parse)` 26/26, all readers
 26/26, 161 tests green.
+
+## Insert → plugin-TYPE linkage — OPEN (needs more RE)
+
+Confirmed NEGATIVE (2026-07-02): the `0x2611` insert's `insert_ID` (u32 at the `0x2036`
+child payload +12) is a **unique per-insert-instance ID** (La Cumparsita: 11 inserts →
+IDs 1,3,4,5,6,7,8,9,10,11,12 — one each, gaps from deleted inserts), **NOT** an index into
+the `0x1018→0x1017` plugin catalog (only 6 catalog entries there). So which plugin *type* an
+insert instantiates is keyed by something else — most likely the instance GUID matching a
+catalog/`0x2064` `.tfx`-settings entry, or the settings path. Groundwork for a "list plugins
+per track" reader and a plugin-preserving track duplicate on real sessions. Not on the current
+critical path (automation/plugins are in the "leave intact" set for track/clip edits).
