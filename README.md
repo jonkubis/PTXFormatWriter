@@ -1,12 +1,16 @@
 # ptxformatwriter
 
-Read **and programmatically construct** Pro Tools session files (`.ptx`) in pure Python.
+Read, programmatically construct, **and surgically edit** Pro Tools session files (`.ptx`)
+in pure Python.
 
-A `.ptx` reader/parser, and—built on top of it—a control-based **session builder**: a
-toolkit for assembling Pro Tools sessions (tracks, audio clips, regions, tempo/meter maps,
-markers, a click track, MIDI notes, and the waveform-overview cache), plus a one-call
-**beatmap MIDI + stems → finished session** pipeline. Everything the builder produces has
-been validated by Pro Tools opening the result.
+A `.ptx` reader/parser, and—built on top of it—a control-based **session builder** (a toolkit
+for assembling sessions from scratch: tracks, audio clips, regions, tempo/meter maps, markers,
+a click track, MIDI notes, and the waveform-overview cache) plus an **in-place editor** that
+resizes/replaces individual structures in an *existing* session and deterministically rebuilds
+the master index, leaving everything else (plugins, automation, routing) byte-intact. Also
+includes a one-call **beatmap MIDI + stems → finished session** pipeline. Everything the
+builder produces, and the confirmed edits below, have been validated by Pro Tools opening
+(and closing) the result.
 
 ---
 
@@ -70,10 +74,48 @@ python3 examples/beatmap_example.py song/TempoMap.mid song/synth/MySong.ptx \
 
 ---
 
+## Reading structure from an existing session
+
+Beyond the low-level `core` reader above, `body_synth` reads high-level structure straight from
+any session's decrypted bytes (`PTFFormat().load(...)` then `.unxored_data()`):
+
+```python
+from ptxformatwriter import body_synth as bs
+info    = bs.session_info(data)                 # rate, bit depth, counts, start bar
+tracks  = bs.track_types(data)                  # name + kind (mono/stereo/MIDI/click) per track
+tempo   = bs.tempo_map(data)                    # [(bpm, tick), …]
+meter   = bs.meter_map(data)                    # [(num, den, tick), …]
+marks   = bs.markers(data)                      # [{name, tick|sample}, …] (deduped)
+clips   = bs.clips(data)                        # clip placements
+```
+
+## Editing an existing session
+
+`body_synth` can **surgically edit** an existing session and rebuild the master index
+deterministically, so the result is byte-clean and everything untouched stays intact:
+
+```python
+data = bs.remove_track(data, "Scratch Vox")          # drop a track (any display position)
+data = bs.duplicate_track(data, "Gtr", "Gt2")        # copy a track (same-length new name)
+data = bs.remove_clip(data, lane_zmark, clip_index)  # drop a clip from a lane
+data = bs.replace_tempo_map(data, [(120.0, 0), (140.0, 1_920_000)])
+data = bs.replace_meter_map(data, [(4, 4, 0), (3, 4, 1_920_000)])
+open("out.ptx", "wb").write(wb.encrypt_session_data(data))
+```
+
+**Pro Tools acceptance** (opened *and* closed cleanly): `remove_clip`, `remove_track` (any
+position), `duplicate_track`, and the tempo/meter replacements are PT-confirmed. `remove_track`
+works across the real-session corpus; `duplicate_track` is byte-exact for stereo sessions today,
+with mono/mixed/real-session coverage in progress. A pre-write `bs.validate(data)` gate replicates
+Pro Tools' stream read to catch structural faults before you save.
+
+---
+
 ## Documentation
 
 - **[`docs/programmatic-session-construction-guide.md`](docs/programmatic-session-construction-guide.md)** — how to build sessions with the library (recipes for every tool).
-- **[`docs/ptx-format-spec.md`](docs/ptx-format-spec.md)** — a reverse-engineered, implementation-grade specification of the `.ptx` byte format (XOR layer, blocks, audio linking, the master-index "holes" model, `WaveCache.wfm`, …). No comparable public spec exists.
+- **[`docs/ptx-format-spec.md`](docs/ptx-format-spec.md)** — a reverse-engineered, implementation-grade specification of the `.ptx` byte format (XOR layer, blocks, audio linking, conductor maps, per-track positional fields, the master-index "holes" model, `WaveCache.wfm`, and a corpus-dissected catalog covering **100% of the real content-types** seen across the session corpus). No comparable public spec exists.
+- **[`docs/content-type-coverage.md`](docs/content-type-coverage.md)** — the per-content-type coverage checklist (documented / phantom-artifact / frequency) backing that spec.
 - **[`docs/gen1-vs-gen2-architecture.md`](docs/gen1-vs-gen2-architecture.md)** — why the index is rebuilt deterministically (the "holes" model) rather than by guessing offsets.
 
 ---
