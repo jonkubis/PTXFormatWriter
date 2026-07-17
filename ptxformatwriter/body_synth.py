@@ -4828,17 +4828,28 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         raise ValueError(
             f"cannot locate track {track_name!r} (not found, or a non-audio track type)")
 
-    # the track's SECOND view-chain subtree (0x2589) is attributed POSITIONALLY: the i-th
-    # 0x2589 belongs to the i-th playlist (0x261C/0x261E/0x2620) in zmark order. Present only
-    # where the 0x2589 count == playlist count (a no-op guard on older schemas).
-    playlists = sorted(z for z, _e, c in bl if c in (0x261C, 0x261E, 0x2620))
-    s2589 = sorted(z for z, _e, c in bl if c == 0x2589)
-    if s2589 and pl_ranges and len(s2589) == len(playlists):
-        pz = min(p for p, _pe in pl_ranges)
-        if pz in playlists:
-            rank = playlists.index(pz)
-            if 0 <= rank < len(s2589):
-                ident.add(s2589[rank])
+    # The track's SECOND view-chain subtree (0x2589) is attributed by the block's OWN display-row
+    # ordinal (u16 at zmark+9), NOT by zmark rank. The blocks are not stored in display order --
+    # a real session's zmark order reads [2, 0, 1, 3] -- so the old rank-based pick selected
+    # another track's chain. That is not a cosmetic slip: each 0x2589 NESTS its children
+    # (0x2037/0x203a/0x2580), so one wrong pick silently deleted ~18 blocks / 268 bytes of a
+    # SURVIVING track's view state, and eos/rc/validate() all still passed.
+    #
+    # Only attribute when the ordinals form a clean 0..N-1 map onto the tracks. A session whose
+    # 0x2589 set does not correspond 1:1 to its tracks (e.g. 4 chains for 3 tracks) gets none
+    # removed: a stale extra view chain is harmless (PT recomputes view state), deleting a live
+    # one is not. The old `len(s2589) == len(playlists)` guard was a weak proxy that could pass
+    # by coincidence and then delete the wrong block.
+    s2589 = [(z, int.from_bytes(data[z + 9 : z + 11], "little"))
+             for z, _e, c in bl if c == 0x2589]
+    if s2589 and pl_ranges:
+        rows = [t.name for t in track_types(data)]
+        if sorted(o for _z, o in s2589) == list(range(len(rows))) and track_name in rows:
+            row = rows.index(track_name)
+            for z2589, ordinal in s2589:
+                if ordinal == row:
+                    ident.add(z2589)
+                    break
 
     # ---- INLINE per-track splices (byte-ranges added to nt_ranges, NOT whole blocks) ----
     # (a) 0x202a/0x202b <ALL> ordinal lists: drop the LAST 2-byte ordinal of each (identity

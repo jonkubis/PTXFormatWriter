@@ -276,3 +276,38 @@ Every one of the 77 sweep remove-failures was removing the session's ONLY track:
 emitted a file PT rejects. `remove_track` now raises ValueError instead (verified: 109 such
 fixtures raise, 0 emit a file). Removal is otherwise clean across 2..512 tracks (153 sessions,
 incl. 14 of the 512-track ones).
+
+## 0x2589 view-chain over-deletion — ROOT-CAUSED + FIXED for real removes (2026-07-02)
+
+The silent data loss above is root-caused. `remove_track` attributed the SECOND view-chain
+(`0x2589`) by **zmark rank** (`s2589[rank]`), but those blocks are **not stored in display
+order** — a real session's zmark order reads `[2, 0, 1, 3]`. Synth sessions happen to have
+zmark order == ordinal order, which is exactly why the synth path (and the PT-confirmed
+verify_3/4) looked perfect while real sessions broke.
+
+Each `0x2589` **nests** its children, so one wrong pick cascaded precisely:
+
+| type   | over-deleted | children of the wrongly-picked 0x2589 |
+|--------|--------------|----------------------------------------|
+| 0x203a | 8            | 8                                      |
+| 0x2037 | 8            | 8                                      |
+| 0x2580 | 1            | 1                                      |
+| 0x2589 | 1            | the block itself                       |
+
+FIXED: attribute by the block's OWN display-row ordinal (`u16 @ zmark+9`), and only when the
+ordinals form a clean `0..N-1` map onto the tracks. A session whose chains do not correspond 1:1
+(e.g. 4 chains / 3 tracks) now gets none removed — a stale extra view chain is harmless (PT
+recomputes view state); deleting a live one is not. The old `len(s2589) == len(playlists)` guard
+was a weak proxy that could pass by coincidence and then delete the wrong block.
+
+Verified: on the failing fixture a real `remove_track` now leaves `0x2589` at 4 and `0x203a` at
+16 (previously 3 and 8) — no surviving track loses its view state. Synth paths unchanged
+(stereo/mono dup == synth, remove-last == synth8, round-trips byte-exact).
+
+STILL OPEN — `duplicate_track` UNDER-ADDS the view chain on non-synth sessions: it adds no
+`0x2589` for the copy and does not shift the survivors' ordinals, so the dup output is
+structurally incomplete and a dup->remove round-trip is still not byte-exact there (the stale
+`0..N-1` ordinals let the guard match a pre-existing chain). Fixing it means copying the source's
+`0x2589` subtree for the copy + re-keying ordinals on arbitrary layouts. The dup->remove
+block-delta check is the regression oracle. Real (unedited) removes are data-safe today.
+
