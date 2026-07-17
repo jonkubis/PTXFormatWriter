@@ -40,14 +40,19 @@ class ChildRef:
 class Element:
     """A marker/offset-table element.
 
-    Layout: <0x01><4*k><0x00><u16 k><k * u32 offset><6 zero>, total 4*k + 11.
+    Layout: <0x01><4*k><0x00><u16 k><k * u32 offset><6-byte tail>, total 4*k + 11.
     The familiar marker `01 04 00 01 00 <off> ...` is just k == 1. Each of the
     `k` offsets is a hole at record-relative position `rel + 5 + 4*i`.
+
+    `tail` is the 6 trailing bytes, PRESERVED rather than assumed zero: they are zero in every
+    PT-authored session, but a session carrying a `_no_magic`-scrubbed 0x5B there had it silently
+    overwritten with 0x00 by a hardcoded tail. Keep the file's own bytes.
     """
 
     rel: int
     tag1: int
     offsets: list[int] = field(default_factory=list)
+    tail: bytes = b"\x00" * 6
 
 
 @dataclass
@@ -139,7 +144,9 @@ def parse_records(
             # tag1 is a u16 (= 4 * offset count): the byte after 0x01 plus the next byte,
             # which is its high byte (0x00 for < 64 offsets, nonzero at N>=64). Reading it as
             # a single byte truncated the count and broke the index at >=64 tracks.
-            elements.append(Element(rel=p - start, tag1=_u16(final_block, p + 1), offsets=offsets))
+            _tail = bytes(final_block[p + 5 + 4 * k : p + 11 + 4 * k])
+            elements.append(Element(rel=p - start, tag1=_u16(final_block, p + 1),
+                                    offsets=offsets, tail=_tail))
             p += 4 * k + 11
         records.append(
             IndexRecord(
@@ -196,7 +203,9 @@ def serialize_record(record: IndexRecord) -> bytes:
         out += len(element.offsets).to_bytes(2, "little")
         for offset in element.offsets:
             out += offset.to_bytes(4, "little")
-        out += b"\x00\x00\x00\x00\x00\x00"
+        # emit the PRESERVED tail (zero in PT-authored sessions; a hardcoded 6 zeros silently
+        # overwrote a scrubbed 0x5B on one fixture -- the file's bytes are the ground truth)
+        out += element.tail if len(element.tail) == 6 else b"\x00" * 6
     return bytes(out)
 
 
