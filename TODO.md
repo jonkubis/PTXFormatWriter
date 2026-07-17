@@ -413,3 +413,36 @@ The remaining 31 are NOT defects:
 NOTE — two hypotheses I formed and REFUTED here: that canonicalize scrambles custom display order
 (it does not; order round-trips identically), and that this residual was "cosmetic polish" (it was
 two real inverse bugs). Diagnose before dismissing, and before alarming.
+
+## Remaining duplicate round-trip differences — classified, 2 open questions (2026-07-02)
+
+After the three inverse fixes (26fc542 + 3706786) the sweep reads duplicate **115 ok / 28 fail**,
+remove **140 / 0**. The 28 are NOT one bucket — by shape:
+
+| n | shape | verdict |
+|---|---|---|
+| 10 | `body: 0x2551/0x2587/0x258a` | our code REPAIRING a stale `0x258A` count (see below) — correct |
+| 10 | `index-only: 7B` | open |
+| 5 | `body: 0x202a/0x202b` | the `<ALL>` count-convention question (below) |
+| 2 | `index-only: 5B/6B` | open |
+| 1 | `body: 0x1000/0x1004/0x1006` | open (synth_stereo_click) |
+
+**`0x258A` (10 cases) — our code is right.** Its count == its `0x2589` child count in EVERY
+PT-authored control and synth (midi9 9/9, mixedmidi_4/5/6/9, synth stereo+mono 8/8). The failing
+fixtures store a STALE count (`nameblock_v3`: stored=4 with 7 children) and `_fix_container_counts`
+repairs it to 7. The round-trip is inexact because the ORIGINAL is wrong.
+
+**`<ALL>` group lists (5 cases) — OPEN: two count conventions.** Our code is provably SYMMETRIC on
+the synth path (`<ALL>` members 8 -> 9 -> 8 across duplicate/remove). But `mixedmidi_click_bottom`
+stores `<ALL>` count=6 while holding only 3 ordinals before the `0xFFFE` delimiter, so the stored
+count disagrees with its own content and `_fix_all_ordinal_counts` recomputes it to 3. This is the
+SAME unresolved question as `0x1015`: that fixture is one of the four where `0x1015` count (3) ==
+AUDIO tracks while `midi9.ptx` count (9) == ALL tracks. Two conventions coexist in PT-authored
+files and we have not pinned which rule selects them. Until that is known, DO NOT invent a third
+model — the `0x1015` precedent (`_adjust_track_count`: adjust by the edit's delta, never recompute)
+is the safe pattern to extend here.
+
+NOTE: every time a residual was labelled "benign"/"cosmetic" this session it was hiding real bugs
+(the 8-byte residual = two inverse defects; the "benign 15" = the 0x2519 lane-offset swap). The
+label was doing the work the diagnosis should have. These 28 are classified by measured shape, not
+adjective.
