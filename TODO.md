@@ -638,3 +638,21 @@ STILL UNKNOWN -- resolve from bytes before writing code:
 Get a click session with 3 tracks and one with 12 and diff the region byte-for-byte; the run
 boundaries should move with the click's display row (bottom/middle/top fixtures exist for
 exactly this).
+
+### Two more facts from the bytes (cheap, and they constrain the next attempt)
+
+1. `click_{bottom,middle,top}` have BYTE-IDENTICAL `<ALL>` regions:
+   `06 00 | 00 00 | 00 00 01 00 02 00 | fe ff | 10 80 | 01 00 00 00 00 00 | ff ff | 00 00 00 00 | ff ff` then `5a`
+   The click occupies a different display row in each, and the bytes do not move. So `<ALL>`
+   does NOT encode display order, and those 3 failures are one cause, not three.
+
+2. Compare the tail against the 12-stereo click session:
+   3 audio + 2 MIDI + click:   `... ff ff | 00 00 00 00 | ff ff` then `5a` (next framed block)
+   12 stereo + click:          `... ff ff | 08 00 09 00 0a 00 0b 00 | fe ff`
+   Same leading run [0,1,2] in BOTH -- on a 3-audio session AND a 12-audio one. So the first run
+   is not "the audio tracks" either. `fe ff` (0xFFFE), `10 80` (0x8010) and `ff ff` (0xFFFF) all
+   behave like sentinels rather than ordinals; `_all_ordinal_lists` treats whichever it hits
+   first as the end.
+
+The 0x2519 preamble precedent (two lengths chosen by a flag at payload+0x0A) is the shape to
+suspect here: find the field that selects the layout before assuming a run encoding.
