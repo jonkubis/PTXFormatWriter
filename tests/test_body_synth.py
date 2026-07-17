@@ -1227,6 +1227,45 @@ class NonSynthDuplicateChannelTests(unittest.TestCase):
                 self.assertEqual(BS.validate(dup), [])
 
 
+class ViewChainAttributionTests(unittest.TestCase):
+    """duplicate -> remove(copy) must be a PERFECT INVERSE: the copy's block-set is exactly what
+    the duplicate added, so remove must delete exactly that and nothing else. This is the oracle
+    that caught remove_track deleting a SURVIVING track's 0x2589 view chain (attributed by zmark
+    rank, but those blocks are not in display order) -- and because each 0x2589 nests its
+    children, one wrong pick silently dropped ~18 blocks while eos/rc/validate() all passed."""
+
+    def _hist(self, data):
+        ref = FI.final_index_ref(data)
+        return Counter(c for _z, _e, c in BS._raw_block_bounds(data, ref.start))
+
+    def _non_synth_session(self):
+        # a MIDI-bearing session fails _is_synth_shaped -> takes the real-session path
+        return BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2])
+
+    def test_duplicate_remove_is_a_perfect_inverse_off_the_synth_path(self):
+        data = self._non_synth_session()
+        self.assertFalse(BS._is_synth_shaped(data))
+        dup = BS.duplicate_track(data, "Audio 2", "Audio X")
+        back = BS.remove_track(dup, "Audio X")
+        h0, h1, h2 = self._hist(data), self._hist(dup), self._hist(back)
+        for ct in sorted(set(h0) | set(h1) | set(h2)):
+            if ct in (0x229D, 0x23A9, 0x2A00, 0x2C29):     # file-header / 0x5A-in-data artifacts
+                continue
+            added = h1.get(ct, 0) - h0.get(ct, 0)
+            deleted = h1.get(ct, 0) - h2.get(ct, 0)
+            self.assertEqual(added, deleted,
+                             f"0x{ct:04x}: duplicate added {added} but remove deleted {deleted}")
+
+    def test_round_trip_preserves_every_body_block(self):
+        data = self._non_synth_session()
+        back = BS.remove_track(BS.duplicate_track(data, "Audio 2", "Audio X"), "Audio X")
+        self.assertEqual(len(back), len(data))
+        ref = FI.final_index_ref(data)
+        for z, e, _c in sorted(BS._raw_block_bounds(data, ref.start)):
+            self.assertEqual(data[z:e], back[z:e], f"block at {z} changed across the round-trip")
+        self.assertEqual(BS.validate(back), [])
+
+
 class NameTablePreambleTests(unittest.TestCase):
     """The 0x2519 preamble has two lengths, selected by the u32 flag at payload+0x0A (0 = base,
     entries at +0x14; 1 = extended, entries at +0x16) -- NOT by the block's +1 subtype word, which

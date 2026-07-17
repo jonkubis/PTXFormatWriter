@@ -4168,7 +4168,33 @@ def clips(data: bytes) -> "list[dict]":
 # so the count must be rewritten. Maps are corpus-derived (count == actual on every
 # valid session): most tally leading children of ONE type; 0x2624 tallies ALL its
 # (heterogeneous) per-track subtrees.
-_COUNT_CONTAINER_CHILD = {0x1015: 0x1014, 0x1054: 0x1052}
+_COUNT_CONTAINER_CHILD = {0x1054: 0x1052}
+
+# `0x1015` is deliberately NOT auto-recomputed. Its u32 is NOT its 0x1014 child count: MIDI tracks
+# carry no 0x1014, so `midi9.ptx` has count=9 with ZERO 0x1014 children and `mixedmidi_5_AMSmM`
+# count=5 with 3 -- tallying 0x1014 rewrote the count to the AUDIO-track total and silently
+# corrupted every mixed audio+MIDI session a track edit touched. (All-audio sessions hid it: there
+# tracks == 0x1014 children.) But "count == len(track_types())" is not universal either -- some
+# corpus sessions disagree with BOTH models -- so no recompute is provably safe. A track edit
+# instead ADJUSTS the existing value by its own delta (`_adjust_track_count`), which preserves
+# whatever the file means and cannot corrupt it. `validate()` likewise does not assert on 0x1015.
+_TRACK_COUNT_CONTAINER = 0x1015
+
+
+def _adjust_track_count(data: bytes, delta: int) -> bytes:
+    """Add `delta` to the `0x1015` track-count `u32` (payload+0), size-neutral.
+
+    Used instead of recomputing: the field is not the container's 0x1014 child count (MIDI tracks
+    have no 0x1014), and it does not universally equal `len(track_types())` either, so any
+    recompute risks corrupting a session whose convention we have not pinned down. Adjusting by
+    the edit's own delta preserves the file's existing meaning."""
+    out = bytearray(data)
+    for z, _e, c in _size_driven_blocks(data):
+        if c == _TRACK_COUNT_CONTAINER:
+            cur = int.from_bytes(out[z + 9 : z + 13], "little")
+            out[z + 9 : z + 13] = max(0, cur + delta).to_bytes(4, "little")
+            break
+    return bytes(out)
 _COUNT_CONTAINER_TOTAL = frozenset({0x2624})
 # Two per-track containers whose child-count `u32` is NOT at payload+0: `0x2107` (child
 # `0x210b`) keeps it at payload+9 (z+18); `0x258a` (child `0x2589`) keeps it immediately
@@ -4840,9 +4866,15 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # removed: a stale extra view chain is harmless (PT recomputes view state), deleting a live
     # one is not. The old `len(s2589) == len(playlists)` guard was a weak proxy that could pass
     # by coincidence and then delete the wrong block.
+    # ...but ONLY on a synth-shaped session, where the mapping is proven (the dup/remove pair is
+    # byte-identical to a fresh synth there). A real session's 0x2589 set does NOT correspond 1:1
+    # to `track_types` -- one fixture carries 4 chains for 3 tracks, i.e. display rows exist that
+    # track_types never reports (master/aux) -- so no track-keyed attribution is sound. Leaving a
+    # stale chain is harmless (PT recomputes view state); deleting a live one silently destroyed
+    # ~18 blocks of a SURVIVING track's state while eos/rc/validate() all passed.
     s2589 = [(z, int.from_bytes(data[z + 9 : z + 11], "little"))
              for z, _e, c in bl if c == 0x2589]
-    if s2589 and pl_ranges:
+    if s2589 and pl_ranges and _do_renumber:
         rows = [t.name for t in track_types(data)]
         if sorted(o for _z, o in s2589) == list(range(len(rows))) and track_name in rows:
             row = rows.index(track_name)
@@ -4944,7 +4976,10 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # duplicate renumber, so the round-trip stays byte-exact and the result equals synth(N-1).
     if _do_renumber:
         out = _renumber_body_after_remove(out, _track_kinds(out), _base_n, _donor_free)
-    return out
+    # The 0x1015 track count is adjusted by this edit's own delta, never recomputed -- tallying
+    # its 0x1014 children silently corrupted mixed audio+MIDI sessions (MIDI tracks carry no
+    # 0x1014). See `_adjust_track_count`.
+    return _adjust_track_count(out, -1)
 
 
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
@@ -5052,16 +5087,28 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     if not any(zct[z] == 0x261B for z in ident):
         raise ValueError(f"cannot locate audio track {source_track!r}")
 
-    # the source track's SECOND view-chain subtree (0x2589), positional (same attribution as
-    # remove_track); copied verbatim (no name/GUID inside) by the units machinery below.
-    playlists = sorted(z for z, _e, c in bl if c in (0x261C, 0x261E, 0x2620))
-    s2589 = sorted(z for z, _e, c in bl if c == 0x2589)
-    if s2589 and pl_ranges and len(s2589) == len(playlists):
-        pz = min(p for p, _pe in pl_ranges)
-        if pz in playlists:
-            rank = playlists.index(pz)
-            if 0 <= rank < len(s2589):
-                ident.add(s2589[rank])
+    # The source track's SECOND view-chain subtree (0x2589), attributed by the block's OWN
+    # display-row ordinal (u16 @ zmark+9) -- the SAME rule remove_track uses, so the two agree on
+    # what a track's chain is and dup->remove stays a perfect inverse. The blocks are not stored
+    # in display order (a real session's zmark order reads [2, 0, 1, 3]), so the old zmark-rank
+    # pick copied another track's chain; and its `len(s2589) == len(playlists)` guard skipped
+    # whole sessions (4 chains / 3 playlists), leaving the copy with no chain at all while
+    # remove still deleted one -- the round-trip asymmetry. Copied verbatim (no name/GUID inside)
+    # by the units machinery below.
+    # ...and, like remove_track, ONLY on a synth-shaped session: a real session's 0x2589 set does
+    # not correspond 1:1 to `track_types` (4 chains for 3 tracks in one fixture -- display rows
+    # track_types never reports), so no track-keyed attribution is sound there. Both editors skip
+    # it off the synth path, which keeps dup->remove a perfect inverse on real sessions.
+    s2589 = [(z, int.from_bytes(data[z + 9 : z + 11], "little"))
+             for z, _e, c in bl if c == 0x2589]
+    if s2589 and pl_ranges and _do_renumber:
+        rows = [t.name for t in track_types(data)]
+        if sorted(o for _z, o in s2589) == list(range(len(rows))) and source_track in rows:
+            row = rows.index(source_track)
+            for z2589, ordinal in s2589:
+                if ordinal == row:
+                    ident.add(z2589)
+                    break
 
     # fresh per-channel GUIDs (deterministic, guaranteed absent)
     gmap: "dict[bytes, bytes]" = {}
@@ -5180,7 +5227,9 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
         # Channels need only be UNIQUE, not contiguous -- removal already leaves gaps that PT
         # accepts -- so the lowest free indices are safe.
         out = _assign_free_channels(out, new_name)
-    return out
+    # See `_adjust_track_count`: adjust the 0x1015 track count by this edit's delta rather than
+    # recomputing it from the 0x1014 children (which MIDI tracks do not have).
+    return _adjust_track_count(out, +1)
 
 
 def _track_1014_rows(data: bytes) -> "list[tuple[str, int, list[int]]]":
