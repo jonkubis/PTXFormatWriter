@@ -4245,27 +4245,38 @@ def _fix_container_counts(data: bytes) -> bytes:
     return bytes(out)
 
 
+def _name_table_shift(data: bytes, z: int) -> int:
+    """Extra preamble bytes in a `0x2519` name table, from the `u32` flag at payload+0x0a
+    (0 = base, 1 = +2). Both the entry count and the first entry move by this. It is NOT keyed
+    by the block's +1 subtype word: sessions with the SAME subtype 9 use both preambles -- a
+    synth's entries start at payload+0x14, a real clip-bearing session's at +0x16. Verified on
+    436 local sessions (362 base / 74 extended, no exceptions)."""
+    return 2 if int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little") else 0
+
+
 def _fix_name_table_count(data: bytes) -> bytes:
-    """Update the `0x2519` name table's INLINE entry count (`u16` at payload+0x0e, present in
-    the `format_version >= 8` layout) to match the actual inline name entries, after a track
-    add/remove changed them. Pro Tools reads this count to bound the inline entry list; a
-    stale count runs the read past the last real entry into the framed children -> end of
-    stream. Size-neutral (no reindex). Idempotent on an already-consistent session."""
+    """Update the `0x2519` name table's INLINE entry count (`u16` at payload+0x0e, shifted by
+    `_name_table_shift`) to match the actual inline name entries, after a track add/remove
+    changed them. Pro Tools reads this count to bound the inline entry list; a stale count runs
+    the read past the last real entry into the framed children -> end of stream. Size-neutral
+    (no reindex). Idempotent on an already-consistent session."""
     bl = _size_driven_blocks(data)
     out = bytearray(data)
     for z, e, c in bl:
-        if c != 0x2519 or int.from_bytes(data[z + 1 : z + 3], "little") < 8:
+        if c != 0x2519:
             continue
+        shift = _name_table_shift(data, z)
         children = [zz for zz, _ee, _cc in bl if z < zz < e]
         end = min(children) if children else e
-        q, n = z + 9 + 0x14, 0                       # entries begin at payload+0x14 (v>=8)
+        q, n = z + 9 + 0x14 + shift, 0               # entries begin at payload+0x14 (+shift)
         while q < end:
             nlen = int.from_bytes(data[q : q + 4], "little")
             if not (0 < nlen <= 64):
                 break
             q += 4 + nlen + _NAME_ENTRY_SUFFIX
             n += 1
-        out[z + 9 + 0x0E : z + 9 + 0x10] = n.to_bytes(2, "little")
+        cnt = z + 9 + 0x0E + shift
+        out[cnt : cnt + 2] = n.to_bytes(2, "little")
     return bytes(out)
 
 

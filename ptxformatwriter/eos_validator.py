@@ -52,9 +52,10 @@ CT_TRACK_LIST = 0x2624         # count-prefixed track-list container
 NAME_ENTRY_TRAILER = 23        # bytes after the name string
 TRAILER_MARK_OFF = 6           # offset of the 0x0000002A marker inside the trailer
 TRAILER_MARK = 0x2A
-ENTRY_START_V8PLUS = 0x14      # first name entry, format_version >= 8
-ENTRY_START_V_LOW = 0x16       # first name entry, format_version < 8
-ENTRY_COUNT_OFF = 0x0E         # u16 inline-entry count in the format_version >= 8 preamble
+ENTRY_START_BASE = 0x14        # first name entry when the preamble carries no extra field
+ENTRY_COUNT_OFF = 0x0E         # u16 inline-entry count (same +2 shift as the entry start)
+PREAMBLE_FLAG_OFF = 0x0A       # u32: 0 = base preamble, 1 = +2-byte extended preamble
+PREAMBLE_EXTRA = 2             # bytes the extended preamble adds before the count + entries
 
 
 def _u16(b: bytes, o: int) -> int:
@@ -100,9 +101,16 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
     """Walk the inline name-entry list the way the reader does. Each entry is
     ``u32 name_length | name | 23-byte trailer`` with a 0x2A marker at trailer +6.
     Raises EndOfStream on the offending entry; returns the entry count otherwise."""
-    fmt_ver = _u16(data, z + 1)
     payload = z + 9
-    start = ENTRY_START_V8PLUS if fmt_ver >= 8 else ENTRY_START_V_LOW
+    # The preamble has two lengths, selected by a u32 flag at payload+0x0A (0 = base, 1 = +2
+    # bytes). Both the entry count and the first entry shift by that amount. This is NOT keyed
+    # by the block's +1 word (the block subtype): sessions with the SAME subtype 9 carry both
+    # preambles -- a synth starts its entries at 0x14 while a real clip-bearing session starts
+    # at 0x16, which made the old subtype-keyed guess misread real sessions' name tables as a
+    # bogus multi-hundred-KB name_length. Rule verified on 436 local sessions (362 base / 74
+    # extended, no exceptions).
+    shift = PREAMBLE_EXTRA if _u32(data, payload + PREAMBLE_FLAG_OFF) else 0
+    start = ENTRY_START_BASE + shift
 
     children = _top_level_children(blocks, z, e)
     entries_end = children[0][0] if children else e   # entries end at the first framed child
@@ -131,16 +139,15 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
         q = entry_end
         idx += 1
 
-    # format_version >= 8 stores an explicit inline-entry count in the preamble; the reader
-    # reads exactly that many entries. A stale count reads one entry too many (past the last
+    # The preamble stores an explicit inline-entry count (at the same +2 shift as the entries);
+    # the reader reads exactly that many. A stale count reads one entry too many (past the last
     # real entry, into the framed children) or stops short — an overrun either way.
-    if fmt_ver >= 8:
-        stored = _u16(data, payload + ENTRY_COUNT_OFF)
-        if stored != idx:
-            raise EndOfStream(
-                CT_NAME_TABLE, z, "preamble.entry_count",
-                f"preamble entry_count={stored} but {idx} inline entries are present "
-                f"(a track's name entry was added/removed without updating the count)")
+    stored = _u16(data, payload + ENTRY_COUNT_OFF + shift)
+    if stored != idx:
+        raise EndOfStream(
+            CT_NAME_TABLE, z, "preamble.entry_count",
+            f"preamble entry_count={stored} but {idx} inline entries are present "
+            f"(a track's name entry was added/removed without updating the count)")
     return idx
 
 

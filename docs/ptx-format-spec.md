@@ -2700,3 +2700,30 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
   - `+18` the breakpoint array begins.
 - **breakpoint array:** the **first** breakpoint carries an **absolute 5-byte conductor tick** (`0xE8D4A51000` = bar 1 when the lane starts at the top, otherwise the lane's start tick), followed by an s16-ish **value** (observed swinging between `0xFF9C` = −100 and `0x0064` = +100 → a normalized pan/level scale). **Subsequent** breakpoints are **delta-encoded** — the average bytes-per-breakpoint shrinks as the count rises (≈8.4 B/pt at count 5 down to ≈6.3 B/pt at count 99), so the records are NOT fixed-stride. Automation is in the "leave intact" set for clip/track edits, so a full per-breakpoint delta decode is deferred (needed only for an automation *editor*).
 - **confidence:** HIGH on the header (magic + `size == payload_len − 10` hold 31/31); MEDIUM on the array (count and absolute-first-tick confirmed; the delta encoding is inferred from the variable stride); LOW on the exact per-breakpoint byte layout and value scaling.
+
+### `0x2519` name table — the preamble has TWO lengths (a `u32` flag, not the subtype)
+
+The name table's inline entry list is preceded by a preamble whose length comes in two variants,
+selected by a **`u32` flag at payload `+0x0A`**:
+
+| `u32 @ payload+0x0A` | entry count | first entry | corpus |
+|---|---|---|---|
+| `0` (base) | `u16 @ payload+0x0E` | `payload+0x14` | 362 sessions |
+| `1` (extended) | `u16 @ payload+0x10` | `payload+0x16` | 74 sessions |
+
+Both the count and the first entry shift by the same **+2 bytes**. Verified across 436 local
+sessions with no exceptions.
+
+**This is NOT keyed by the block's `+1` subtype word.** That was the natural guess — and it is
+wrong: sessions with the *same* subtype `9` use *both* preambles. A pristine synth starts its
+entries at `+0x14`, while a real clip-bearing session starts at `+0x16`. Reading a real session
+with the synth's offset lands mid-field and yields an absurd `name_length` (e.g. `458752`), which
+looks exactly like a corrupt/misframed name table. Two consequences we hit in practice:
+
+- the EOS validator reported a bogus overrun on perfectly good real sessions (false positives);
+- `duplicate_track` wrote the new entry count to the *base* offset on an extended-preamble
+  session, leaving the real count stale — `entry_count=4` with 5 entries present — which is a
+  genuine "end of stream" fault in Pro Tools.
+
+Writers must therefore resolve the shift from `+0x0A` before touching either field
+(`body_synth._name_table_shift`, `eos_validator.PREAMBLE_FLAG_OFF`).

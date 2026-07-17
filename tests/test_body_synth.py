@@ -1227,5 +1227,51 @@ class NonSynthDuplicateChannelTests(unittest.TestCase):
                 self.assertEqual(BS.validate(dup), [])
 
 
+class NameTablePreambleTests(unittest.TestCase):
+    """The 0x2519 preamble has two lengths, selected by the u32 flag at payload+0x0A (0 = base,
+    entries at +0x14; 1 = extended, entries at +0x16) -- NOT by the block's +1 subtype word, which
+    is 9 for both. Guessing from the subtype misread real sessions' name tables (a bogus
+    multi-hundred-KB name_length) and made `_fix_name_table_count` write the entry count to the
+    wrong offset, leaving it stale -- a genuine end-of-stream fault in Pro Tools."""
+
+    def _name_tables(self, data):
+        return [(z, e) for z, e, c in BS._size_driven_blocks(data) if c == 0x2519]
+
+    def _true_entry_start(self, data, z, e):
+        payload = data[z + 9 : e]
+        for off in range(0, 44):
+            if off + 4 > len(payload):
+                break
+            ln = int.from_bytes(payload[off : off + 4], "little")
+            name = payload[off + 4 : off + 4 + ln]
+            if 1 <= ln <= 32 and len(name) == ln and all(0x20 <= b < 0x7F for b in name):
+                return off
+        return None
+
+    def test_shift_matches_the_real_entry_start(self):
+        # a synth uses the base preamble; both must agree with where entries actually parse
+        data = BS.synthesize_stereo_inline(8)
+        for z, e in self._name_tables(data):
+            self.assertEqual(0x14 + BS._name_table_shift(data, z),
+                             self._true_entry_start(data, z, e))
+
+    def test_fix_count_is_idempotent_on_both_preambles(self):
+        for data in (BS.synthesize_stereo_inline(8), BS.synthesize_mono_inline(8)):
+            with self.subTest(tracks=len(BS.track_types(data))):
+                self.assertEqual(BS._fix_name_table_count(data), data)
+                self.assertEqual(BS.validate(data), [])
+
+    def test_duplicate_keeps_the_entry_count_in_sync(self):
+        # the count must track the entries whichever preamble the session uses
+        data = BS.set_track_names(BS.synthesize_stereo_inline(8),
+                                  ["Kick", "Snare", "Bass", "Gtr", "Keys", "Vox", "Perc", "FX"])
+        dup = BS.duplicate_track(data, "Bass", "Bas2")
+        self.assertEqual(BS.validate(dup), [])
+        for z, e in self._name_tables(dup):
+            shift = BS._name_table_shift(dup, z)
+            stored = int.from_bytes(dup[z + 9 + 0x0E + shift : z + 9 + 0x10 + shift], "little")
+            self.assertEqual(stored, len(BS.track_types(dup)))
+
+
 if __name__ == "__main__":
     unittest.main()
