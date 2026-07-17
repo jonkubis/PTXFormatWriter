@@ -368,8 +368,12 @@ def canonicalize_after_track_add(
                     for element in record.elements[1:] for o in element.offsets]
             record.elements = [head] + rest
         elif record.content_type == 0x2519 and record.count == 2 and record.flag == 0:
-            record.elements[0].offsets = sorted(record.elements[0].offsets,
-                                                 key=lambda o: rank(0x251A, o))
+            # The 0x2519 packed lane-offset table is NOT re-sorted, for the same reason the
+            # container elements above are not: the duplicate already splices the copy's offset
+            # beside its source's, which is the wanted order. Sorting by 0x251a body rank is a
+            # no-op on a synth (offset order == body order) but SWAPS a real session's lane
+            # offsets, leaving duplicate->remove off by two bytes here.
+            pass
 
     out: list[IndexRecord] = []
     _copy_records: list[IndexRecord] = []          # the split-off copy halves
