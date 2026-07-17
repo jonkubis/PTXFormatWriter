@@ -262,8 +262,14 @@ def _is_playlist_instance_record(record: IndexRecord) -> bool:
             and record.child_refs and record.child_refs[0].child_type in (0x261C, 0x261E, 0x2620))
 
 
-def rebuild_after_track_drop(records: list[IndexRecord], new_track_count: int) -> list[IndexRecord]:
-    """Finish `remove_track`'s partial index rebuild so the result equals synth(new_count).
+def rebuild_after_track_drop(records: list[IndexRecord]) -> list[IndexRecord]:
+    """Finish `remove_track`'s partial index rebuild so the result equals synth(N-1).
+
+    Takes no track count on purpose: every value here is now derived from the records themselves
+    or adjusted by this edit's delta. The old `new_track_count` parameter fed a MODEL of the
+    session (`len(track_types(data)) - 1`) into the fixed-count ordinal, which rewrote sessions
+    whose stored value follows their own convention; it became dead when that assignment turned
+    into a decrement, and is removed so it cannot be wired back up.
 
     Applies the three remaining rank fixes (offset pruning/shifting is done by the caller,
     and the tag1 count is derived by `serialize_record`, so neither is handled here):

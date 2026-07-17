@@ -4988,7 +4988,7 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # track count. `rebuild_after_track_drop` drops the dead records and re-ranks the
     # track-count ordinal (the packed-offset table's `tag1` count is derived at serialize
     # time), making the whole index byte-identical to synth(new_count).
-    recs = _FI.rebuild_after_track_drop(recs, len(track_types(data)) - 1)
+    recs = _FI.rebuild_after_track_drop(recs)
     out = _set_index_offset(bytes(body) + _FI.serialize_final_block(recs))
     out = _fix_all_ordinal_counts(out)                   # <ALL> u16 counts (0x202a/0x202b)
     out = _fix_name_table_intergroup(out)                # 0x2519 inter-group u32
