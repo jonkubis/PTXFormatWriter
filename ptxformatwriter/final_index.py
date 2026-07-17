@@ -298,10 +298,16 @@ def rebuild_after_track_drop(records: list[IndexRecord], new_track_count: int) -
             record.ordinal = _decrement(record.ordinal, removed_lane_ords)
         elif _is_playlist_instance_record(record):
             record.ordinal = _decrement(record.ordinal, removed_playlist_ords)
+    # The fixed-count 0x2519 records carry `ordinal == track count`. DECREMENT it rather than
+    # assigning `new_track_count`: a session whose stored value follows its own convention (one
+    # probe fixture holds 4 for 3 tracks) would otherwise be rewritten to our model — the same
+    # mistake `_fix_container_counts` made on 0x1015. Adjusting by this edit's delta preserves
+    # the file's meaning and is the exact inverse of the add, and on the synth path (where the
+    # stored value IS the track count) it lands on new_track_count anyway.
     for record in out:
         if (record.content_type == 0x2519 and record.child_refs
                 and record.child_refs[0].child_type in (0x251B, 0x2716)):
-            record.ordinal = new_track_count
+            record.ordinal = max(0, record.ordinal - 1)
     return out
 
 
@@ -433,11 +439,13 @@ def canonicalize_after_track_add(
 
     _shift_family(_is_lane_instance_record)
     _shift_family(_is_playlist_instance_record)
-    new_track_count = len([r for r in records if _is_lane_instance_record(r)])
+    # INCREMENT the fixed-count 0x2519 ordinal (the exact mirror of the drop's decrement) rather
+    # than assigning len(lanes): see `rebuild_after_track_drop` — recomputing rewrites a session
+    # whose stored value follows its own convention.
     for record in records:
         if (record.content_type == 0x2519 and record.child_refs
                 and record.child_refs[0].child_type in (0x251B, 0x2716)):
-            record.ordinal = new_track_count
+            record.ordinal += 1
     return records
 
 
