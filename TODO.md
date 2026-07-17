@@ -346,3 +346,13 @@ on such sessions refuse (correct) rather than work. The guard is data-safety, no
 LESSON (the recurring one): eos/rc/validate() never inspected index completeness, so "remove
 155/155 clean" was measured with instruments blind to this failure. Check the artifact you claim
 is intact, not a proxy for it.
+
+### ...and the parse limitation is NOT a live bug (2026-07-02)
+
+Settled by asking whether our CURRENT writer produces indexes we can re-parse. It does, at every
+size tested — `synthesize_stereo_inline` N=64/128/256/400 → declared==parsed (287/415/671/959) and
+`serialize(parse(idx)) == idx` **EXACT** in all four. So the truncation guard fires on neither
+PT-authored sessions (47/47 control_files, 26/26 real corpus) nor anything we write today; the
+164 refusals are legacy `generated/` artifacts from OLDER writer versions. The guard is a safety
+net, not a workaround for a live defect, and "why record 110" is archaeology on dead files rather
+than a blocker. (Cost note: N=400 synthesis takes ~150s.)
