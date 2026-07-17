@@ -4746,6 +4746,15 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     regions/audio linger in the clips bin (harmless). Validated so the per-track block delta
     equals a real session's, the EOS simulator (`validate`) is clean, rc=0, and every other
     block is byte-identical."""
+    # Removing the session's ONLY track leaves no track for the scaffolding (the shared 0x1054
+    # lane container, the 0x2624 playlist list, the name table) to describe, and the splice
+    # emits a session Pro Tools rejects rather than an empty one. Refuse instead of writing a
+    # file that fails to open: every 1-track fixture in the local corpus produced an invalid
+    # result this way, while 2..512-track removals are clean.
+    if len(track_types(data)) <= 1:
+        raise ValueError(
+            "cannot remove the session's only track (a .ptx needs at least one track); "
+            "create the replacement track first, or synthesize a new session")
     nb = track_name.encode()
     # BODY positional renumber (synth-shaped mono/stereo/mixed sessions only): capture the
     # pre-edit channel-count layout, the grow-path threshold, and the donor 0x261c free fields so

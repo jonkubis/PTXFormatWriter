@@ -236,3 +236,43 @@ still == their fresh-synth references). Test: `NonSynthDuplicateChannelTests`.
 PENDING PT: `verify_9_nonsynth_duplicate.ptx`.
 STILL OPEN: verify on a genuine corpus session with clips/plugins (needs the corpus volume
 mounted) — the fix is layout-independent, but a real session is the honest test.
+
+## remove_track OVER-DELETES on non-synth sessions — DATA LOSS (2026-07-02, OPEN, top priority)
+
+Found by sweeping ALL 695 local fixtures (`control_files/` + `generated/`, 284 with real clips)
+instead of a hand-picked few — the earlier "4/4 real clip-bearing sessions pass" was a 4-session
+sample and did NOT generalize.
+
+THE ORACLE: `duplicate_track` then `remove_track(copy)` must be a perfect inverse — the copy's
+block-set is exactly what the duplicate added, so remove must delete exactly that. On a non-synth
+session (`mixed_no_click_probe_2624_full_final_v1.ptx`, 3 tracks) it is not:
+
+| type   | added by dup | deleted by remove | over-deleted |
+|--------|--------------|-------------------|--------------|
+| 0x2037 | 8            | 16                | 8            |
+| 0x203a | 0            | 8                 | 8            |
+| 0x2580 | 1            | 2                 | 1            |
+| 0x2589 | 0            | 1                 | 1            |
+
+The round-trip loses **268 bytes / 18 blocks** of OTHER tracks' view state. `0x203a`/`0x2589` are
+the clearest: the duplicate added NONE, yet remove deleted 8 and 1 — those belonged to other
+tracks. So duplicate and remove DISAGREE about which blocks constitute a track once a session
+isn't synth-shaped.
+
+WHY IT HID: `eos`/`rc`/`validate()` all PASS on the damaged result — the session still loads. This
+is silent data loss, which is exactly why "corpus remove 6/6 clean" and the PT-confirmed
+verify_3/4 looked reassuring: the synth path IS a perfect inverse (byte-identical), so the bug
+only shows on real sessions.
+
+TO FIX: per-track block attribution for the view/scaffolding families (0x2037/0x203a/0x2580/
+0x2589) on arbitrary layouts — the synth path attributes 0x2589 POSITIONALLY (i-th 0x2589 = i-th
+playlist), which is what likely over-matches when a real session's view chains don't line up 1:1
+with tracks. Gate any real-session remove/duplicate on this. The round-trip block-delta check
+above is the regression oracle.
+
+## remove_track on a 1-track session — FIXED (2026-07-02)
+
+Every one of the 77 sweep remove-failures was removing the session's ONLY track: the splice
+emitted a file PT rejects. `remove_track` now raises ValueError instead (verified: 109 such
+fixtures raise, 0 emit a file). Removal is otherwise clean across 2..512 tracks (153 sessions,
+incl. 14 of the 512-track ones).
