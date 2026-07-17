@@ -1311,6 +1311,34 @@ class NameTablePreambleTests(unittest.TestCase):
             stored = int.from_bytes(dup[z + 9 + 0x0E + shift : z + 9 + 0x10 + shift], "little")
             self.assertEqual(stored, len(BS.track_types(dup)))
 
+    @unittest.skipUnless((CONTROL_DIR / "robust_audio_mixed12.ptx").exists(),
+                         "robust_audio_mixed12 control not present")
+    def test_name_entry_stride_is_not_constant(self):
+        """REGRESSION (bug #14): a 0x2519 name entry's ordinal is a u32 in almost every entry
+        but a u16 in some, so the entry stride is 23 OR 21 -- `robust_audio_mixed12` is an
+        unedited PT session carrying a 21-byte gap at entry [1], mid-table.
+
+        Walking with a hardcoded 23 landed 2 bytes off and stopped at entry [2], reporting this
+        12-entry table as 2 -- so `_fix_name_table_count` rewrote the session's header count
+        12 -> 2. PT bounds its inline read by that count, so editing this session at all would
+        have stranded PT reading 2 of 12 tracks. The count PT itself wrote is the ground truth:
+        our walk must reproduce it, never overwrite it."""
+        data = _load_path(CONTROL_DIR / "robust_audio_mixed12.ptx")
+        bl = BS._size_driven_blocks(data)
+        z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+        off = z + 9 + 0x0E + BS._name_table_shift(data, z)
+        stored = int.from_bytes(data[off : off + 2], "little")
+
+        self.assertEqual(stored, 12, msg="PT authored this table with 12 entries")
+        self.assertEqual(len(BS._inline_name_entries(data, z, e, bl)), 12,
+                         msg="the walk must reach all 12 entries across the 21-byte gap")
+        self.assertEqual(len(BS.track_types(data)), 12)
+
+        # the writer must agree with PT's own value rather than clobber it
+        again = int.from_bytes(BS._fix_name_table_count(data)[off : off + 2], "little")
+        self.assertEqual(again, stored,
+                         msg="_fix_name_table_count must not rewrite a PT-authored count")
+
 
 if __name__ == "__main__":
     unittest.main()

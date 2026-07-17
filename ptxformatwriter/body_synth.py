@@ -147,7 +147,8 @@ def _parent_zmarks(ptf: PTFFormat) -> dict[int, int]:
     return pm
 
 
-_NAME_ENTRY_SUFFIX = 23  # bytes after `<len:u32><name>` in a 0x2519 name entry
+_NAME_ENTRY_SUFFIX = 23        # `<6 fixed><4 tag 0x2a><8 id><ordinal:u32><1 pad>`
+_NAME_ENTRY_SUFFIX_SHORT = 21  # the same, with a 2-byte ordinal instead of 4
 
 
 def _name_table_entries(table: bytes) -> list[bytes]:
@@ -4293,16 +4294,48 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
     end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
     q = z + 9 + 0x14 + _name_table_shift(data, z)
     out: "list[tuple[str, int]]" = []
-    while q + 4 <= end:
-        nlen = int.from_bytes(data[q : q + 4], "little")
-        if not (0 < nlen <= 64) or q + 4 + nlen > end:
+    while True:
+        head = _name_entry_head(data, q, end)
+        if head is None:
             break
-        name = data[q + 4 : q + 4 + nlen]
-        if not all(0x20 <= b < 0x7F for b in name):
-            break
-        out.append((name.decode("latin1"), q + 4))
-        q += 4 + nlen + _NAME_ENTRY_SUFFIX
+        name, name_end = head
+        out.append((name, q + 4))
+        q = _next_name_entry(data, name_end, end)
     return out
+
+
+def _name_entry_head(data: bytes, q: int, end: int) -> "tuple[str, int] | None":
+    """`(name, name_end)` if a `<len:u32><printable name>` entry begins at `q`, else None."""
+    if q + 4 > end:
+        return None
+    nlen = int.from_bytes(data[q : q + 4], "little")
+    if not (0 < nlen <= 64) or q + 4 + nlen > end:
+        return None
+    name = data[q + 4 : q + 4 + nlen]
+    if not all(0x20 <= b < 0x7F for b in name):
+        return None
+    return name.decode("latin1"), q + 4 + nlen
+
+
+def _next_name_entry(data: bytes, name_end: int, end: int) -> int:
+    """Where the entry after the one ending at `name_end` starts.
+
+    The suffix is NOT a constant: its ordinal is a `u32` in almost every entry but a `u16` in
+    some, so the stride is 23 or 21. Pro Tools emits both -- `robust_audio_mixed12` (an
+    unedited PT session) carries a 21-byte gap at entry [1], mid-table, and only 2 of 4362
+    corpus entries are short, which is why a hardcoded 23 survived this long. It did real
+    damage where it did fire: the walk landed 2 bytes off, failed to parse entry [2], and
+    reported a 12-entry table as 2 -- so `_fix_name_table_count` rewrote that session's header
+    count 12 -> 2, and PT bounds its read by that count.
+
+    Prefer the long form and fall back to the short one only when long does not land on a valid
+    entry; neither landing means there is no next entry.
+    """
+    q = name_end + _NAME_ENTRY_SUFFIX
+    if _name_entry_head(data, q, end) is not None:
+        return q
+    alt = name_end + _NAME_ENTRY_SUFFIX_SHORT
+    return alt if _name_entry_head(data, alt, end) is not None else q
 
 
 def _fix_name_table_count(data: bytes) -> bytes:
@@ -4310,22 +4343,18 @@ def _fix_name_table_count(data: bytes) -> bytes:
     `_name_table_shift`) to match the actual inline name entries, after a track add/remove
     changed them. Pro Tools reads this count to bound the inline entry list; a stale count runs
     the read past the last real entry into the framed children -> end of stream. Size-neutral
-    (no reindex). Idempotent on an already-consistent session."""
+    (no reindex). Idempotent on an already-consistent session.
+
+    Walks via `_inline_name_entries` -- this used to keep its own copy of the walk, which is how
+    it inherited the fixed-stride bug (see `_next_name_entry`) and wrote a 12-entry table's count
+    as 2. One walker, so a stride fix cannot reach the reader and miss the writer."""
     bl = _size_driven_blocks(data)
     out = bytearray(data)
     for z, e, c in bl:
         if c != 0x2519:
             continue
         shift = _name_table_shift(data, z)
-        children = [zz for zz, _ee, _cc in bl if z < zz < e]
-        end = min(children) if children else e
-        q, n = z + 9 + 0x14 + shift, 0               # entries begin at payload+0x14 (+shift)
-        while q < end:
-            nlen = int.from_bytes(data[q : q + 4], "little")
-            if not (0 < nlen <= 64):
-                break
-            q += 4 + nlen + _NAME_ENTRY_SUFFIX
-            n += 1
+        n = len(_inline_name_entries(data, z, e, bl))
         cnt = z + 9 + 0x0E + shift
         out[cnt : cnt + 2] = n.to_bytes(2, "little")
     return bytes(out)
