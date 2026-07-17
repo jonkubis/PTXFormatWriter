@@ -1112,6 +1112,55 @@ class ContainerCountValidatorTests(unittest.TestCase):
         self.assertEqual(norm(dup), norm(ref21), msg="N=20 duplicate BODY != synth(21)")
         self.assertEqual(BS.remove_track(dup, "Dpx09"), b20, msg="N=20 round-trip")
 
+    def test_duplicate_mono_matches_valid(self):
+        """MONO generalization: duplicating a track in an all-mono synth is byte-identical (mod
+        GUID) to a fresh synth(N+1) of the same display layout -- WHOLE file, index included --
+        and the duplicate->remove round-trip is byte-exact. The renumber picks the per-kind
+        offsets (mono 0x1014 SITE2 @ +30/u16, tighter 0x261c counters, mono element-id pool)
+        purely from each track's channel count, so the same code that keeps all-stereo
+        byte-identical also handles mono. Validates against the definitive oracle: equality to a
+        fresh `synthesize_mono_inline`."""
+        norm = self._norm_guid
+        names = ["Audio A", "Audio B", "Audio C", "Audio D",
+                 "Audio E", "Audio F", "Audio G", "Audio H"]
+        base8 = BS.set_track_names(BS.synthesize_mono_inline(8), names)
+        for src in ("Audio A", "Audio C", "Audio G"):          # top / middle / near end
+            dup = BS.duplicate_track(base8, src, "Audio Z")
+            ref9 = BS.set_track_names(BS.synthesize_mono_inline(9),
+                                      [t.name for t in BS.track_types(dup)])
+            self.assertEqual(BS.validate(dup), [], msg=f"mono dup {src!r} not eos-clean")
+            self.assertEqual(norm(dup), norm(ref9),
+                             msg=f"mono duplicate of {src!r} != synth(9) whole file")
+            self.assertEqual(BS.remove_track(dup, "Audio Z"), base8,
+                             msg=f"mono round-trip for {src!r}")
+
+    def test_duplicate_mixed_matches_valid(self):
+        """MIXED generalization: duplicating either a stereo OR a mono track in a mono+stereo
+        synth is byte-identical (mod GUID) to a fresh synth(N+1) whose spec has the copy's
+        channel count inserted at its display slot -- WHOLE file -- and round-trips byte-exact.
+        This exercises the CUMULATIVE channel base (each track's channels start at the running
+        sum, not a uniform stride), the two SEPARATE per-kind element-id pools (stereo low, mono
+        high) the mixed synth assigns, and the block-END-anchored 0x261c C4 (a variable-length
+        folder-leaf sits before it in mixed sessions). Definitive oracle: equality to a fresh
+        `synthesize_mixed_inline`."""
+        norm = self._norm_guid
+        names = ["Trk1", "Trk2", "Trk3", "Trk4", "Trk5", "Trk6", "Trk7", "Trk8"]
+        spec = [2, 1, 2, 1, 2, 1, 2, 1]                        # stereo/mono alternating
+        base8 = BS.set_track_names(BS.synthesize_mixed_inline(spec), names)
+        # (source display slot, source name) -- one stereo, one mono; both in the grown range.
+        for slot, src in ((2, "Trk3"), (3, "Trk4")):
+            dup = BS.duplicate_track(base8, src, "TrkZ")
+            layout = [t.name for t in BS.track_types(dup)]
+            refspec = spec[:slot + 1] + [spec[slot]] + spec[slot + 1:]  # copy's kind at its slot
+            ref9 = BS.set_track_names(BS.synthesize_mixed_inline(refspec), layout)
+            self.assertEqual(BS.validate(dup), [], msg=f"mixed dup {src!r} not eos-clean")
+            self.assertEqual([t.channels for t in BS.track_types(dup)], refspec,
+                             msg=f"mixed dup {src!r} channel layout")
+            self.assertEqual(norm(dup), norm(ref9),
+                             msg=f"mixed duplicate of {src!r} != synth(9) whole file")
+            self.assertEqual(BS.remove_track(dup, "TrkZ"), base8,
+                             msg=f"mixed round-trip for {src!r}")
+
     def test_track_edits_match_valid_structure(self):
         """A duplicate's per-track block delta equals a real N+1-track session's (real block
         types only; the size-walk's phantom 0x4b48/0x5xxx artifacts are ignored)."""
