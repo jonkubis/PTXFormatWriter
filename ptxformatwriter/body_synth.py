@@ -4280,6 +4280,31 @@ def _name_table_shift(data: bytes, z: int) -> int:
     return 2 if int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little") else 0
 
 
+def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[str, int]]":
+    """`(name, name_start)` for each INLINE entry of the `0x2519` name table, in table order.
+
+    Read from the table itself rather than inferred from `track_types`, which does not report
+    every entry (a click track has an entry but no reported track), so "is this the last entry"
+    must be answered by the table. Entries run `<u32 len><name><23-byte trailer>` from the
+    preamble (see `_name_table_shift`) up to the first framed child.
+    """
+    if bl is None:
+        bl = _size_driven_blocks(data)
+    end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+    q = z + 9 + 0x14 + _name_table_shift(data, z)
+    out: "list[tuple[str, int]]" = []
+    while q + 4 <= end:
+        nlen = int.from_bytes(data[q : q + 4], "little")
+        if not (0 < nlen <= 64) or q + 4 + nlen > end:
+            break
+        name = data[q + 4 : q + 4 + nlen]
+        if not all(0x20 <= b < 0x7F for b in name):
+            break
+        out.append((name.decode("latin1"), q + 4))
+        q += 4 + nlen + _NAME_ENTRY_SUFFIX
+    return out
+
+
 def _fix_name_table_count(data: bytes) -> bytes:
     """Update the `0x2519` name table's INLINE entry count (`u16` at payload+0x0e, shifted by
     `_name_table_shift`) to match the actual inline name entries, after a track add/remove
@@ -4894,19 +4919,17 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # (b) 0x2519 header ordinal: ONLY when the removed track was the LAST header entry (its ord
     #     was the special-last 2-byte form). Removing it strands the NEW last survivor with a
     #     full 4-byte ordinal -> truncate to 2 bytes. A non-last removal leaves the special-last.
-    all_names = [t.name for t in track_types(data)]
-    if all_names and all_names[-1] == track_name:
-        surviving = [n for n in all_names if n != track_name]
-        if surviving:
-            snb = surviving[-1].encode()
-            z2519, e2519 = [(z, e) for z, e, c in bl if c == 0x2519][0]
-            fc = min((cz for cz, ce, cc in bl if z2519 < cz < e2519), default=e2519)
-            k = data.find(snb, z2519, fc)
-            while k >= 0 and not (k >= 4 and int.from_bytes(data[k - 4:k], "little") == len(snb)):
-                k = data.find(snb, k + 1, fc)
-            if k >= 0:
-                ord_pos = k + len(snb) + 18       # name_end + 6 fixed + 4 tag + 8 guid
-                nt_ranges.append((ord_pos + 2, ord_pos + 4))
+    # "Last" means last INLINE NAME-TABLE ENTRY, read from the table itself -- NOT
+    # `track_types(data)[-1]`. track_types does not report every entry (a click track is absent),
+    # so on a click-bearing session removing the last *reported* track looked last-by-model while
+    # the table continued past it: this truncated a survivor's ordinal by 2 bytes that nothing
+    # ever restored, shrinking the 0x2519 block (768 -> 766) across a duplicate->remove.
+    z2519, e2519 = [(z, e) for z, e, c in bl if c == 0x2519][0]
+    _entries = _inline_name_entries(data, z2519, e2519, bl)
+    if _entries and _entries[-1][0] == track_name and len(_entries) > 1:
+        prev_name, prev_name_pos = _entries[-2][0], _entries[-2][1]
+        ord_pos = prev_name_pos + len(prev_name.encode()) + 18   # name_end +6 fixed +4 tag +8 guid
+        nt_ranges.append((ord_pos + 2, ord_pos + 4))
 
     # outermost removed blocks (a subtree parent covers its children) + the name-table entries
     ranges = [(z, zend[z]) for z in ident
@@ -4965,7 +4988,7 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # track count. `rebuild_after_track_drop` drops the dead records and re-ranks the
     # track-count ordinal (the packed-offset table's `tag1` count is derived at serialize
     # time), making the whole index byte-identical to synth(new_count).
-    recs = _FI.rebuild_after_track_drop(recs, len(all_names) - 1)
+    recs = _FI.rebuild_after_track_drop(recs, len(track_types(data)) - 1)
     out = _set_index_offset(bytes(body) + _FI.serialize_final_block(recs))
     out = _fix_all_ordinal_counts(out)                   # <ALL> u16 counts (0x202a/0x202b)
     out = _fix_name_table_intergroup(out)                # 0x2519 inter-group u32
