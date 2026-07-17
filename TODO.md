@@ -446,3 +446,44 @@ NOTE: every time a residual was labelled "benign"/"cosmetic" this session it was
 (the 8-byte residual = two inverse defects; the "benign 15" = the 0x2519 lane-offset swap). The
 label was doing the work the diagnosis should have. These 28 are classified by measured shape, not
 adjective.
+
+## Track edits — final state after 12 fixes (2026-07-02)
+
+| operation | ok | fail | refused |
+|---|---|---|---|
+| remove_track | 140 | **0** | 240 (1-track sessions; unparseable legacy indexes) |
+| duplicate_track | **128** | 15 | 237 |
+| index serializer | **243 EXACT** | 0 MISMATCH | — |
+
+170 tests. PT-confirmed synth path byte-identical through every fix.
+
+EVERY remaining failure is diagnosed — none unexplained:
+- **10x** `body:0x2551/0x2587/0x258a` — our code REPAIRING a stale `0x258A` count. Verified correct:
+  `0x258A count == its 0x2589 child count` in EVERY PT-authored control and synth (midi9 9/9,
+  mixedmidi_4/5/6/9, synth stereo+mono 8/8). The fixtures store a stale value (`nameblock_v3`:
+  4 with 7 children) and `_fix_container_counts` repairs it to 7. The round-trip is inexact because
+  the ORIGINAL is wrong, not the edit.
+- **5x** `body:0x202a/0x202b` — the `<ALL>` count convention. PT-GATED (below).
+
+### THE one open format question (needs Pro Tools, not more analysis)
+
+Two count conventions coexist in PT-AUTHORED files and no rule in the bytes selects them:
+- `midi9.ptx`      : `0x1015` = 9 == ALL tracks (9 MIDI, ZERO 0x1014 blocks)
+- `mixedmidi_click_bottom.ptx`: `0x1015` = 3 == AUDIO tracks only (5 tracks: 3 audio + 2 MIDI)
+
+The same split governs the `<ALL>` group's stored count (that fixture holds 6 with 3 ordinals before
+the 0xFFFE delimiter). Our code is provably SYMMETRIC on the synth path (`<ALL>` 8 -> 9 -> 8), and
+`_adjust_track_count` already refuses to recompute what we cannot pin down.
+
+GROUND-TRUTH PROBE that settles it: open `control_files/mixedmidi_click_bottom.ptx` in Pro Tools,
+add one track, save, and diff. Which of `0x1015` / the `<ALL>` count moves (and by how much) tells us
+which convention PT itself follows. DO NOT guess a fourth model -- bug #9 proved a byte-perfect
+round-trip can ship a corrupt file (dup produced `<ALL>`=[0,1,1], a duplicate ordinal, while every
+check reported clean).
+
+### The recurring defect (six instances, one disease)
+
+`0x1015` = 0x1014 child count | fixed-count `0x2519` ordinal = `new_track_count` | `<ALL>` insert
+index = `len(track_types)` | "last entry" = `track_types[-1]` | element tail = six zeros (parse) |
+element tail = six zeros (rebuild). Each asks "what SHOULD this be?" instead of "what does the file
+say?". The rule was written at the first one; the cost was skipping the sweep that finds the rest.
