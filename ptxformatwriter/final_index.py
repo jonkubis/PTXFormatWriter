@@ -385,7 +385,10 @@ def canonicalize_after_track_add(
             # sorting by body rank additionally reordered every OTHER element, which only matches
             # on a synth (where element order == body-rank order) and rotated a real session's
             # 0x2624 element list -- part of the duplicate->remove round-trip residual.
-            rest = [Element(rel=0, tag1=4, offsets=[o])
+            # carry each source element's TAIL onto its singles: constructing Elements without
+            # it defaults to six zeros and silently drops a file's own tail bytes (a scrubbed
+            # 0x5B), which preserving the tail at PARSE time cannot save if the rebuild discards it
+            rest = [Element(rel=0, tag1=4, offsets=[o], tail=element.tail)
                     for element in record.elements[1:] for o in element.offsets]
             record.elements = [head] + rest
         elif record.content_type == 0x2519 and record.count == 2 and record.flag == 0:
@@ -418,9 +421,12 @@ def canonicalize_after_track_add(
         copy_off = off_a if off_a in copy_offsets else off_b
         orig_off = off_b if copy_off == off_a else off_a
         r_orig = copy.deepcopy(record)
-        r_orig.child_refs, r_orig.elements = orig_crs, [Element(rel=0, tag1=4, offsets=[orig_off])]
+        _src_tail = record.elements[0].tail
+        r_orig.child_refs, r_orig.elements = orig_crs, [Element(rel=0, tag1=4, offsets=[orig_off],
+                                                                tail=_src_tail)]
         r_copy = copy.deepcopy(record)
-        r_copy.child_refs, r_copy.elements = copy_crs, [Element(rel=0, tag1=4, offsets=[copy_off])]
+        r_copy.child_refs, r_copy.elements = copy_crs, [Element(rel=0, tag1=4, offsets=[copy_off],
+                                                                tail=_src_tail)]
         _copy_records.append(r_copy)
         _copy_source[id(r_copy)] = r_orig
         child_type = 0x251A if is_lane else 0x261C
