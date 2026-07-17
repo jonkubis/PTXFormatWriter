@@ -193,3 +193,24 @@ insert instantiates is keyed by something else — most likely the instance GUID
 catalog/`0x2064` `.tfx`-settings entry, or the settings path. Groundwork for a "list plugins
 per track" reader and a plugin-preserving track duplicate on real sessions. Not on the current
 critical path (automation/plugins are in the "leave intact" set for track/clip edits).
+
+## Track-edit renumber — MONO + MIXED generalized (2026-07-02, committed 3b5b2e5)
+
+The `_all_stereo` gate is gone: the body renumber is now channel-count-aware and covers
+mono/stereo/mixed. Each `0x1014` carries its own channel count at `ne+1`; channels =
+`base..base+nchan-1` with `base` the cumulative channel sum, written at per-kind sites
+(`site2_off = 28 + 2*nchan`). Reduces exactly to the old stereo constants, so the PT-confirmed
+stereo path is byte-identical. Mono `0x261C` free-field offsets are stereo−39 with u16 (not u32)
+C1/C3/C4; mono grow-base `10*k+18871`. Guard `_is_synth_shaped` restricts the fixed-offset
+renumber to pristine synths (real sessions keep the safe splice path), with an O(blocks) cheap
+reject on `0x104F/0x2628/0x2611/0x2064` + an lru_cached reference build.
+
+PENDING PT: `verify_6_mono_duplicate.ptx`, `verify_7_mixed_dup_stereo.ptx`,
+`verify_8_mixed_dup_mono.ptx` (all byte-identical to their synth references).
+
+STILL OPEN: duplicate_track on a REAL session (clips/plugins). The renumber's offsets are
+synth-layout-specific, so real sessions currently fall through to the no-renumber path — fine for
+`remove_track` (removal only leaves a channel gap) but a real-session DUPLICATE would collide on
+channels. Needs grammar-driven field location (find the channel sites structurally in arbitrary
+block layouts) + PT verification. Also re-run the corpus remove_track eos+rc regression when
+`/Volumes/Backups/AI/__PTX corpus` is mounted.
