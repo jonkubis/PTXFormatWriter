@@ -154,6 +154,20 @@ def parse_records(
             )
         )
         pos = p
+    # The index declares its record count at payload+0; the walk above must reproduce EXACTLY
+    # that many. It used to `break` out silently on the first record it could not frame, and the
+    # caller would then serialize the short list -- writing a smaller record_count and DISCARDING
+    # every record after the stumble. On a 512-track fixture that turned a 103847-byte index into
+    # 36796 bytes (110 of 1183 records kept): the master block table was gutted while eos/rc and
+    # `validate()` all reported clean, because the reader can size-walk the body without it.
+    # Silent truncation of the index is data loss, so refuse instead. Callers that legitimately
+    # cannot parse a session get an error rather than a quietly destroyed file.
+    declared = _u32(final_block, 9)
+    if len(records) != declared:
+        raise ValueError(
+            f"index declares {declared} records but only {len(records)} could be framed "
+            f"(stopped at byte {pos} of {end}); refusing to rebuild a truncated master index"
+        )
     return records
 
 

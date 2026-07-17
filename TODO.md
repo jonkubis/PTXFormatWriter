@@ -311,3 +311,38 @@ structurally incomplete and a dup->remove round-trip is still not byte-exact the
 `0x2589` subtree for the copy + re-keying ordinals on arbitrary layouts. The dup->remove
 block-delta check is the regression oracle. Real (unedited) removes are data-safe today.
 
+
+## parse_records SILENTLY TRUNCATED the master index — guarded (2026-07-02)
+
+Found by classifying the duplicate round-trip failures instead of accepting "eos+rc pass". On a
+512-track fixture the BODY round-tripped perfectly (1369269 -> 1369269) while the INDEX collapsed
+103847 -> 36796 bytes:
+
+```
+declared record_count @payload+0 = 1183
+parse_records returned           = 110      <- stopped early, no error
+serialize_final_block wrote      = 110      <- and discarded 1073 records
+```
+
+`parse_records` `break`s out of its walk on the first record it cannot frame and returns the short
+list; the caller then serializes a truncated index, gutting the master block table. eos, rc AND
+`validate()` ALL PASS on the result — our reader size-walks the body and never needs the index, so
+nothing we had was looking at it. Both `remove_track` and `duplicate_track` did this.
+
+GUARDED: `parse_records` now RAISES when it frames fewer than the declared `record_count`, so an
+edit refuses instead of quietly destroying the file. Verified: the 512-track fixture's remove AND
+duplicate both refuse; synth paths unaffected (stereo/mono dup == synth, remove-last == synth8,
+round-trips byte-exact).
+
+SCOPE (do not overstate): **no PT-authored session is affected** — all 47 `control_files` parse, as
+did all 26 real corpus sessions when last checked. All 164 refusals are `generated/` artifacts, our
+own older-writer/RE-experiment outputs (85 of them the 512-track `milestone_7`/`synth_audio_512`
+family). So the silent-truncation bug bit only sessions whose index we cannot frame, and in this
+corpus that set is exclusively our own artifacts.
+
+STILL OPEN: WHY the walk stumbles at record 110 on those indexes. Until that is understood, edits
+on such sessions refuse (correct) rather than work. The guard is data-safety, not a fix.
+
+LESSON (the recurring one): eos/rc/validate() never inspected index completeness, so "remove
+155/155 clean" was measured with instruments blind to this failure. Check the artifact you claim
+is intact, not a proxy for it.
