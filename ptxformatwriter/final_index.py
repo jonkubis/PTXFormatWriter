@@ -359,15 +359,21 @@ def canonicalize_after_track_add(
         child_type = _container_child_type(record)
         if child_type is not None:
             head = record.elements[0]
+            # Split each doubled element into singles WITHOUT re-sorting. The doubling already
+            # splices the copy's offset directly beside its source's, which IS the wanted order;
+            # sorting by body rank additionally reordered every OTHER element, which only matches
+            # on a synth (where element order == body-rank order) and rotated a real session's
+            # 0x2624 element list -- part of the duplicate->remove round-trip residual.
             rest = [Element(rel=0, tag1=4, offsets=[o])
                     for element in record.elements[1:] for o in element.offsets]
-            rest.sort(key=lambda e: rank(child_type, e.offsets[0]))
             record.elements = [head] + rest
         elif record.content_type == 0x2519 and record.count == 2 and record.flag == 0:
             record.elements[0].offsets = sorted(record.elements[0].offsets,
                                                  key=lambda o: rank(0x251A, o))
 
     out: list[IndexRecord] = []
+    _copy_records: list[IndexRecord] = []          # the split-off copy halves
+    _copy_source: "dict[int, IndexRecord]" = {}    # id(copy record) -> its original half
     for record in records:
         is_lane = _is_lane_instance_record(record)
         is_playlist = _is_playlist_instance_record(record)
@@ -390,6 +396,8 @@ def canonicalize_after_track_add(
         r_orig.child_refs, r_orig.elements = orig_crs, [Element(rel=0, tag1=4, offsets=[orig_off])]
         r_copy = copy.deepcopy(record)
         r_copy.child_refs, r_copy.elements = copy_crs, [Element(rel=0, tag1=4, offsets=[copy_off])]
+        _copy_records.append(r_copy)
+        _copy_source[id(r_copy)] = r_orig
         child_type = 0x251A if is_lane else 0x261C
         out.extend(sorted((r_orig, r_copy), key=lambda r: rank(child_type, r.elements[0].offsets[0])))
     records = out
@@ -397,13 +405,31 @@ def canonicalize_after_track_add(
     def _elem_rank(record: IndexRecord, content_type: int) -> int:
         return rank(content_type, record.elements[0].offsets[0]) if record.elements else 1 << 30
 
-    lanes = [r for r in records if _is_lane_instance_record(r)]
-    for i, record in enumerate(sorted(lanes, key=lambda r: _elem_rank(r, 0x251A)), 1):
-        record.ordinal = i
-    playlists = [r for r in records if _is_playlist_instance_record(r)]
-    for i, record in enumerate(sorted(playlists, key=lambda r: _elem_rank(r, 0x261C)), 1):
-        record.ordinal = i
-    new_track_count = len(lanes)
+    # Re-rank the per-track ordinals as the exact MIRROR of `rebuild_after_track_drop`: the copy
+    # takes `source.ordinal + 1` and every higher ordinal in that family shifts up by one. The
+    # previous code re-assigned 1..N sorted by BODY RANK, which is an inverse of the drop's
+    # "decrement relative to the removed ordinal" ONLY when ordinal order == body-rank order.
+    # That holds for a synth (tracks are created in display order) but not for a session whose
+    # ordinals do not follow body order, where it rewrote every ordinal into body-rank order and
+    # left duplicate->remove off by one (the 8-byte round-trip residual). Mirroring keeps the
+    # file's own convention and reduces to the same 1..N+1 on the synth path, where the copy's
+    # block is placed directly after its source's.
+    def _shift_family(is_member) -> None:
+        members = [r for r in records if is_member(r)]
+        copies = [r for r in members if r in _copy_records]
+        for copy_rec in copies:
+            source = _copy_source.get(id(copy_rec))
+            if source is None:
+                continue
+            base = source.ordinal
+            for other in members:
+                if other is not copy_rec and other.ordinal > base:
+                    other.ordinal += 1
+            copy_rec.ordinal = base + 1
+
+    _shift_family(_is_lane_instance_record)
+    _shift_family(_is_playlist_instance_record)
+    new_track_count = len([r for r in records if _is_lane_instance_record(r)])
     for record in records:
         if (record.content_type == 0x2519 and record.child_refs
                 and record.child_refs[0].child_type in (0x251B, 0x2716)):
