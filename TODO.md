@@ -516,3 +516,42 @@ rewrite those four fixtures.
 LESSON: "this needs external ground truth" was itself a premature conclusion. The outliers' shared
 signature — and the one control with zero 0x1014 blocks — answered it. Check whether the anomaly is
 the format or your own past output before declaring a question unanswerable.
+
+## CORRECTION #2 — the 5 `<ALL>` cases ARE a live defect, not "our code repairing fixtures"
+
+I claimed the 15 remaining duplicate failures were all benign (10 repairing stale `0x258A` counts,
+5 handling files bug #4 corrupted). **The second half is refuted.** Testing the claim instead of
+asserting it: repairing the `0x1015` damage in memory does NOT fix the round-trip, and
+`mixedmidi_reorder_SMm` was never failing.
+
+```
+mixedmidi_click_bottom  0x1015 3->5  round-trip: corrupted=False  repaired=False
+mixedmidi_reorder_SMm   0x1015 2->3  round-trip: corrupted=True   repaired=True   (never failed)
+```
+
+THE REAL DEFECT (`mixedmidi_click_{bottom,middle,top}`), 3 audio + 2 MIDI + a click:
+
+```
+name-table: ['Audio 1','MIDI 1','Audio 2','Audio 3','MIDI 2','Click 1']   (6 entries)
+orig  <ALL> stored count=6, but only 3 ordinals [0,1,2] precede the 0xFFFE delimiter
+dup   <ALL> count=3 ords=[0,1,2]    <- 4 audio tracks after the dup; should be [0,1,2,3]
+back  <ALL> count=2 ords=[0,1]      <- should be [0,1,2]
+```
+
+The `<ALL>` group holds the AUDIO tracks (3), while its stored count (6) matches the NAME-TABLE
+entry count. So the stored count and the ordinal list disagree in a PT-authored file, and:
+- `_all_ordinal_lists` derives the member span FROM the stored count, so it reads 6 u16s
+  ([0,1,2,0xFFFE,0x8010,1]) -- swallowing the delimiter and trailer as "members";
+- bug #9's fix (`next_index = the list's own member count`) therefore reads 6 and inserts the wrong
+  index, so the copy never gets a correct `<ALL>` ordinal;
+- `_fix_all_ordinal_counts` then recomputes the count to 3 (counting to the delimiter), rewriting a
+  PT-authored value.
+
+WHAT IT NEEDS: pin what the `<ALL>` stored count actually counts when it disagrees with the
+delimiter-terminated list (name-table entries? a different group?), then make insert/drop adjust by
+the edit's delta rather than recompute -- the `_adjust_track_count` pattern, which is the seventh
+place this same disease appears.
+
+LESSON (again, and the sharpest one): "these are not defects" was an explanation I found
+satisfying and did not test. The test refuted it in one command. An untested exculpatory story is
+worth exactly as much as an untested bug report.
