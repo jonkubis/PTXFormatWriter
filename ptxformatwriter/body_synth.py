@@ -5139,7 +5139,53 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     if _do_renumber and _source_row is not None:
         out = _renumber_body_after_duplicate(out, _source_row + 1, _track_kinds(out),
                                              _base_n, _donor_free)
+    else:
+        # NOT synth-shaped (a real session: clips/plugins/automation/MIDI). The fixed-offset
+        # renumber above is derived only for the synth layout, so it is skipped -- but the copy
+        # was spliced from the source and therefore still carries the SOURCE's channel indices.
+        # Two tracks claiming the same channels is exactly what crashes Pro Tools on close (the
+        # verify_2 fault), so give the copy free channels. This is structural (set_track_channels
+        # locates the fields via the name length + the 0x2a marker), so it holds for any layout.
+        # Channels need only be UNIQUE, not contiguous -- removal already leaves gaps that PT
+        # accepts -- so the lowest free indices are safe.
+        out = _assign_free_channels(out, new_name)
     return out
+
+
+def _track_1014_rows(data: bytes) -> "list[tuple[str, int, list[int]]]":
+    """(name, track_offset, channel indices) per 0x1014, read structurally (any session)."""
+    rows: "list[tuple[str, int, list[int]]]" = []
+    ref = _FI.final_index_ref(data)
+    for z, _e, ct in sorted(_raw_block_bounds(data, ref.start)):
+        if ct != 0x1014:
+            continue
+        nlen = int.from_bytes(data[z + 9 : z + 13], "little")
+        name = data[z + 13 : z + 13 + nlen].decode("latin1", "replace")
+        toff = z + 7                      # block content start (the 0x1014 word)
+        rows.append((name, toff, track_channel_indices(data, toff)))
+    return rows
+
+
+def _assign_free_channels(data: bytes, name: str) -> bytes:
+    """Give the track called `name` the lowest channel indices no other track uses."""
+    rows = _track_1014_rows(data)
+    target = None
+    used: set[int] = set()
+    for nm, toff, chans in rows:
+        if nm == name and target is None:
+            target = (toff, len(chans))
+        else:
+            used.update(chans)
+    if target is None:
+        return data
+    toff, nchan = target
+    free: list[int] = []
+    c = 0
+    while len(free) < nchan:
+        if c not in used:
+            free.append(c)
+        c += 1
+    return set_track_channels(data, toff, free)
 
 
 # --- arbitrary track naming --------------------------------------------------

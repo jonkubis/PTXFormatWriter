@@ -1196,5 +1196,36 @@ class ContainerCountValidatorTests(unittest.TestCase):
         self.assertTrue(any(p.get("content_type") == 0x2519 for p in BS.validate(bytes(b))))
 
 
+class NonSynthDuplicateChannelTests(unittest.TestCase):
+    """A duplicate on a NOT-synth-shaped session (the path real sessions take) must still give
+    the copy free channels: the copy is spliced from the source, so without this it inherits the
+    source's channel indices, and two tracks claiming the same channels is what crashes Pro Tools
+    on close. A MIDI-bearing session fails `_is_synth_shaped`, so it exercises that path."""
+
+    def _session(self):
+        return BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2])
+
+    def _collisions(self, data):
+        seen, clashes = {}, []
+        for name, _off, chans in BS._track_1014_rows(data):
+            for c in chans:
+                if c in seen:
+                    clashes.append((c, seen[c], name))
+                seen[c] = name
+        return clashes
+
+    def test_session_is_not_synth_shaped(self):
+        self.assertFalse(BS._is_synth_shaped(self._session()))
+
+    def test_duplicate_gives_copy_free_channels(self):
+        for source in ("Audio 2", "Audio 1"):            # stereo source, then mono source
+            with self.subTest(source=source):
+                dup = BS.duplicate_track(self._session(), source, "Audio X")
+                self.assertEqual(self._collisions(dup), [])
+                chans = dict((n, c) for n, _o, c in BS._track_1014_rows(dup))
+                self.assertNotEqual(chans["Audio X"], chans[source])
+                self.assertEqual(BS.validate(dup), [])
+
+
 if __name__ == "__main__":
     unittest.main()

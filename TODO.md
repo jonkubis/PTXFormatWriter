@@ -214,3 +214,25 @@ synth-layout-specific, so real sessions currently fall through to the no-renumbe
 channels. Needs grammar-driven field location (find the channel sites structurally in arbitrary
 block layouts) + PT verification. Also re-run the corpus remove_track eos+rc regression when
 `/Volumes/Backups/AI/__PTX corpus` is mounted.
+
+## Real-session duplicate — CHANNEL COLLISION FIXED (2026-07-02)
+
+`duplicate_track` on a NOT-synth-shaped session (the path every real session takes) spliced the
+copy from the source and left it carrying the **source's channel indices** — reproduced without
+the corpus using a MIDI-bearing session (which fails `_is_synth_shaped`): the copy came out with
+channels `[1,2]`, identical to its source. That is exactly the collision that crashed PT on close
+before the stereo fix, so real-session duplicates were broken.
+
+FIXED structurally (no synth offsets): `_assign_free_channels` reads every `0x1014` via
+`_track_1014_rows` and hands the copy the lowest channel indices no other track uses, writing them
+with the pre-existing `set_track_channels`, which locates the fields by the name length + the
+`0x2a` marker (`marker+19`/`marker+23`) and already handles mono vs stereo. Channels need only be
+UNIQUE, not contiguous — `remove_track` already leaves gaps PT accepts. The stored `0x1054+2`
+channel-count field is maintained by the splice already (verified 8→10, 16→18).
+
+Verified: non-synth duplicate of a stereo source → copy `[8,9]`, of a mono source → `[8]`, zero
+collisions, eos+rc clean, `validate()` empty; all synth byte-identity unchanged (stereo/mono/mixed
+still == their fresh-synth references). Test: `NonSynthDuplicateChannelTests`.
+PENDING PT: `verify_9_nonsynth_duplicate.ptx`.
+STILL OPEN: verify on a genuine corpus session with clips/plugins (needs the corpus volume
+mounted) — the fix is layout-independent, but a real session is the honest test.
