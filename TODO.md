@@ -383,3 +383,33 @@ inverses on the synth path (byte-identical) but not quite on non-synth records. 
 
 NOTE — a hypothesis I had and REFUTED: that canonicalize's body-rank sort scrambles custom display
 order. It does not; the order round-trips identically. Test before claiming.
+
+## The duplicate round-trip residual — RESOLVED (2026-07-02)
+
+Two genuine inverse defects, both fixed (commit 26fc542); `canonicalize_after_track_add` was not
+the inverse of `rebuild_after_track_drop`:
+
+1. ORDINALS — canonicalize re-assigned lane/playlist ordinals 1..N sorted by BODY RANK while the
+   drop decrements relative to the REMOVED ordinal. Inverses only when ordinal order == body-rank
+   order (synth). On a real session duplicate rewrote every ordinal and the round-trip returned
+   off-by-one (2->1, 3->2). Now MIRRORS the drop: the copy takes source.ordinal+1, higher ordinals
+   shift up. Reduces to the same 1..N+1 on the synth path.
+2. ELEMENT ORDER — canonicalize sorted container track-elements by body rank, but the doubling
+   already splices the copy's offset beside its source's. The sort was a no-op on synth and
+   ROTATED a real session's 0x2624 element list. Dropped.
+
+Non-synth round-trip: 8 -> 6 -> **0 bytes**. Sweep: duplicate ok 98 -> **112**, fail 45 -> 31.
+The PT-confirmed synth path stayed byte-identical at every step (that oracle is what made
+refactoring it safe).
+
+The remaining 31 are NOT defects:
+- 15 BENIGN — every body block byte-identical; only index representation differs.
+- 16 are our code CORRECTING a pre-broken fixture. `0x258A`'s count == its 0x2589 child count in
+  EVERY PT-authored control and synth (midi9 9/9, mixedmidi_4/5/6/9, synth stereo+mono 8/8), i.e.
+  the model is right; the failing fixtures store a STALE count (nameblock_v3: stored=4 with 7
+  children) and `_fix_container_counts` repairs it to 7. The round-trip is inexact because the
+  ORIGINAL is wrong, not the edit.
+
+NOTE — two hypotheses I formed and REFUTED here: that canonicalize scrambles custom display order
+(it does not; order round-trips identically), and that this residual was "cosmetic polish" (it was
+two real inverse bugs). Diagnose before dismissing, and before alarming.
