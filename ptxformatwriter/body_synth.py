@@ -5131,13 +5131,18 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     inserts += [(b, transform(data[a:b]), None) for a, b in nt_ranges]
 
     # ---- INLINE per-track inserts (inverse of remove_track's <ALL> splices) ----
-    # append one u16 == N (the new last index) before each 0x202a/0x202b <ALL> trailer, so the
+    # Append one u16 == the list's next index before each 0x202a/0x202b <ALL> trailer, so the
     # copy's ordinal records equal a valid track's; identity ordinals stay dense [0..N].
-    ncount = len(track_types(data))
+    # The new index is each list's OWN member count, NOT `len(track_types(data))`: those agree
+    # only when the <ALL> group happens to hold exactly the reported tracks. A click-bearing
+    # session's <ALL> holds [0, 1] while track_types reports 1 (the click track is not reported),
+    # so the model inserted a second `1` -- a DUPLICATE ordinal in the group. Reading the list's
+    # own length is the same value on the synth path (8 members <-> 8 tracks) and correct here.
     for z, e, c in bl:
         if c == 0x202B:
             for lst in _all_ordinal_lists(data, z, e):
-                inserts.append((lst["ords_end"], struct.pack("<H", ncount), None))
+                next_index = (lst["ords_end"] - lst["ords_start"]) // 2
+                inserts.append((lst["ords_end"], struct.pack("<H", next_index), None))
     inserts.sort()
 
     def shift(o: int) -> int:
