@@ -555,3 +555,51 @@ place this same disease appears.
 LESSON (again, and the sharpest one): "these are not defects" was an explanation I found
 satisfying and did not test. The test refuted it in one command. An untested exculpatory story is
 worth exactly as much as an untested bug report.
+
+## Bug #14 FIXED, and the `<ALL>` defect is now precisely characterized (still OPEN)
+
+### FIXED (committed): the 0x2519 name-entry stride is not a constant
+An entry's ordinal is a u32 in almost every entry but a u16 in some -> stride 23 or 21. Only 2 of
+4362 corpus entries are short, both in `robust_audio_mixed12` (an unedited PT session), at entry
+[1], mid-table -- so a hardcoded 23 survived a long time and then did real damage: the walk
+reported that 12-entry table as 2, and `_fix_name_table_count` rewrote PT's header count 12 -> 2.
+PT bounds its inline read by that count. Editing that session at all would have stranded PT
+reading 2 of 12 tracks, silently.
+
+Fix: `_next_name_entry` takes the stride the bytes support; `_fix_name_table_count` walks via
+`_inline_name_entries` instead of keeping a second copy of the walk (the duplicate is how it
+inherited the bug). Oracle: PT's own stored count. Our recompute now agrees on ALL 282 corpus
+sessions (0 rewrites, was 2). 171 tests OK incl. the PT-confirmed byte-identical synth oracles.
+
+### STILL OPEN: the `<ALL>` list on click-bearing sessions
+Two independent probes converged on the SAME 8 files -- every one click-bearing:
+
+  - the `<ALL>` u16 count equals the NAME-TABLE ENTRY count, not the member count
+    (tally across 282 files: matches-both 272, entry-count-only 8, member-count-only 0 once
+    bug #14's under-read is fixed);
+  - and those same 8 are exactly the 8 duplicate->remove round-trip failures.
+
+  mixedmidi_click_{bottom,middle,top}   entries=6  stored=6  members=3
+  test_clickbottom_3stereo              entries=4  stored=4  members=3
+  test_clickbottom_12stereo             entries=13 stored=13 members=3
+  test_F2_12stereo_clicktop             entries=13 stored=13 members=3
+
+So `_all_ordinal_lists`'s model -- "count == member count, ordinals are positional identity" --
+is wrong. It derives `ords_end` FROM the stored count, so on these files it reads 6 u16s
+([0,1,2,0xFFFE,0x8010,1]), swallowing the `fe ff` delimiter and trailer as members. Downstream:
+bug #9's `next_index = the list's own member count` then reads 6 and inserts at an offset past
+the real list end, so the copy never gets an `<ALL>` ordinal; `_fix_all_ordinal_counts`
+recomputes the count to 3 and overwrites a PT-authored 6. The duplicate does not insert, but the
+remove DOES drop -- that asymmetry, not the count alone, is what breaks the round-trip.
+
+WHAT IS NOT YET EXPLAINED (do not ship a story here -- I already shipped one and it was refuted):
+members=3 on BOTH a 3-audio and a 12-audio click session. 3 is suspiciously constant, so
+"members = the audio tracks" is ALSO wrong. Either `ords_start` shifts on click sessions (the
+0x2519 preamble has exactly such a flag-selected shift, so there is precedent) or the list is
+not what we think. NEXT: dump the raw `<ALL>` region on a click vs non-click session of the same
+track count and read the layout off the bytes before touching any code.
+
+LESSON (eighth instance of the one disease): every count we RECOMPUTE from a model is a place we
+overwrite ground truth. `_adjust_track_count` adjusts by the edit's delta and is right;
+`_fix_all_ordinal_counts` and `_fix_name_table_count` recompute, and both were caught corrupting
+PT-authored values. Prefer adjust-by-delta over recompute-from-model.
