@@ -603,3 +603,38 @@ LESSON (eighth instance of the one disease): every count we RECOMPUTE from a mod
 overwrite ground truth. `_adjust_track_count` adjusts by the edit's delta and is right;
 `_fix_all_ordinal_counts` and `_fix_name_table_count` recompute, and both were caught corrupting
 PT-authored values. Prefer adjust-by-delta over recompute-from-model.
+
+### The `<ALL>` raw bytes (read them first -- this is the evidence, not a theory)
+
+Same track count, click vs no click, from `_all_ordinal_lists`'s `<ALL>` marker:
+
+```
+test_A_12allstereo_mixedpath (12 stereo, NO click)   count field = 12
+  3c 41 4c 4c 3e | 02 ff ff ff ff 00 00 | 0c 00 | 00 00 |
+  <ALL>            7 fixed                count    pad
+  00 00 01 00 02 00 03 00 04 00 05 00 06 00 07 00 08 00 09 00 0a 00 0b 00 | fe ff | 10 80
+  ordinals 0..11  (12 = count = tracks)                                     term     trailer
+
+test_clickbottom_12stereo (12 stereo + click)        count field = 13
+  3c 41 4c 4c 3e | 02 ff ff ff ff 00 00 | 0d 00 | 00 00 |
+  00 00 01 00 02 00 | fe ff | 10 80 | 01 00 00 00 00 00 | ff ff | 08 00 09 00 0a 00 0b 00 | fe ff
+  ordinals 0,1,2      term    trailer   ???                ???     ordinals 8,9,10,11        term
+```
+
+WHAT THIS SETTLES: the member list is SEGMENTED, not a flat run. The click session carries runs
+[0,1,2] AND [8,9,10,11]. Our reader stops at the first `fe ff`, which is why "members=3" looked
+suspiciously constant across a 3-audio and a 12-audio click session -- 3 was never a member
+count, it was just the length of the FIRST RUN. Both the "count == member count" model and the
+"members == the audio tracks" model are dead.
+
+STILL UNKNOWN -- resolve from bytes before writing code:
+  - what `fe ff 10 80` means when it appears MID-list (it terminates the list in the non-click
+    file and separates runs in the click one);
+  - what `01 00 00 00 00 00 ff ff` is between the runs;
+  - where ordinals 3..7 are on the click session (12 stereo tracks, runs cover only 0-2 and
+    8-11) -- so a run is not simply "a contiguous span of surviving tracks" either;
+  - whether the count (13 = entries incl. click) bounds the ordinals, the runs, or neither.
+
+Get a click session with 3 tracks and one with 12 and diff the region byte-for-byte; the run
+boundaries should move with the click's display row (bottom/middle/top fixtures exist for
+exactly this).
