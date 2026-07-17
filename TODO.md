@@ -487,3 +487,32 @@ check reported clean).
 index = `len(track_types)` | "last entry" = `track_types[-1]` | element tail = six zeros (parse) |
 element tail = six zeros (rebuild). Each asks "what SHOULD this be?" instead of "what does the file
 say?". The rule was written at the first one; the cost was skipping the sweep that finds the rest.
+
+## CORRECTION — the count "convention" question is RESOLVED, and was never PT-gated (2026-07-02)
+
+I claimed two count conventions coexist in PT-authored files and that only a Pro Tools probe could
+settle it. That was wrong: the evidence was in the bytes.
+
+`0x1015` counts **ALL TRACKS**. One convention, not two:
+
+- 43 of 47 control fixtures: `0x1015 == len(track_types)` — the ALL convention.
+- `midi9.ptx` is decisive: 9 MIDI tracks, **ZERO 0x1014 blocks**, `0x1015 = 9`. A session with no
+  0x1014 children stores 9, so the count CANNOT be the 0x1014 child count.
+- The 4 "AUDIO" outliers are **files WE corrupted**: `mixedmidi_click_{bottom,middle,top}` and
+  `mixedmidi_reorder_SMm` — all click-splice / reorder outputs, i.e. the tools that ran the OLD
+  `_fix_container_counts`. Every one has `0x1015 == n_1014` EXACTLY: the precise signature of bug #4
+  (tallying 0x1014 children, which under-counts because MIDI tracks have none). Not a second
+  convention — our own damage, still sitting in the fixtures.
+
+CONSEQUENCE: none of the remaining duplicate "failures" are defects. All 15 are our code handling
+pre-broken fixtures — 10 repairing a stale `0x258A` count, 5 involving these 4 self-corrupted
+`<ALL>`/`0x1015` files. The reimplementation has no known open correctness question from the bytes.
+
+`_adjust_track_count` (adjust by delta, never recompute) remains the right behaviour even now that
+the convention is known: on a VALID file a delta keeps a correct count correct; on a BROKEN file it
+preserves the damage rather than compounding it. Recomputing to `len(track_types)` would silently
+rewrite those four fixtures.
+
+LESSON: "this needs external ground truth" was itself a premature conclusion. The outliers' shared
+signature — and the one control with zero 0x1014 blocks — answered it. Check whether the anomaly is
+the format or your own past output before declaring a question unanswerable.
