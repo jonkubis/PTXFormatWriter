@@ -356,3 +356,30 @@ PT-authored sessions (47/47 control_files, 26/26 real corpus) nor anything we wr
 164 refusals are legacy `generated/` artifacts from OLDER writer versions. The guard is a safety
 net, not a workaround for a live defect, and "why record 110" is archaeology on dead files rather
 than a blocker. (Cost note: N=400 synthesis takes ~150s.)
+
+## Post-guard sweep — where the editors actually stand (2026-07-02)
+
+Full sweep over all 695 local fixtures, AFTER the five fixes + the index-truncation guard:
+
+| operation | ok | fail | refused (ValueError) |
+|---|---|---|---|
+| remove_track | 140 | **0** | 240 |
+| duplicate_track | 98 | 45 | 237 |
+
+`remove_track` is clean on every session it accepts (2..512 tracks, incl. clip-bearing), and refuses
+the rest (1-track sessions; unparseable legacy indexes) rather than corrupting them. Earlier
+"lossy" duplicates are GONE: the 31 that shrank 512-track sessions by 67KB were the parse_records
+truncation and now refuse (dup_FAIL_clips 27 -> 12, lossy 31 -> 0).
+
+REMAINING GAP (minor, documented, not fixed): all 45 duplicate "failures" are
+`col=0 eos=True rc=True rt=False` — the session is valid; only the dup->remove round-trip is not
+byte-exact. Diagnosed to **8 bytes**: within ONE 0x2624 record the element offsets come back
+rotated (same SET), and two playlist-instance ordinals return decremented (2->1, 3->2). The BODY is
+byte-identical and the functional playlist order round-trips EXACTLY (verified via
+`track_playlist_order`, incl. a custom `A1,M1,A2` order, where duplicate correctly yields
+`A1,AZ,M1,A2`). Cause: `canonicalize_after_track_add` and `rebuild_after_track_drop` are exact
+inverses on the synth path (byte-identical) but not quite on non-synth records. Impact looks nil
+(order preserved, validators clean, no data loss) but is NOT proven harmless.
+
+NOTE — a hypothesis I had and REFUTED: that canonicalize's body-rank sort scrambles custom display
+order. It does not; the order round-trips identically. Test before claiming.
