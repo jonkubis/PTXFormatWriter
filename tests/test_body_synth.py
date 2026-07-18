@@ -1295,6 +1295,31 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_duplicate_remove_midi_track(self):
+        """remove_track/duplicate_track now handle MIDI tracks (no 0x1014/0x1052/0x261B/0x261C;
+        the track-list entry is 0x1057 in 0x1058, the per-track record is 0x2620). Identification
+        widened the container set to {0x261C, 0x2620, 0x261E} and seeds 0x1057 like 0x1014. The
+        duplicate->remove perfect-inverse oracle must hold byte-exact on a MIDI track."""
+        data = self._non_synth_session()          # mixed audio + one MIDI track
+        midi = next(t.name for t in BS.track_types(data) if t.kind == "midi")
+        dup = BS.duplicate_track(data, midi, "MZ")
+        self.assertIn("MZ", [t.name for t in BS.track_types(dup)])
+        self.assertEqual(len(BS.track_types(dup)), len(BS.track_types(data)) + 1)
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(BS.remove_track(dup, "MZ"), data,
+                         msg="MIDI duplicate->remove must invert byte-exact")
+
+    @unittest.skipUnless((ROOT / "control_files" / "midi9.ptx").exists(),
+                         "midi9 control not present")
+    def test_duplicate_remove_pure_midi_control(self):
+        """The pure-MIDI control (9 MIDI tracks, ZERO audio) is the decisive MIDI oracle: no
+        0x1014 anywhere, so the audio GUID-seed is entirely absent."""
+        data = _load_path(ROOT / "control_files" / "midi9.ptx")
+        self.assertTrue(all(t.kind == "midi" for t in BS.track_types(data)))
+        dup = BS.duplicate_track(data, "MIDI 1", "MIDI Z")
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(BS.remove_track(dup, "MIDI Z"), data)
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

@@ -4835,10 +4835,12 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     block (in 0x2107), and its inline 0x2519 name entry — then rebuilds the master index
     (dropping the removed refs + offset-shifting survivors) and re-syncs every container
     child-count (including the 0x258A/0x2107 counts and the name-table entry count). Handles
-    AUDIO tracks (raises for MIDI/aux/bus/master) and unique names. The track's source
+    AUDIO (0x261C) and MIDI (0x2620) tracks, and a CLICK/aux (0x261E) track by name; the track
+    is identified by NAME across the three per-track record containers (audio has a 0x1014
+    track-list entry, MIDI a 0x1057 in 0x1058, click none). Unique names. The track's source
     regions/audio linger in the clips bin (harmless). Validated so the per-track block delta
     equals a real session's, the EOS simulator (`validate`) is clean, rc=0, and every other
-    block is byte-identical."""
+    block is byte-identical (MIDI dup->remove round-trips byte-exact; PT display-confirm pending)."""
     # Removing the session's ONLY track leaves no track for the scaffolding (the shared 0x1054
     # lane container, the 0x2624 playlist list, the name table) to describe, and the splice
     # emits a session Pro Tools rejects rather than an empty one. Refuse instead of writing a
@@ -4895,7 +4897,10 @@ def remove_track(data: bytes, track_name: str) -> bytes:
             b = innermost(j)
             if b:
                 z, e, c = b
-                if c in (0x1014, 0x251A):               # track-list entry: seed the GUID
+                if c in (0x1014, 0x1057, 0x251A):        # track-list entry: seed the GUID
+                    # 0x1014 = audio track-list entry, 0x1057 = MIDI track-list entry (in 0x1058);
+                    # both carry the name + a GUID after a 2A tag. A MIDI 0x1057's GUID differs
+                    # from its identity GUID, so seeding it too catches the 0x1057 itself.
                     ident.add(z)
                     seed_guids.update(guids_in(data[z:e]))
                 elif c == 0x1052:                       # a lane (with its placements)
@@ -4908,18 +4913,21 @@ def remove_track(data: bytes, track_name: str) -> bytes:
                     if span:
                         nt_ranges.append(span)
         pos = j + 1
-    # link name -> track-list GUID -> the 0x102D that carries it -> its enclosing 0x261C subtree
+    # link name -> GUID -> the 0x102D that carries it -> its enclosing per-track record. The
+    # record container is 0x261C (audio), 0x2620 (MIDI), or 0x261E (click/aux) -- all siblings
+    # under the 0x2624 track-list, each nesting one 0x102D (whose 0x2619 holds the identity GUID).
     pl_ranges: "list[tuple[int, int]]" = []
     for z, e, c in bl:
         if c == 0x102D and any(g in data[z:e] for g in seed_guids):
-            cs = [(cz, ce) for cz, ce, cc in bl if cc == 0x261C and cz < z < ce]
+            cs = [(cz, ce) for cz, ce, cc in bl
+                  if cc in (0x261C, 0x2620, 0x261E) and cz < z < ce]
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
-    if not any(zct[z] == 0x261B for z in ident):
+    if not pl_ranges:
         raise ValueError(
-            f"cannot locate track {track_name!r} (not found, or a non-audio track type)")
+            f"cannot locate track {track_name!r} (not found, or an unsupported track type)")
 
     # The track's SECOND view-chain subtree (0x2589) is attributed by the block's OWN display-row
     # ordinal (u16 at zmark+9), NOT by zmark rank. The blocks are not stored in display order --
@@ -5097,10 +5105,13 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     untouched. The variable-length path inherits `rename_track`'s constraints (it currently uses
     the scan parser, which stumbles on some MIDI-clip sessions).
 
-    Constraints: audio tracks only; unique source name; cannot duplicate the last track in the
-    name table (short-trailer entry — rename/reorder first). Validated so the per-track block
-    delta equals a real session's, the EOS simulator (`validate`) is clean, rc=0, the round-trip
-    (`duplicate_track` then `remove_track(new_name)`) is byte-identical, and every other block is
+    Handles AUDIO (0x261C) and MIDI (0x2620) tracks. Constraints: unique source name; cannot
+    duplicate the LAST track in the name table (short-trailer entry — rename/reorder first), which
+    the click always is; a CLICK/aux (0x261E) track is not yet duplicable (the canonicalize
+    body-rank sort hardcodes 0x261C — a latent issue gated off by the last-entry rule). Validated
+    so the per-track block delta equals a real session's, the EOS simulator (`validate`) is clean,
+    rc=0, the round-trip (`duplicate_track` then `remove_track(new_name)`) is byte-identical
+    (audio AND MIDI; PT display-confirm pending), and every other block is
     byte-intact."""
     import struct
     if len(new_name) != len(source_track):
@@ -5155,7 +5166,7 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
             b = innermost(j)
             if b:
                 z, e, c = b
-                if c in (0x1014, 0x251A):
+                if c in (0x1014, 0x1057, 0x251A):        # 0x1057 = MIDI track-list entry (0x1058)
                     ident.add(z)
                     seed.update(guids_in(data[z:e]))
                 elif c == 0x1052:
@@ -5178,13 +5189,14 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     pl_ranges: "list[tuple[int, int]]" = []
     for z, e, c in bl:
         if c == 0x102D and any(g in data[z:e] for g in seed):
-            cs = [(cz, ce) for cz, ce, cc in bl if cc == 0x261C and cz < z < ce]
+            cs = [(cz, ce) for cz, ce, cc in bl
+                  if cc in (0x261C, 0x2620, 0x261E) and cz < z < ce]
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
-    if not any(zct[z] == 0x261B for z in ident):
-        raise ValueError(f"cannot locate audio track {source_track!r}")
+    if not pl_ranges:
+        raise ValueError(f"cannot locate track {source_track!r} (or an unsupported track type)")
 
     # The source track's SECOND view-chain subtree (0x2589), attributed by the block's OWN
     # display-row ordinal (u16 @ zmark+9) -- the SAME rule remove_track uses, so the two agree on
