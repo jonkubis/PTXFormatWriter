@@ -5049,10 +5049,13 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # duplicate renumber, so the round-trip stays byte-exact and the result equals synth(N-1).
     if _do_renumber:
         out = _renumber_body_after_remove(out, _track_kinds(out), _base_n, _donor_free)
-    # The 0x1015 track count is adjusted by this edit's own delta, never recomputed -- tallying
-    # its 0x1014 children silently corrupted mixed audio+MIDI sessions (MIDI tracks carry no
-    # 0x1014). See `_adjust_track_count`.
-    return _adjust_track_count(out, -1)
+    # 0x1015 counts AUDIO tracks (its 0x1014 entries), NOT all tracks -- verified on 166 PT
+    # sessions (e.g. `multiple track types`: 2 audio + 1 MIDI -> 0x1015 = 2; every MIDI-bearing
+    # session has 0x1015 == the 0x1014 count). So adjust it ONLY for an audio edit; removing a
+    # MIDI/click track leaves it unchanged. (midi9's 0x1015 = 9 with zero audio is a synth
+    # artifact, which is what the old "0x1015 = all tracks" reading was mistakenly based on.)
+    audio_edit = any(zct.get(z) == 0x1014 for z in ident)
+    return _adjust_track_count(out, -1 if audio_edit else 0)
 
 
 def _unique_same_length_name(length: int, taken: "set[str]") -> str:
@@ -5343,9 +5346,10 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
         # Channels need only be UNIQUE, not contiguous -- removal already leaves gaps that PT
         # accepts -- so the lowest free indices are safe.
         out = _assign_free_channels(out, new_name)
-    # See `_adjust_track_count`: adjust the 0x1015 track count by this edit's delta rather than
-    # recomputing it from the 0x1014 children (which MIDI tracks do not have).
-    return _adjust_track_count(out, +1)
+    # 0x1015 counts AUDIO tracks (its 0x1014 entries), NOT all tracks (166 PT sessions) -- so
+    # bump it only when the duplicated track is audio; a MIDI/click copy leaves it unchanged.
+    audio_edit = any(zct.get(z) == 0x1014 for z in ident)
+    return _adjust_track_count(out, 1 if audio_edit else 0)
 
 
 def _track_1014_rows(data: bytes) -> "list[tuple[str, int, list[int]]]":

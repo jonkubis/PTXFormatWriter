@@ -1320,6 +1320,30 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(BS.validate(dup), [])
         self.assertEqual(BS.remove_track(dup, "MIDI Z"), data)
 
+    @unittest.skipUnless(
+        (ROOT / "control_files" / "various" / "two midi tracks one note each.ptx").exists(),
+        "MIDI-clip control not present")
+    def test_midi_edit_leaves_audio_count_0x1015_unchanged(self):
+        """REGRESSION (bug #17): 0x1015 counts AUDIO tracks (its 0x1014 entries), NOT all tracks
+        -- verified on 166 PT sessions. Adding/removing a MIDI track must leave it unchanged. The
+        round-trip HID this (dup +1, remove -1 nets to zero) while dup produced a PT-wrong count;
+        this asserts the intermediate is correct on a PT-authored 0-audio session (0x1015 == 0)."""
+        data = _load_path(ROOT / "control_files" / "various" / "two midi tracks one note each.ptx")
+
+        def audio_count(d):
+            for z, _e, c in BS._size_driven_blocks(d):
+                if c == 0x1015:
+                    return int.from_bytes(d[z + 9 : z + 13], "little")
+            return None
+
+        self.assertEqual(len([t for t in BS.track_types(data) if t.kind in ("mono", "stereo")]), 0)
+        self.assertEqual(audio_count(data), 0)
+        dup = BS.duplicate_track(data, "MIDI 1", "MZ")
+        self.assertEqual(audio_count(dup), 0, msg="a MIDI copy must NOT bump the audio-count 0x1015")
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(audio_count(BS.remove_track(data, "MIDI 2")), 0,
+                         msg="removing a MIDI track must NOT change the audio-count 0x1015")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
