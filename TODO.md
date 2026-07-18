@@ -828,3 +828,28 @@ dup won't bump 0x1015 either.
 The pure-MIDI synthesis (grow_one_midi_track/add_midi_track) sets 0x1015 = track count (midi9 -> 9)
 instead of the audio count (0). PT-authored pure-MIDI sessions store 0x1015 = 0. Uncaught because
 the synth oracles are audio-only. Fix the MIDI synth to set 0x1015 = audio count, regenerate midi9.
+
+## MIDI CORRECTNESS AUDIT (bugs #17 + #18 fixed; #17-class discipline applied)
+After shipping MIDI dup/remove I checked every stored count against its ACTUAL contents on the dup
+output (not just the byte-exact round-trip, which HIDES net-zero errors -- the bug-#9/#17 trap).
+Found and fixed TWO count bugs the round-trip masked:
+  - #17: 0x1015 (AUDIO count) was wrongly bumped for MIDI/click edits -> now gated to audio.
+  - #18: 0x1058 (MIDI count) was NOT bumped for MIDI edits -> now bumped via _adjust_midi_list_count.
+On PT-authored sessions the track-list counts (0x1015/0x1058/0x2624/0x2519 header) are now all
+consistent with their contents after a MIDI dup. 182 tests.
+
+## KNOWN LIMITATION (pre-existing, audio AND MIDI, PT-pending): non-synth dup omits 0x2589
+The non-synth duplicate path DELIBERATELY does not copy the source track's 0x2589 view chain (its
+display-row ordinals do not map 1:1 to track_types on a real session -- a click has a chain but no
+track_types entry, so no track-keyed attribution is sound; documented in the code). Result: a
+non-synth dup copy (AUDIO or MIDI) has one fewer 0x2589 than name entries -- N+1 name entries but N
+view chains. The byte-exact round-trip and validate()/rc=0 all pass, so it was never caught. This
+is the same "check the intermediate, not A->B->A" lesson. OPEN: is this PT-valid (does PT tolerate
+a name entry with no 0x2589, creating a default view) or must the copy get a chain? Needs PT, or a
+sound non-synth 0x2589 attribution. Affects the committed audio non-synth dup too (PT-display was
+always pending there).
+
+## Synth-path count follow-up (separate from the in-place editors)
+Our MIDI synthesis sets 0x1015 = track count (midi9 -> 9, should be 0 audio) AND 0x1058 off-by-one
+(midi9 -> 8 for 9 MIDI; should be 9). PT-authored sessions have both correct. Uncaught (synth
+oracles are audio-only). Fix the MIDI synth to set both to the PT convention, regenerate fixtures.
