@@ -813,16 +813,100 @@ def reindex_after_resize(consistent_data: bytes, resized_data: bytes) -> bytes:
     ref1 = final_index_ref(resized_data)
     if ref0 is None or ref1 is None:
         return resized_data
-    _r, holes = offset_holes(consistent_data)
     old_start, new_start = ref0.start, ref1.start
-    _zmark_to_type, by_type = block_layout(resized_data)
+    try:
+        _r, holes = offset_holes(consistent_data)
+        _zmark_to_type, by_type = block_layout(resized_data)
+        resolved = [(abs_pos, by_type.get(tt, ())[rank])
+                    for abs_pos, _v, tt, rank, _k in holes
+                    if rank < len(by_type.get(tt, ()))]
+    except (ValueError, IndexError):
+        # The scan parser (offset_holes/block_layout) undercounts real/MIDI-clip sessions and
+        # RAISES `bad element tag`. Fall back to a size-driven enumeration -- consistent on both
+        # sides, so the (type, rank) resolution still holds. Only reached on the sessions the scan
+        # path cannot frame, so the 278 sessions it CAN frame stay byte-for-byte unchanged.
+        resolved = _resolve_holes_sized(consistent_data, resized_data, ref0)
     out = bytearray(resized_data)
-    for abs_pos, _value, target_type, target_rank, _kind in holes:
+    for abs_pos, new_value in resolved:
         npos = new_start + (abs_pos - old_start)
-        targets = by_type.get(target_type, ())
-        if 0 <= npos and npos + 4 <= len(out) and target_rank < len(targets):
-            out[npos : npos + 4] = int(targets[target_rank]).to_bytes(4, "little")
+        if 0 <= npos and npos + 4 <= len(out):
+            out[npos : npos + 4] = int(new_value).to_bytes(4, "little")
     return _set_first_block_index_pointer(bytes(out), new_start)
+
+
+def _block_bounds_sized(data: bytes, end0: int) -> "dict[int, int]":
+    """`{zmark: content_type}` for every block in `data[:end0]`, via a size-driven recursive
+    walk over the 0x5A framing (mirrors body_synth._raw_block_bounds). Robust where the scan
+    parser undercounts (real/MIDI-clip sessions)."""
+    z2t: "dict[int, int]" = {}
+
+    def descend(lo: int, hi: int) -> None:
+        pos = lo
+        while pos < hi:
+            nz = data.find(b"\x5a", pos, hi)
+            if nz < 0:
+                return
+            pos = nz
+            block_type = int.from_bytes(data[pos + 1 : pos + 3], "little")
+            if not (block_type & 0xFF00):
+                size = int.from_bytes(data[pos + 3 : pos + 7], "little")
+                ct = int.from_bytes(data[pos + 7 : pos + 9], "little")
+                end = (pos + 7) + size
+                if size > 0 and end <= hi:
+                    z2t[pos] = ct
+                    descend(pos + 9, end)
+                    pos = end
+                    continue
+            pos += 1
+
+    descend(0, end0)
+    return z2t
+
+
+def _resolve_holes_sized(consistent_data: bytes, resized_data: bytes,
+                         ref0: "W.BlockRef") -> "list[tuple[int, int]]":
+    """`(abs_pos_in_consistent, new_offset)` for every index hole, resolved size-driven. Both
+    layouts are enumerated the same way, and a resize preserves the block set, so each hole's
+    (content_type, rank) in `consistent_data` names the same block in `resized_data`."""
+    z2t0 = _block_bounds_sized(consistent_data, ref0.start)
+    by_type0: "dict[int, list[int]]" = {}
+    for z, t in z2t0.items():
+        by_type0.setdefault(t, []).append(z)
+    for offs in by_type0.values():
+        offs.sort()
+    rank0 = {z: by_type0[t].index(z) for z, t in z2t0.items()}
+
+    ref1 = final_index_ref(resized_data)
+    z2t1 = _block_bounds_sized(resized_data, ref1.start)
+    by_type1: "dict[int, list[int]]" = {}
+    for z, t in z2t1.items():
+        by_type1.setdefault(t, []).append(z)
+    for offs in by_type1.values():
+        offs.sort()
+
+    records = parse_records(ref0.data, set(by_type0), set(z2t0))
+    out: "list[tuple[int, int]]" = []
+
+    def resolve(value: int) -> "int | None":
+        t = z2t0.get(value)
+        if t is None:
+            return None
+        rank = rank0[value]
+        targets = by_type1.get(t, ())
+        return targets[rank] if rank < len(targets) else None
+
+    def add(abs_pos: int, value: int) -> None:
+        nv = resolve(value)
+        if nv is not None:
+            out.append((abs_pos, nv))
+
+    for record in records:
+        for child in record.child_refs:
+            add(ref0.start + record.start + child.rel + 2, child.offset)
+        for element in record.elements:
+            for index, value in enumerate(element.offsets):
+                add(ref0.start + record.start + element.rel + 5 + 4 * index, value)
+    return out
 
 
 def index_target_type_sequence(data: bytes) -> list[tuple[int, str]]:

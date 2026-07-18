@@ -424,6 +424,22 @@ class ReplaceMapTests(unittest.TestCase):
         self.assertEqual(_reload_ok(out), 0)
         self.assertEqual(BS.meter_map(out), [(7, 8, 0), (5, 4, 3840000)])
 
+    @unittest.skipUnless((VAR / "two midi tracks one note each.ptx").exists(),
+                         "MIDI-clip control not present")
+    def test_set_maps_on_midi_via_sized_reindex(self) -> None:
+        """set_tempo_map/set_meter_map route through final_index.reindex_after_resize, whose
+        scan-based offset_holes RAISED `bad element tag` on MIDI-clip sessions. The size-driven
+        fallback makes them work: the maps read back and the session validates + reloads."""
+        d = _load_path(VAR / "two midi tracks one note each.ptx")
+        t = BS.set_tempo_map(d, [(88.0, 0), (132.0, 8 * _TQ)])
+        self.assertEqual([(round(b, 1), p) for b, p in BS.tempo_map(t)], [(88.0, 0), (132.0, 7680000)])
+        self.assertEqual(BS.validate(t), [])
+        self.assertEqual(_reload_ok(t), 0)
+        m = BS.set_meter_map(d, [(3, 4, 0), (7, 8, 4 * _TQ)])
+        self.assertEqual(BS.meter_map(m), [(3, 4, 0), (7, 8, 3840000)])
+        self.assertEqual(BS.validate(m), [])
+        self.assertEqual(_reload_ok(m), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
