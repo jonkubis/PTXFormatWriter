@@ -805,3 +805,26 @@ Three coupled blockers (from the workflow's adversarial risk list, MIDI-safe but
   - Aux/bus/master tracks that are NOT clicks (if the corpus has any 0x261E variants beyond click).
   - add-clip with NEW audio (0x2628 geometry, PT-gated).
   - PT verification of verify_1..11 + the new MIDI/click edits (user-gated).
+
+## BUG #17 FIXED (commit 3057bdb) — 0x1015 = AUDIO track count, resolved from the bytes
+The long-open "what does 0x1015 count" question is settled: it is the AUDIO (0x1014) track count,
+NOT all tracks. 166 PT-authored sessions agree (every MIDI/click one has 0x1015 == n_1014); the
+old "all tracks" reading was based only on midi9.ptx, whose 0x1015 = 9 with 0 audio is OUR synth
+bug. remove_track/duplicate_track now adjust 0x1015 only for an AUDIO edit; MIDI/click edits leave
+it untouched. This was a real bug in the MIDI dup shipped earlier today (86c32e0) -- it bumped the
+audio count on a 0-audio session, HIDDEN by the byte-exact round-trip (the bug-#9 trap). Fixed +
+regression-tested (asserts the INTERMEDIATE, not just A->B->A); 181 tests.
+
+This also resolves click-dup blocker (3) below: the audio-gate returns False for a click, so click
+dup won't bump 0x1015 either.
+
+## Remaining click/aux (0x261E) DUPLICATE blockers (down to 2)
+  1. LAST-name-entry limitation (the click is always the last 0x2519 entry, short 21-byte trailer).
+  2. canonicalize_after_track_add's body-rank sort hardcodes `else 0x261C` -> a 0x261E element
+     ranks against block_ranks[0x261C] = 1<<30. Generalize the sort key per container kind.
+  (3. 0x1015-count-on-click -> DONE via bug #17's audio-gate.)
+
+## NEW follow-up — synth-path 0x1015 bug
+The pure-MIDI synthesis (grow_one_midi_track/add_midi_track) sets 0x1015 = track count (midi9 -> 9)
+instead of the audio count (0). PT-authored pure-MIDI sessions store 0x1015 = 0. Uncaught because
+the synth oracles are audio-only. Fix the MIDI synth to set 0x1015 = audio count, regenerate midi9.
