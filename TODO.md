@@ -695,3 +695,23 @@ ords_end-2, count moves +/-1), so this is a documentation gap, not a correctness
   2. replace-clip / add-clip on arbitrary sessions (remove_clip already ships).
   3. tempo/meter map edits on arbitrary sessions.
   4. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
+
+## NEW BUG discovered (#16, latent): synth-click path emits a MALFORMED `<ALL>` list
+
+Decisive comparison against PT-AUTHORED click sessions ("1/2/3/4 stereo plus click.ptx"):
+PT authors a FLAT list `[0..entries-1]` including the click ordinal:
+  1 stereo + click -> count 2 [0,1]     3 stereo + click -> count 4 [0,1,2,3]
+Our own SYNTHESIZED click fixtures (test_clickbottom_*, mixedmidi_click_*) instead carry a
+SEGMENTED list with embedded 0xFFFE/0x8010/0xFFFF sentinels and missing ordinals:
+  test_clickbottom_12stereo -> [0,1,2] .. [8,9,10,11]  (skips 3-7 and the click's ordinal)
+
+PT tolerates it (loads rc=0), which is why it went unnoticed. It is NOT what PT writes.
+
+IMPACT: none on the editing primitives -- verified that on PT-AUTHORED click sessions,
+duplicate produces the correct flat range(N+1) (`3 stereo plus click` count 4 [0,1,2,3] ->
+count 5 [0,1,2,3,4]), round-trips byte-exact, and validate()==clean. So in-place editing of real
+PT sessions is correct. The bug is only in how we SYNTHESIZE click sessions from scratch.
+
+TODO: fix the click-synthesis path to emit `<ALL>` = flat range(entries) incl. the click
+ordinal. Regenerate the test_clickbottom_*/mixedmidi_click_* fixtures once fixed. This is the
+recurring "reader rc=0 != PT-valid" lesson again -- PT accepting the file did not make it correct.

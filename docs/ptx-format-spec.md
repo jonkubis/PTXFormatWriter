@@ -1114,7 +1114,9 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
   - +(25+name_len+2*member_count) u16 = 0xFFFF (constant; immediately precedes the child).
   - +(27+name_len+2*member_count): the 0x258e child block.
 - **notes:** Parent container 0x202b (one per session, holds every 0x202a). Each group is emitted TWICE per session (Edit-group list + Mix-group list), so instance count is 2× the distinct-group count. group_id is 1-based but NOT guaranteed contiguous (gaps from deleted groups). Encodes per-track ordering/membership directly as a 0-based u16 ordinal list.
-- **confidence:** high (298 instances / 19 sessions).
+  - **`<ALL>` member_count == the NAME-TABLE ENTRY count**, i.e. every track INCLUDING a click track — confirmed on PT-authored click sessions: `1 stereo plus click` → count 2, members `[0,1]`; `3 stereo plus click` → count 4, members `[0,1,2,3]`; `4 stereo plus click` → count 5, `[0,1,2,3,4]`. So `<ALL>` really is `range(entries)`, and its click ordinal is the last one. This is the value the in-place editors maintain (`_fix_all_ordinal_counts` pins it to the entry count; +1 on duplicate, −1 on remove).
+  - **CAVEAT (our synth-click bug, NOT PT):** our own click-synthesis path emits a MALFORMED `<ALL>` on click sessions — a SEGMENTED list with embedded `0xFFFE/0x8010/0xFFFF` sentinels and missing ordinals (e.g. our `test_clickbottom_12stereo` → `[0,1,2] … [8,9,10,11]`, skipping 3–7 and the click). Pro Tools tolerates it (loads rc=0) but never authors it. Editing such a file stays self-consistent (duplicate→remove is byte-exact), but the list itself is not PT-shaped. Fixing the synth-click path to emit flat `range(entries)` is tracked in TODO.
+- **confidence:** high (298 instances / 19 sessions; `<ALL>`=range(entries) re-confirmed on PT-authored click sessions 2026-07).
 
 ### 0x202c — region/clip-group definition
 
