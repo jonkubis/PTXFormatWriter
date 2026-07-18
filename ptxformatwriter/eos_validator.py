@@ -125,13 +125,20 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
     # extended, no exceptions).
     shift = PREAMBLE_EXTRA if _u32(data, payload + PREAMBLE_FLAG_OFF) else 0
     start = ENTRY_START_BASE + shift
+    # Walk exactly the STORED entry count -- the way Pro Tools reads it -- not "until the first
+    # child". A trackless session (a tempo/meter-only control) stores count 0 and its name table
+    # holds no entries; the until-child heuristic instead read whatever non-entry bytes followed
+    # and misread a u32 (e.g. 0x01000000) as a bogus name_length -> a FALSE end-of-stream on 17
+    # trackless corpus sessions. A count that is too LARGE for the entries still raises below
+    # (the read runs into the child block / past object end), so real desync is still caught.
+    count = struct.unpack_from("<H", data, payload + ENTRY_COUNT_OFF + shift)[0]
 
     children = _top_level_children(blocks, z, e)
     entries_end = children[0][0] if children else e   # entries end at the first framed child
 
     q = payload + start
     idx = 0
-    while q < entries_end:
+    while idx < count:
         if q + 4 > e:
             raise EndOfStream(CT_NAME_TABLE, z, f"name[{idx}].length",
                               f"length field at 0x{q:x} would read past object end 0x{e:x}")

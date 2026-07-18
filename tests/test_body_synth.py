@@ -1195,6 +1195,20 @@ class ContainerCountValidatorTests(unittest.TestCase):
                 break
         self.assertTrue(any(p.get("content_type") == 0x2519 for p in BS.validate(bytes(b))))
 
+    @unittest.skipUnless((ROOT / "control_files" / "various" / "120 to 140bpm.ptx").exists(),
+                         "tempo control not present")
+    def test_trackless_session_validates_clean(self):
+        """A trackless session (a tempo/meter-only control) stores name-entry count 0. The EOS
+        name walk must respect that count and read 0 entries -- the old until-first-child walk
+        instead misread the following bytes as a bogus name_length and false-positived on 17
+        corpus sessions. set_tempo_map on such a session must also validate clean."""
+        data = _load_path(ROOT / "control_files" / "various" / "120 to 140bpm.ptx")
+        self.assertEqual([t.name for t in BS.track_types(data)], [], msg="expected a trackless control")
+        self.assertEqual(BS.validate(data), [], msg="trackless session must validate clean")
+        out = BS.set_tempo_map(data, [(90.0, 0), (120.0, 4 * 960000)])
+        self.assertEqual(BS.validate(out), [])
+        self.assertEqual(BS.tempo_map(out), [(90.0, 0), (120.0, 3840000)])
+
 
 class NonSynthDuplicateChannelTests(unittest.TestCase):
     """A duplicate on a NOT-synth-shaped session (the path real sessions take) must still give
