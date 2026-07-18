@@ -715,3 +715,23 @@ PT sessions is correct. The bug is only in how we SYNTHESIZE click sessions from
 TODO: fix the click-synthesis path to emit `<ALL>` = flat range(entries) incl. the click
 ordinal. Regenerate the test_clickbottom_*/mixedmidi_click_* fixtures once fixed. This is the
 recurring "reader rc=0 != PT-valid" lesson again -- PT accepting the file did not make it correct.
+
+## SHIPPED — variable-length duplicate_track (commit 6fe20d0)
+The same-length-name constraint is gone: a different-length name duplicates under a same-length
+placeholder, then rename_track absorbs the size delta. Same-length path byte-identical (synth
+oracles untouched). Verified longer AND shorter names on PT-authored + non-synth sessions:
+copy carries the real name, validate clean, remove inverts byte-exact. 174 tests.
+
+INHERITED LIMIT: rename_track uses the SCAN parser (parse/flat_blocks), which stumbles on some
+MIDI-clip sessions -- variable-length rename round-trips 259/263 corpus sessions; the 4 failures
+are MIDI sessions (`bad element tag`, the classic scan-parser undercount). Porting rename_track
+to the size-driven walk (_size_driven_blocks) is the robust fix and would also generalize.
+
+## CURRENT FRONTIER (in-place editing on arbitrary sessions)
+  1. Port rename_track to the size-driven parser -> fixes the 4 MIDI rename failures and makes
+     variable-length duplicate work on 100% of sessions.
+  2. Fix bug #16 (synth-click emits a malformed segmented <ALL>; should be flat range(entries)).
+  3. Non-audio track duplicate/remove (MIDI/aux 0x261E/bus/master -- different subtree).
+  4. add-clip with NEW audio (needs the 0x2628 geometry write; PT-gated).
+  5. Replace tempo/meter map on arbitrary sessions (set_*_map still use the scan parser).
+  6. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
