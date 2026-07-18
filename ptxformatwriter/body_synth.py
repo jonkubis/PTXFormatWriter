@@ -5403,39 +5403,38 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     new = new_name.encode() if isinstance(new_name, str) else bytes(new_name)
     if old == new:
         return data
+    import bisect
     delta = len(new) - len(old)
     ref = _FI.final_index_ref(data)
     old_index_start = ref.start
-    # Capture index holes from the ORIGINAL (consistent) layout: their positions
-    # within the index are stable across the rename, and each resolves to a
-    # (content_type, rank) block. We re-fill them after the shift -- the index
-    # can't be re-parsed once the body moves (its stored offsets no longer match
-    # the block zmarks the parser keys on).
-    _r, holes = _FI.offset_holes(data)
+    # SIZE-DRIVEN throughout. The scan parser (parse/flat_blocks, _FI.offset_holes)
+    # undercounts real sessions and RAISES on some MIDI-clip ones (`bad element tag`).
+    # Capture the index holes as (abs_pos, target_offset) from the ORIGINAL layout;
+    # reindex is a pure offset-shift (no block is added or removed), so a target at
+    # old offset o moves by delta per occurrence that precedes it.
+    holes, _zm = _index_offset_holes(data)
     body = bytearray(data[:old_index_start])
     index = data[old_index_start:]
-    ptf = parse(bytes(body))
     occ = track_name_occurrences(bytes(body), old)
     if not occ:
         raise ValueError(f"track name {old!r} not found (length-prefixed) in body")
-    # Bump every containing block's size by (occurrences within it) * delta. A
-    # block contains an occurrence iff the name offset lies within [zmark, end);
-    # ancestors contain their descendants' occurrences, so this also grows them.
-    for b in flat_blocks(ptf):
-        s, e = b.offset - 7, b.offset + b.block_size
-        cnt = sum(1 for j in occ if s <= j < e)
+    # block bounds from the ORIGINAL full session (body alone has no index for
+    # final_index_ref to anchor on); every bound lies in the body region we mutate.
+    snapshot = _size_driven_blocks(data)
+    # Bump every containing block's size by (occurrences within it) * delta. A block
+    # contains an occurrence iff the name offset lies within [zmark, end); ancestors
+    # contain their descendants' occurrences, so this also grows them.
+    for z, e, _c in snapshot:
+        cnt = sum(1 for j in occ if z <= j < e)
         if cnt:
-            sp = s + 3
-            sz = int.from_bytes(body[sp : sp + 4], "little")
-            body[sp : sp + 4] = (sz + cnt * delta).to_bytes(4, "little")
+            sz = int.from_bytes(body[z + 3 : z + 7], "little")
+            body[z + 3 : z + 7] = (sz + cnt * delta).to_bytes(4, "little")
     # Also adjust content-internal path-wrapper length fields (`5a 0a 00 <u32 size>`)
-    # that span a renamed occurrence. The embedded session-folder path inside a
-    # 0x261c (and 0x2067/0x200b) is wrapped by these pseudo-block length fields, but
-    # the block parser does NOT descend into them (they aren't in flat_blocks /
-    # block_layout), so the loop above misses them. A stale wrapper size leaves Pro
-    # Tools reading past the data -> "end of stream". (No-op for track-name renames,
-    # whose occurrences never fall inside one of these path wrappers.)
-    parsed_zmarks = {b.offset - 7 for b in flat_blocks(ptf)}
+    # that span a renamed occurrence -- opaque embedded session-folder paths inside a
+    # 0x261c (and 0x2067/0x200b) that the block walk does not descend into. A stale
+    # wrapper size leaves Pro Tools reading past the data -> "end of stream". (No-op
+    # for track renames, whose occurrences never fall inside a path wrapper.)
+    parsed_zmarks = {z for z, _e, _c in snapshot}
     scan = 0
     while True:
         k = body.find(b"\x5a\x0a\x00", scan)
@@ -5455,14 +5454,17 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     for j in sorted(occ, reverse=True):
         body[j - 4 : j] = len(new).to_bytes(4, "little")
         body[j : j + len(old)] = new
-    # Reattach the index and re-fill each hole at its (stable) index-relative
-    # position with the target block's new zmark offset.
+    # Reattach the index and rewrite each hole's offset for the shifted layout.
+    occ_sorted = sorted(occ)
+
+    def _shift(o: int) -> int:                       # occurrences strictly before o
+        return o + delta * bisect.bisect_left(occ_sorted, o)
+
     out = bytearray(bytes(body) + index)
     new_index_start = len(body)
-    _z2t, by_type = _FI.block_layout(bytes(out))
-    for abs_pos, _value, ttype, rank, _kind in holes:
+    for abs_pos, target in holes:
         npos = new_index_start + (abs_pos - old_index_start)
-        out[npos : npos + 4] = int(by_type[ttype][rank]).to_bytes(4, "little")
+        out[npos : npos + 4] = _shift(target).to_bytes(4, "little")
     # The first block stores the index's absolute offset, which moved with the
     # body-size change; rewrite it (else "magic ID does not match").
     return _set_index_offset(bytes(out))

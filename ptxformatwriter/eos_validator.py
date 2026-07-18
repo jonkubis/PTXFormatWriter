@@ -49,7 +49,8 @@ CT_MASTER_INDEX = 0x0002
 CT_NAME_TABLE = 0x2519          # inline name-entry list (the failing path)
 CT_TRACK_LIST = 0x2624         # count-prefixed track-list container
 
-NAME_ENTRY_TRAILER = 23        # bytes after the name string
+NAME_ENTRY_TRAILER = 23        # bytes after the name string (u32 ordinal form)
+NAME_ENTRY_TRAILER_SHORT = 21  # ...with a u16 ordinal instead of u32
 TRAILER_MARK_OFF = 6           # offset of the 0x0000002A marker inside the trailer
 TRAILER_MARK = 0x2A
 ENTRY_START_BASE = 0x14        # first name entry when the preamble carries no extra field
@@ -64,6 +65,19 @@ def _u16(b: bytes, o: int) -> int:
 
 def _u32(b: bytes, o: int) -> int:
     return struct.unpack_from("<I", b, o)[0]
+
+
+def _frames_entry(data: bytes, q: int, e: int) -> bool:
+    """True if a name entry (`u32 len | printable name | trailer with 0x2A marker`) begins at
+    `q` within object end `e`. Used to disambiguate the 23- vs 21-byte trailer stride."""
+    if q + 4 > e:
+        return False
+    n = _u32(data, q)
+    if not (0 < n <= 64) or q + 4 + n + TRAILER_MARK_OFF + 4 > e:
+        return False
+    if not all(0x20 <= b < 0x7F for b in data[q + 4 : q + 4 + n]):
+        return False
+    return _u32(data, q + 4 + n + TRAILER_MARK_OFF) == TRAILER_MARK
 
 
 class EndOfStream(Exception):
@@ -136,6 +150,14 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
                 f"entry at 0x{q:x} (name_length={name_length}) is misframed: expected trailer "
                 f"marker 0x{TRAILER_MARK:08x} at 0x{mark_at:x}, found 0x{_u32(data, mark_at):08x} "
                 f"(the name-entry list is out of sync with the track edit)")
+        # The trailer's ordinal is a u32 in almost every entry but a u16 in some, so the stride
+        # is 23 OR 21 (see body_synth._next_name_entry -- bug #14). Advance by the long form,
+        # but fall back to the short form when long does not land on a valid next entry, so a
+        # PT-authored 21-byte entry (e.g. robust_audio_mixed12) is not misread as a bogus length.
+        entry_end_short = q + 4 + name_length + NAME_ENTRY_TRAILER_SHORT
+        if (entry_end < entries_end and not _frames_entry(data, entry_end, e)
+                and _frames_entry(data, entry_end_short, e)):
+            entry_end = entry_end_short
         q = entry_end
         idx += 1
 

@@ -1403,6 +1403,35 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertEqual(back, data,
                          msg="duplicate->remove must round-trip byte-exact on a click session")
 
+    @unittest.skipUnless((CONTROL_DIR / "robust_audio_mixed12.ptx").exists(),
+                         "robust_audio_mixed12 control not present")
+    def test_validate_handles_the_short_name_entry_stride(self):
+        """REGRESSION (bug #14, validator site): the EOS name-table walk advanced by a fixed
+        23-byte trailer, so on the 21-byte-stride entry in `robust_audio_mixed12` (an unedited PT
+        session) it landed 2 bytes off and misread the next u32 as a ~1.9GB name_length -> a
+        FALSE 'end of stream' on a file Pro Tools loads fine. validate() must be clean here."""
+        data = _load_path(CONTROL_DIR / "robust_audio_mixed12.ptx")
+        self.assertEqual(BS.validate(data), [],
+                         msg="validate() must not false-positive on the 21-byte-stride name entry")
+
+    @unittest.skipUnless((ROOT / "control_files" / "various" / "two midi tracks one note each.ptx").exists(),
+                         "MIDI-clip control not present")
+    def test_rename_track_variable_length_on_midi(self):
+        """rename_track is size-driven, so it works on MIDI-clip sessions that made the old
+        scan-parser path raise `bad element tag` (this exact file did). A longer name must
+        round-trip byte-exact and the renamed session must validate + resolve every index
+        offset."""
+        data = _load_path(ROOT / "control_files" / "various" / "two midi tracks one note each.ptx")
+        src = [t.name for t in BS.track_types(data)][0]
+        renamed = BS.rename_track(data, src, src + " with a longer name")
+        self.assertIn(src + " with a longer name", [t.name for t in BS.track_types(renamed)])
+        self.assertEqual(BS.validate(renamed), [])
+        holes, zmarks = BS._index_offset_holes(renamed)
+        self.assertEqual([t for _p, t in holes if t and t not in zmarks], [],
+                         msg="every index offset must resolve after a variable-length rename")
+        self.assertEqual(BS.rename_track(renamed, src + " with a longer name", src), data,
+                         msg="rename must round-trip byte-exact")
+
 
 if __name__ == "__main__":
     unittest.main()
