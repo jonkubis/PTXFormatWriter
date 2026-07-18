@@ -4414,12 +4414,28 @@ def _all_ordinal_lists(data: bytes, z: int, e: int) -> "list[dict]":
 
 
 def _fix_all_ordinal_counts(data: bytes) -> bytes:
-    """Set each 0x202b `<ALL>` list's u16 count to its actual ordinal count (bounded by the
-    `fe ff` trailer) after an inline splice/insert changed the list length; this also fixes the
-    two nested 0x202a lists (same physical bytes). Size-neutral, idempotent."""
-    ref = _FI.final_index_ref(data)
+    """Set each 0x202b `<ALL>` list's u16 count to the name-table entry count after an inline
+    splice/insert changed the block; this also fixes the two nested 0x202a lists (same physical
+    bytes). Size-neutral, idempotent.
+
+    The count is the NAME-TABLE ENTRY count (tracks incl. a click), NOT the length of the first
+    `fe ff`-terminated run. Those coincide only when the `<ALL>` list is a flat `[0..N-1]` (every
+    non-click session), which is why "recompute to the first-run length" survived: it gave the
+    right value everywhere it was tested. On a click session the list is SEGMENTED -- runs of
+    ordinals separated by `fe ff 10 80 <u32> ff ff`, e.g. `[0,1,2] .. [8,9,10,11]` -- so the
+    first run is far shorter than the entry count, and recomputing rewrote a PT-authored 6 to 3.
+    Across the whole corpus the stored count equals the entry count on ALL 280 sessions (0 equal
+    the first-run length but not the entry count), so entry count is the ground truth.
+
+    This also makes duplicate/remove inverse on click sessions: dup inserts the copy's ordinal at
+    `ords_end` and remove strips `ords_end-2`, which only line up when the count moves +1/-1 with
+    the edit. Pinning the count to the entry count does exactly that (dup: 6->7 entries, remove:
+    7->6), where the old recompute pinned it to the first-run length and broke the round-trip."""
+    bl = _size_driven_blocks(data)
+    z19, e19 = [(z, e) for z, e, c in bl if c == 0x2519][0]
+    n_entries = len(_inline_name_entries(data, z19, e19, bl))
     out = bytearray(data)
-    for z, e, c in sorted(_raw_block_bounds(data, ref.start)):
+    for z, e, c in bl:
         if c != 0x202B:
             continue
         p = z
@@ -4427,10 +4443,7 @@ def _fix_all_ordinal_counts(data: bytes) -> bytes:
             a = out.find(b"<ALL>", p, e)
             if a < 0:
                 break
-            ords_start = a + 5 + 7 + 2 + 2
-            tr = out.find(b"\xfe\xff", ords_start, e)
-            if tr >= 0:
-                out[a + 5 + 7 : a + 5 + 9] = ((tr - ords_start) // 2).to_bytes(2, "little")
+            out[a + 5 + 7 : a + 5 + 9] = n_entries.to_bytes(2, "little")
             p = a + 1
     return bytes(out)
 

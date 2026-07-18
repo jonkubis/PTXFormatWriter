@@ -1339,6 +1339,46 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertEqual(again, stored,
                          msg="_fix_name_table_count must not rewrite a PT-authored count")
 
+    @unittest.skipUnless((ROOT / "control_files" / "mixedmidi_click_bottom.ptx").exists(),
+                         "mixedmidi_click_bottom control not present")
+    def test_all_ordinal_count_is_entry_count_not_first_run(self):
+        """REGRESSION (bug #15): the 0x202a/0x202b `<ALL>` u16 count is the NAME-TABLE ENTRY
+        count, not the length of the first `fe ff`-terminated run.
+
+        On a click session the `<ALL>` list is SEGMENTED -- runs of ordinals separated by
+        `fe ff 10 80 <u32> ff ff`, e.g. `[0,1,2]` then `[8,9,10,11]` -- so the first run is far
+        shorter than the entry count. `_fix_all_ordinal_counts` used to recompute the count to
+        that first run (6 -> 3), and because dup inserts the copy's ordinal at `ords_end` while
+        remove strips `ords_end-2`, the two only invert when the count moves +1/-1 with the edit.
+        The recompute pinned it to the run length instead, so duplicate->remove was not a perfect
+        inverse on every click-bearing session (8 of them in the corpus). Entry count is the
+        ground truth: it matches PT's stored value on all 280 corpus sessions."""
+        data = _load_path(ROOT / "control_files" / "mixedmidi_click_bottom.ptx")
+        bl = BS._size_driven_blocks(data)
+        z19, e19 = [(z, e) for z, e, c in bl if c == 0x2519][0]
+        n_entries = len(BS._inline_name_entries(data, z19, e19, bl))
+        self.assertEqual(n_entries, 6, msg="Audio 1/MIDI 1/Audio 2/Audio 3/MIDI 2/Click 1")
+
+        # PT's stored <ALL> count is the entry count (6), not the first-run length (3)
+        z2b, e2b = [(z, e) for z, e, c in bl if c == 0x202B][0]
+        a = data.find(b"<ALL>", z2b, e2b)
+        self.assertEqual(int.from_bytes(data[a + 12 : a + 14], "little"), n_entries)
+
+        # our recompute must reproduce it, never rewrite it to the first run
+        again = BS._fix_all_ordinal_counts(data)
+        self.assertEqual(int.from_bytes(again[a + 12 : a + 14], "little"), n_entries,
+                         msg="_fix_all_ordinal_counts must pin the count to the entry count")
+
+        # and the whole point: duplicate -> remove is now a perfect inverse on a click session
+        names = [t.name for t in BS.track_types(data)]
+        src = names[0]
+        new = "Z" * len(src)
+        while new in names:
+            new = "Y" + new[1:]
+        back = BS.remove_track(BS.duplicate_track(data, src, new), new)
+        self.assertEqual(back, data,
+                         msg="duplicate->remove must round-trip byte-exact on a click session")
+
 
 if __name__ == "__main__":
     unittest.main()
