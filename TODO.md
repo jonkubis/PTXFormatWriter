@@ -656,3 +656,42 @@ exactly this).
 
 The 0x2519 preamble precedent (two lengths chosen by a flag at payload+0x0A) is the shape to
 suspect here: find the field that selects the layout before assuming a run encoding.
+
+## Bug #15 FIXED — the `<ALL>` count, and with it the WHOLE corpus round-trip
+
+`_fix_all_ordinal_counts` now pins each `<ALL>` count to the name-table entry count instead of
+recomputing it to the first `fe ff`-terminated run. That was the last thing breaking the
+duplicate->remove inverse on click sessions.
+
+  corpus duplicate->remove sweep:  159 ok / 0 FAIL   (was 8 FAIL; 15 at the start of the day)
+  tests: 172 OK, synth oracles byte-identical
+
+The 104 ValueError in the sweep are the documented v1 limitation (duplicate requires the new name
+to be the same byte length as the source); the 19 no_tracks are non-session fixtures. So EVERY
+eligible corpus session now round-trips byte-exact.
+
+### `<ALL>` list grammar (decoded from bytes; see docs/ptx-format-spec.md §12c)
+Inside 0x202b, after `<ALL> 02 ff ff ff ff 00 00`:
+  count:u16  = name-table ENTRY count (tracks incl. click)   <- NOT the list length
+  pad:u16    = 0
+  then a sequence of RUNS:
+    run      = ordinal:u16 * k
+    then     `fe ff` (0xFFFE, run end) `10 80` (0x8010) `<u32=1>` `ff ff` (0xFFFF, separator)
+  list ends with a trailing `ff ff`, then the next 5A block.
+Non-click sessions have ONE run = [0..N-1] (a flat list == the tracks). Click sessions segment
+into multiple runs, e.g. 12-stereo+click -> [0,1,2] then [8,9,10,11].
+
+STILL NOT UNDERSTOOD (does not block editing; matters for full documentation):
+  - why the runs split where they do ([0,1,2]+[8,9,10,11] on 12-stereo+click, skipping 3..7);
+  - whether a run boundary encodes anything (it does NOT encode display order -- click
+    bottom/middle/top are byte-identical);
+  - what the `10 80` / `<u32=1>` / trailing `ff ff` sentinels mean semantically.
+The editing primitives are inverse WITHOUT this (dup inserts at ords_end, remove strips
+ords_end-2, count moves +/-1), so this is a documentation gap, not a correctness one.
+
+## NEXT (editing primitives, in priority order)
+  1. Lift the same-length-name constraint on duplicate (variable-length rename) -> unlocks the
+     104 ValueError sessions for add-copy-with-arbitrary-name.
+  2. replace-clip / add-clip on arbitrary sessions (remove_clip already ships).
+  3. tempo/meter map edits on arbitrary sessions.
+  4. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
