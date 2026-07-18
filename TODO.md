@@ -728,8 +728,10 @@ are MIDI sessions (`bad element tag`, the classic scan-parser undercount). Porti
 to the size-driven walk (_size_driven_blocks) is the robust fix and would also generalize.
 
 ## CURRENT FRONTIER (in-place editing on arbitrary sessions)
-  1. Port rename_track to the size-driven parser -> fixes the 4 MIDI rename failures and makes
-     variable-length duplicate work on 100% of sessions.
+  1. [DONE 7d3e565] rename_track ported to the size-driven parser -> the 4 MIDI rename failures
+     are fixed (corpus variable-length rename 263/263), and a residual bug #14 site in
+     eos_validator.check_name_table (fixed 23-byte stride -> false EOS on 21-byte entries) is
+     fixed too. Variable-length duplicate now works on 100% of eligible sessions.
   2. Fix bug #16 (synth-click emits a malformed segmented <ALL>; should be flat range(entries)).
   3. Non-audio track duplicate/remove (MIDI/aux 0x261E/bus/master -- different subtree).
   4. add-clip with NEW audio (needs the 0x2628 geometry write; PT-gated).
