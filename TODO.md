@@ -778,3 +778,30 @@ Capabilities added: variable-length duplicate_track; rename_track/tempo/meter on
      Contained synth-fidelity fix (ground truth in hand); risk is the PT-confirmed synth path.
   3. add-clip with NEW audio (needs 0x2628 geometry write; PT-gated).
   4. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
+
+## SHIPPED — MIDI track duplicate/remove (commit 86c32e0)
+Generalized remove_track/duplicate_track off the audio-only assumption (dissected via a workflow +
+independent byte-level ground truth). MIDI tracks: NO 0x1014/0x1052/0x261B/0x261C; track-list
+entry = 0x1057 (in 0x1058), per-track record = 0x2620, identified by NAME (a MIDI 0x1057's GUID
+differs from its identity GUID). Three edits (seed 0x1057, widen container set to
+{0x261C,0x2620,0x261E}, guard = "container found"); existing index rebuild + count re-sync handle
+the rest. MIDI dup->remove byte-exact (midi9/two-midi/mixed), validate clean, rc=0, copy visible in
+track_types (guards symmetric-incompleteness); variable-length names work; corpus 32 ok / 0
+round-trip failures; audio 159/0 (no regression); 180 tests. Click (0x261E) REMOVE works.
+
+## NEXT — click/aux (0x261E) DUPLICATE (the remaining track-edit gap)
+Three coupled blockers (from the workflow's adversarial risk list, MIDI-safe but click-relevant):
+  1. LAST-name-entry limitation: the click is ALWAYS the last 0x2519 entry (short 21-byte trailer);
+     duplicate_track can't copy it as a 23-byte entry. Lift by supporting short-trailer copy, or
+     reorder first.
+  2. canonicalize_after_track_add's body-rank sort hardcodes `else 0x261C`; a 0x261E playlist-
+     instance element gets ranked against block_ranks[0x261C] -> 1<<30 (wrong). Generalize the
+     sort key per container kind.
+  3. 0x1015 count on a CLICK add: a control pair proves 3->3 (click add does NOT bump 0x1015),
+     but the current +1 would; net-zero under dup->remove so the round-trip HIDES it -> needs a
+     kind-gate + PT/control-pair check (PT is the oracle). NOTE this is the bug-#9 trap again.
+
+## Other remaining frontier
+  - Aux/bus/master tracks that are NOT clicks (if the corpus has any 0x261E variants beyond click).
+  - add-clip with NEW audio (0x2628 geometry, PT-gated).
+  - PT verification of verify_1..11 + the new MIDI/click edits (user-gated).
