@@ -749,9 +749,32 @@ midi track and clip / two midi tracks one note each / two separate midi clips sa
 `final_index.offset_holes`, which is SCAN-based (parse_records over scan zmarks) and raises on
 MIDI-clip sessions -- the same undercount that `rename_track` had before its size-driven port.
 
-## NEXT: port final_index.offset_holes to size-driven zmarks
+## [DONE be13c8d] size-driven fallback in reindex_after_resize
 Shared infra -- fixes the last 4 MIDI cases for tempo/meter/marker writers (all route through
 reindex_after_resize) at once. Must preserve the 5-tuple (abs_pos, value, type, rank, kind) shape
 (reindex_after_resize resolves by (type,rank) in the resized layout, NOT a bisect shift). Frame
 the index with size-driven zmarks (as body_synth._index_offset_holes does). VALIDATE against the
 full synth path (reindex_after_resize is on the synth-insert path too) + the 278 corpus replaces.
+
+## SESSION CHECKPOINT 2026-07-18 — in-place editing is broadly robust on the corpus
+All committed + regression-tested; synth path byte-identical throughout; 178 tests green.
+
+  duplicate->remove round-trip     159 / 0 FAIL   (click sessions fixed by bug #15)
+  variable-length rename           263 / 263      (MIDI fixed by size-driven rename_track)
+  set_tempo_map / set_meter_map    282 / 282      (MIDI fixed by reindex fallback)
+  replace_tempo_map/meter_map      already 26/26  (own size-driven splice)
+  trackless validate() false-pos   0 / 19         (count-driven name walk)
+
+Bugs closed this session: #14 (name-entry stride 23/21; 2 sites: body_synth + eos_validator),
+#15 (<ALL> count = entry count), validator trackless count-driven, reindex_after_resize MIDI.
+Capabilities added: variable-length duplicate_track; rename_track/tempo/meter on MIDI sessions.
+
+## REMAINING FRONTIER (next builds, roughly by value)
+  1. Non-audio track duplicate/remove: MIDI, aux 0x261E, bus/master. The biggest capability gap
+     (remove_track/duplicate_track are audio-only). Aux is the 0x261E subtree (no 0x1014/0x1052
+     lane; 0x2613 holds plugin state not clips); MIDI tracks have no 0x1014 the same way. Multi-
+     turn build; validate against a track-edit backup pair.
+  2. Bug #16: synth-click emits a malformed segmented <ALL>; PT authors flat range(entries).
+     Contained synth-fidelity fix (ground truth in hand); risk is the PT-confirmed synth path.
+  3. add-clip with NEW audio (needs 0x2628 geometry write; PT-gated).
+  4. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
