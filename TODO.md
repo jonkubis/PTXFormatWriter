@@ -737,3 +737,21 @@ to the size-driven walk (_size_driven_blocks) is the robust fix and would also g
   4. add-clip with NEW audio (needs the 0x2628 geometry write; PT-gated).
   5. Replace tempo/meter map on arbitrary sessions (set_*_map still use the scan parser).
   6. PT verification of verify_1..verify_11 (user-gated; PT is the only oracle).
+
+## CONFIRMED — tempo/meter map REPLACE works on arbitrary sessions (278/282)
+Corpus sweep: set_tempo_map AND set_meter_map replace -> 278 ok / 4 ValueError, each result
+reading back the new map AND validating clean. The memory's "set_*_map don't work on arbitrary
+sessions" was STALE -- it was the trackless validator false-positive (now fixed) masking success.
+
+The 4 failures are the SAME MIDI-clip sessions as rename (one clip two notes clean / one renamed
+midi track and clip / two midi tracks one note each / two separate midi clips same track), all
+`bad element tag`. ROOT CAUSE TRACED: `final_index.reindex_after_resize` calls
+`final_index.offset_holes`, which is SCAN-based (parse_records over scan zmarks) and raises on
+MIDI-clip sessions -- the same undercount that `rename_track` had before its size-driven port.
+
+## NEXT: port final_index.offset_holes to size-driven zmarks
+Shared infra -- fixes the last 4 MIDI cases for tempo/meter/marker writers (all route through
+reindex_after_resize) at once. Must preserve the 5-tuple (abs_pos, value, type, rank, kind) shape
+(reindex_after_resize resolves by (type,rank) in the resized layout, NOT a bisect shift). Frame
+the index with size-driven zmarks (as body_synth._index_offset_holes does). VALIDATE against the
+full synth path (reindex_after_resize is on the synth-insert path too) + the 278 corpus replaces.
