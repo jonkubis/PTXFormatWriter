@@ -5047,6 +5047,31 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     return _adjust_track_count(out, -1)
 
 
+def _unique_same_length_name(length: int, taken: "set[str]") -> str:
+    """A printable-ASCII track name of EXACTLY `length` bytes that is not in `taken`.
+
+    Used as an intermediate placeholder for a variable-length duplicate: the same-length
+    duplicate path runs byte-for-byte as usual, then `rename_track` changes the placeholder to
+    the real (any-length) name. With `length >= 1` and a 36-char alphabet the single-char-repeat
+    sweep (36 candidates) effectively always finds one; the product fallback covers the
+    pathological case where every simple name is already used."""
+    import itertools
+    import string
+    if length <= 0:
+        raise ValueError("track name must be at least one byte")
+    alphabet = string.ascii_uppercase + string.digits
+    for ch in alphabet:                       # "QQ", "RR", ... — readable, almost always free
+        cand = ch * length
+        if cand not in taken:
+            return cand
+    head = min(length, 5)
+    for combo in itertools.product(alphabet, repeat=head):
+        cand = "".join(combo) + alphabet[0] * (length - head)
+        if cand not in taken:
+            return cand
+    raise ValueError("could not find a unique same-length placeholder name")
+
+
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
     `remove_track`, validated by round-trip byte-identity (`duplicate_track` then
@@ -5065,15 +5090,24 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     in place), via `final_index.canonicalize_after_track_add`. `remove_track` is its exact
     inverse, so the round-trip stays byte-exact.
 
-    v1 constraints: `new_name` must be the SAME LENGTH as `source_track`; audio tracks only;
-    unique source name; cannot duplicate the last track in the name table (short-trailer entry
-    — rename/reorder first). Validated so the per-track block delta equals a real session's,
-    the EOS simulator (`validate`) is clean, rc=0, the round-trip (`duplicate_track` then
-    `remove_track(new_name)`) is byte-identical, the index equals synth(N+1), and every other
-    block is byte-intact."""
+    A DIFFERENT-LENGTH `new_name` is handled by duplicating under a same-length placeholder and
+    then `rename_track`-ing to the real name (which grows/shrinks the containing blocks and
+    reindexes for the size delta). The same-length path below is left byte-for-byte unchanged, so
+    the PT-confirmed synth oracles (stereo/mono/mixed duplicate byte-identical to synth(N+1)) are
+    untouched. The variable-length path inherits `rename_track`'s constraints (it currently uses
+    the scan parser, which stumbles on some MIDI-clip sessions).
+
+    Constraints: audio tracks only; unique source name; cannot duplicate the last track in the
+    name table (short-trailer entry — rename/reorder first). Validated so the per-track block
+    delta equals a real session's, the EOS simulator (`validate`) is clean, rc=0, the round-trip
+    (`duplicate_track` then `remove_track(new_name)`) is byte-identical, and every other block is
+    byte-intact."""
     import struct
     if len(new_name) != len(source_track):
-        raise ValueError("v1: new_name must be the same length as source_track")
+        taken = {t.name for t in track_types(data)} | {source_track, new_name}
+        placeholder = _unique_same_length_name(len(source_track), taken)
+        return rename_track(duplicate_track(data, source_track, placeholder),
+                            placeholder, new_name)
     # the source's 0-based display row (the copy is spliced in right after it, so the copy's
     # row is source_row + 1); captured before any edit for the closing BODY renumber.
     _names_before = [t.name for t in track_types(data)]

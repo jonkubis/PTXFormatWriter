@@ -1265,6 +1265,30 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(data[z:e], back[z:e], f"block at {z} changed across the round-trip")
         self.assertEqual(BS.validate(back), [])
 
+    def test_duplicate_with_a_different_length_name(self):
+        """duplicate_track no longer requires new_name to match the source length. A longer OR
+        shorter name duplicates under a same-length placeholder and then rename_track absorbs the
+        size delta. The copy must exist under the real name, validate clean, and remove_track must
+        still invert it byte-exact -- for both a longer and a shorter target name."""
+        data = self._non_synth_session()
+        src = "Audio 2"                       # 7 bytes
+        for new in ("Audio 2 with a much longer name", "A2"):   # longer, then shorter
+            self.assertNotEqual(len(new), len(src))
+            dup = BS.duplicate_track(data, src, new)
+            self.assertIn(new, [t.name for t in BS.track_types(dup)],
+                          msg=f"the copy must carry the real name {new!r}")
+            self.assertEqual(BS.validate(dup), [])
+            self.assertEqual(BS.remove_track(dup, new), data,
+                             msg=f"duplicate->remove must invert byte-exact for {new!r}")
+
+    def test_same_length_duplicate_is_unchanged(self):
+        """The same-length path must be byte-for-byte what it was before the variable-length
+        branch existed (the PT-confirmed synth oracles depend on it)."""
+        data = self._non_synth_session()
+        dup = BS.duplicate_track(data, "Audio 2", "Audio X")   # same length -> fast path
+        self.assertEqual(BS.remove_track(dup, "Audio X"), data)
+        self.assertEqual(BS.validate(dup), [])
+
 
 class NameTablePreambleTests(unittest.TestCase):
     """The 0x2519 preamble has two lengths, selected by the u32 flag at payload+0x0A (0 = base,
