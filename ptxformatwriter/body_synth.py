@@ -4183,15 +4183,34 @@ _TRACK_COUNT_CONTAINER = 0x1015
 
 
 def _adjust_track_count(data: bytes, delta: int) -> bytes:
-    """Add `delta` to the `0x1015` track-count `u32` (payload+0), size-neutral.
+    """Add `delta` to the `0x1015` AUDIO-track-count `u32` (payload+0), size-neutral.
 
-    Used instead of recomputing: the field is not the container's 0x1014 child count (MIDI tracks
-    have no 0x1014), and it does not universally equal `len(track_types())` either, so any
-    recompute risks corrupting a session whose convention we have not pinned down. Adjusting by
-    the edit's own delta preserves the file's existing meaning."""
+    0x1015 counts the session's AUDIO tracks (its 0x1014 entries), NOT all tracks -- verified on
+    166 PT sessions. Callers pass delta only for an AUDIO edit; a MIDI/click edit passes 0 (its
+    count lives in 0x1058, see `_adjust_midi_list_count`). Adjust-by-delta, never recompute, so a
+    session whose stored value is off (e.g. our synth's midi9) is preserved rather than 'fixed'
+    into a round-trip mismatch."""
     out = bytearray(data)
     for z, _e, c in _size_driven_blocks(data):
         if c == _TRACK_COUNT_CONTAINER:
+            cur = int.from_bytes(out[z + 9 : z + 13], "little")
+            out[z + 9 : z + 13] = max(0, cur + delta).to_bytes(4, "little")
+            break
+    return bytes(out)
+
+
+def _adjust_midi_list_count(data: bytes, delta: int) -> bytes:
+    """Add `delta` to the `0x1058` MIDI-track-list count `u32` (payload+0), size-neutral.
+
+    0x1058 is the MIDI analog of 0x1015: its count == the number of 0x1057 MIDI track-list entries
+    it holds (PT-verified: 1 MIDI -> 1, 2 MIDI -> 2). A MIDI add/remove must move it, or the dup
+    leaves it stale (the count says N while the container holds N+1 0x1057 entries) -- invisible to
+    the byte-exact round-trip. Target the 0x1058 that actually holds 0x1057 entries (a session also
+    carries a tiny empty 0x1058). Adjust-by-delta for the same reason as 0x1015."""
+    out = bytearray(data)
+    bl = _size_driven_blocks(data)
+    for z, e, c in bl:
+        if c == 0x1058 and any(z < zz < e and cc == 0x1057 for zz, _ee, cc in bl):
             cur = int.from_bytes(out[z + 9 : z + 13], "little")
             out[z + 9 : z + 13] = max(0, cur + delta).to_bytes(4, "little")
             break
@@ -5055,7 +5074,11 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # MIDI/click track leaves it unchanged. (midi9's 0x1015 = 9 with zero audio is a synth
     # artifact, which is what the old "0x1015 = all tracks" reading was mistakenly based on.)
     audio_edit = any(zct.get(z) == 0x1014 for z in ident)
-    return _adjust_track_count(out, -1 if audio_edit else 0)
+    midi_edit = any(zct.get(z) == 0x1057 for z in ident)
+    out = _adjust_track_count(out, -1 if audio_edit else 0)    # 0x1015 = audio count
+    if midi_edit:
+        out = _adjust_midi_list_count(out, -1)                 # 0x1058 = MIDI count
+    return out
 
 
 def _unique_same_length_name(length: int, taken: "set[str]") -> str:
@@ -5349,7 +5372,11 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # 0x1015 counts AUDIO tracks (its 0x1014 entries), NOT all tracks (166 PT sessions) -- so
     # bump it only when the duplicated track is audio; a MIDI/click copy leaves it unchanged.
     audio_edit = any(zct.get(z) == 0x1014 for z in ident)
-    return _adjust_track_count(out, 1 if audio_edit else 0)
+    midi_edit = any(zct.get(z) == 0x1057 for z in ident)
+    out = _adjust_track_count(out, 1 if audio_edit else 0)     # 0x1015 = audio count
+    if midi_edit:
+        out = _adjust_midi_list_count(out, 1)                  # 0x1058 = MIDI count
+    return out
 
 
 def _track_1014_rows(data: bytes) -> "list[tuple[str, int, list[int]]]":

@@ -1344,6 +1344,32 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(audio_count(BS.remove_track(data, "MIDI 2")), 0,
                          msg="removing a MIDI track must NOT change the audio-count 0x1015")
 
+    @unittest.skipUnless(
+        (ROOT / "control_files" / "various" / "two midi tracks one note each.ptx").exists(),
+        "MIDI-clip control not present")
+    def test_midi_dup_bumps_the_midi_list_count_0x1058(self):
+        """REGRESSION (bug #18): 0x1058 is the MIDI track-list count (== its 0x1057 entries;
+        PT-verified 1 MIDI -> 1, 2 MIDI -> 2). A MIDI copy must bump it so the count stays
+        consistent with the entries -- the round-trip HID a stale count (dup left it while adding a
+        0x1057). Verified on a PT-authored session where 0x1058 was consistent to begin with."""
+        data = _load_path(ROOT / "control_files" / "various" / "two midi tracks one note each.ptx")
+
+        def midi_list(d):
+            bl = BS._size_driven_blocks(d)
+            for z, e, c in bl:
+                if c == 0x1058 and any(z < zz < e and cc == 0x1057 for zz, _ee, cc in bl):
+                    stored = int.from_bytes(d[z + 9 : z + 13], "little")
+                    entries = sum(1 for zz, _ee, cc in bl if z < zz < e and cc == 0x1057)
+                    return stored, entries
+            return None
+
+        self.assertEqual(midi_list(data), (2, 2), msg="PT control: 0x1058 = 2 for 2 MIDI tracks")
+        dup = BS.duplicate_track(data, "MIDI 1", "MZ")
+        stored, entries = midi_list(dup)
+        self.assertEqual(entries, 3, msg="dup added a 0x1057 MIDI entry")
+        self.assertEqual(stored, 3, msg="0x1058 count must track its 0x1057 entries after the dup")
+        self.assertEqual(BS.remove_track(dup, "MZ"), data, msg="round-trip stays byte-exact")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
