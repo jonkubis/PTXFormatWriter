@@ -2729,3 +2729,52 @@ looks exactly like a corrupt/misframed name table. Two consequences we hit in pr
 
 Writers must therefore resolve the shift from `+0x0A` before touching either field
 (`body_synth._name_table_shift`, `eos_validator.PREAMBLE_FLAG_OFF`).
+
+### Per-track records: the three kind variants, and the two track-list counts
+
+A session's tracks are **sibling records under the single `0x2624` track list**, one per track,
+in **display order**. The record's content type identifies the track kind, and each kind has a
+different (or absent) entry in a kind-specific *track-list* container:
+
+| kind | per-track record | track-list entry | list container | has `0x261B`? |
+|---|---|---|---|---|
+| audio (mono/stereo) | `0x261C` | `0x1014` | `0x1015` | yes (inside `0x261C`) |
+| MIDI | `0x2620` | `0x1057` | `0x1058` | no |
+| click / aux | `0x261E` | *(none)* | — | yes (inside `0x261E`) |
+
+Every record nests exactly one `0x102D`, whose `0x2619` carries the track's **name + identity
+GUID**. Note a MIDI track's `0x1057` GUID is *not* its identity GUID (the two differ), so a
+name→GUID→subtree walk seeded from `0x1057` will not reach the `0x2620`; seed from the name table
+(`0x251A`/`0x210B` carry the identity GUID) or match by name.
+
+**The two counts are per-kind, not totals** — this is easy to get backwards:
+
+- **`0x1015` (payload+0) counts AUDIO tracks only** — it equals the number of `0x1014` entries.
+  Verified on 166 PT-authored sessions: every MIDI/click-bearing one stores the audio count, never
+  the total (`multiple track types`, 2 audio + 1 MIDI → `0x1015` = 2; a 0-audio 2-MIDI session →
+  0). Adding a MIDI or click track must leave it **unchanged**.
+- **`0x1058` (payload+0) counts MIDI tracks** — it equals the number of `0x1057` entries it holds
+  (1 MIDI → 1, 2 MIDI → 2). A session also carries a second, tiny empty `0x1058`; the count lives
+  on the instance that actually holds the entries.
+- `0x2624` (payload+0) is the **total** track count (all kinds), matching its record children.
+
+### `0x2589` view chains — one per display row (`ordinals == range(name entries)`)
+
+Each `0x2589` overview/view-chain block stores its own **display row** as a `u16` at `zmark+9`.
+The set of those ordinals is exactly `range(N)` where **N = the number of `0x2519` inline name
+entries** — verified on 162/162 PT-authored corpus sessions, with no exceptions.
+
+The basis matters: it is the **name-table entry count**, *not* `track_types()`. A click track has
+a name entry and a display row but is not a reported track, so a `track_types`-based 1:1 check
+fails on any click-bearing session (`3 stereo plus click`: 4 entries, 4 chains, 3 reported tracks)
+and wrongly concludes the chains cannot be attributed.
+
+**Name-entry order is display order.** Confirmed against the authoritative `0x2624` playlist
+order: in `multiple track types` the entries `[Click 1, MIDI 1, Audio 1, Audio 2]` line up
+position-for-position with the records `[0x261E, 0x2620, 0x261C, 0x261C]`.
+
+Consequences for editing: inserting a track at display row `R+1` means the new chain takes
+ordinal `R+1` and every existing chain with an ordinal `> R` shifts up one; removing row `R` is
+the inverse. A copy that gets no chain leaves `N+1` name entries with only `N` chains, breaking
+the invariant — and because a duplicate→remove pair breaks it symmetrically, a byte-exact
+round-trip will not detect the violation.
