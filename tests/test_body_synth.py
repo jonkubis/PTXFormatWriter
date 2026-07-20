@@ -1410,6 +1410,47 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(BS.remove_track(dup, "AZZZZZZ"), data,
                          msg="remove must invert the chain copy + ordinal shift byte-exact")
 
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/3 stereo plus click.ptx")),
+                         "click control not present")
+    def test_duplicate_the_last_name_entry(self):
+        """The LAST 0x2519 entry uses the SHORT 21-byte trailer because its `next_kind` u16 is
+        absent -- there is no next entry. Duplicating it used to raise; it now mirrors
+        remove_track's last-entry truncation: the source is PROMOTED to the 23-byte form carrying
+        `kind(copy) << 8`, and the copy becomes the new last in the short form with ordinal N+1.
+
+        The click is always the last entry, so this is also what unblocked duplicating a click
+        (0x261E) track."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/3 stereo plus click.ptx"))))
+
+        def entries(d):
+            bl = BS._size_driven_blocks(d)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            ents = BS._inline_name_entries(d, z, e, bl)
+            kids = [zz for zz, _e, _c in bl if z < zz < e]
+            region_end = min(kids) if kids else e
+            out = []
+            for nm, npos in ents:
+                full = npos - 4 + 4 + len(nm) + 23
+                out.append((nm, min(full, region_end) - (npos - 4)))
+            return out, region_end
+
+        before, _ = entries(data)
+        self.assertEqual(before[-1][0], "Click 1", msg="the click is the last entry")
+        self.assertEqual(before[-1][1], 4 + len("Click 1") + 21, msg="...in the SHORT form")
+
+        dup = BS.duplicate_track(data, "Click 1", "ZZZZZZZ")
+        after, _ = entries(dup)
+        self.assertEqual([n for n, _s in after],
+                         ["Audio 1", "Audio 2", "Audio 3", "Click 1", "ZZZZZZZ"])
+        # the source was promoted to the FULL form, the copy is the new SHORT last
+        self.assertEqual(after[-2][1], 4 + len("Click 1") + 23,
+                         msg="the old last entry must be promoted to the 23-byte form")
+        self.assertEqual(after[-1][1], 4 + len("ZZZZZZZ") + 21,
+                         msg="the copy becomes the new last, in the short form")
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(BS.remove_track(dup, "ZZZZZZZ"), data,
+                         msg="remove must invert the promotion byte-exact")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

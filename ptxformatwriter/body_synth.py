@@ -5208,6 +5208,7 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     ident: "set[int]" = set()
     seed: "set[bytes]" = set()
     nt_ranges: "list[tuple[int, int]]" = []
+    _last_entry_dup: "tuple[int, int] | None" = None   # (start, end) when the source is LAST
     pos = 0
     while True:
         j = data.find(sb, pos)
@@ -5229,13 +5230,16 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                     span = _name_entry_span(data, j, bl)
                     if span:
                         st, en = span
-                        # the LAST name entry has a SHORT (21-byte) trailer; copying it would
-                        # leave the source needing a full trailer it lacks -> misframed table.
+                        # The LAST entry uses the SHORT (21-byte) trailer because its `next_kind`
+                        # u16 is absent -- there is no next entry (see the spec). Duplicating it
+                        # is the mirror of remove_track's last-entry truncation: the source stops
+                        # being last, so it is PROMOTED to the 23-byte form by inserting
+                        # `kind(copy) << 8` (the copy has the source's kind) before its pad byte,
+                        # and the copy becomes the new last in the short form with ordinal N+1.
                         if en - st < 4 + len(sb) + _NAME_ENTRY_SUFFIX:
-                            raise ValueError(
-                                "v1: cannot duplicate the last track in the name table "
-                                "(short-trailer entry); rename/reorder first")
-                        nt_ranges.append((st, en))
+                            _last_entry_dup = (st, en)
+                        else:
+                            nt_ranges.append((st, en))
         pos = j + 1
     pl_ranges: "list[tuple[int, int]]" = []
     for z, e, c in bl:
@@ -5311,6 +5315,23 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                    if not any(zz < z and zend[zz] >= zend[z] for zz in ident if zz != z))
     inserts = [(e, transform(data[z:e]), z) for z, e in units]
     inserts += [(b, transform(data[a:b]), None) for a, b in nt_ranges]
+
+    # Duplicating the LAST name entry (see the 0x2519 trailer section of the spec): the source is
+    # promoted to the 23-byte form by inserting its `next_kind` u16 -- the kind of the entry that
+    # now follows it, i.e. the copy, i.e. the source's own kind -- immediately before its pad byte,
+    # and the copy is appended as the new last in the short 21-byte form with ordinal N+1.
+    if _last_entry_dup is not None:
+        _st, _en = _last_entry_dup
+        _kind = {0x261C: 0, 0x2620: 1, 0x261E: 2}.get(
+            next((c for z, e, c in bl
+                  if (z, e) in [(pz, pe) for pz, pe in pl_ranges]), 0x261C), 0)
+        inserts.append((_en - 1, (_kind << 8).to_bytes(2, "little"), None))
+        _nents = len(_inline_name_entries(data, _nt[0][0], _nt[0][1], bl)) if _nt else 0
+        _cp = bytearray(transform(data[_st:_en]))
+        _op = 4 + len(nn) + 18                      # <len><name><flags4><zeros2><tag4><guid8>
+        if _op + 2 <= len(_cp) and _nents:
+            _cp[_op : _op + 2] = (_nents + 1).to_bytes(2, "little")
+        inserts.append((_en, bytes(_cp), None))
 
     # ---- INLINE per-track inserts (inverse of remove_track's <ALL> splices) ----
     # Append one u16 == the list's next index before each 0x202a/0x202b <ALL> trailer, so the
