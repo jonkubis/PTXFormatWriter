@@ -929,3 +929,29 @@ click/aux (0x261E), the LAST name entry, and single-track sessions.
      All three are the same shape: our writer does not reproduce a PT invariant we have now pinned.
   2. add-clip with NEW audio (0x2628 geometry, PT-gated).
   3. PT verification of the whole in-place edit suite (user-gated; PT remains the only real oracle).
+
+## CORRECTION + precise diagnosis — the synth writer is CLEANER than I claimed
+I listed three synth-path writer bugs from OLD fixtures. Audited the LIVE synth instead of
+assuming the fixtures still represent it:
+
+  synth stereo x8 / mono x8 (audio-only)  next_kind OK, 0x2589 ordinals OK, 0x1015 == audio count OK
+  synth mixed [mono,MIDI,stereo]          next_kind OK, 0x1015 == audio count OK,
+                                          **0x2589 ordinals WRONG** -> [1, 0, 1] for 3 entries
+
+So the audio-only synth is PT-faithful on every invariant we have pinned, and the live mixed synth
+gets 0x1015/next_kind right too. My "pure-MIDI synth writes 0x1015 = track count" note came from
+`midi9.ptx`, an OLD fixture built by an earlier version — NOT the current writer. (Same mistake
+shape as the 0x1015 memory error: reading an old artifact as the current convention.)
+
+THE ONE LIVE SYNTH BUG — mixed audio+MIDI 0x2589 ordinals:
+`grow_one_midi_track` does `append_after(_by_type(ptf, 0x2589)[-1], unit["b2589"])`
+(body_synth.py ~L621) — it appends a COPY of the template's chain and never restamps its ordinal,
+so the new MIDI chain inherits the template's display row and collides ([1,0,1] for 3 entries).
+FIX SHAPE: restamp the appended chain to the track's DISPLAY row (== its 0x2519 name-entry index,
+per the spec's 0x2589 section). NOTE a plain file-order `enumerate()` restamp (what
+`_renumber_body_after_*` does) is WRONG here: the chain is appended LAST while the MIDI track sits
+mid-display, so file order != display order. Must map each chain to its entry via the display
+order, then assign 0..N-1.
+IMPACT when fixed: those 13 corpus sessions stop being skipped by view-chain attribution, so
+in-place editing gains full coverage of our own generated sessions. PT already tolerates the
+duplicates (the affected sessions are PT-confirmed to open), so this is fidelity, not breakage.
