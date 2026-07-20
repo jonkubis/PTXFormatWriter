@@ -2935,3 +2935,34 @@ artifact, not two distinct oddities.
 **Rule for any tool that enumerates content types:** skip the header region (start the walk at
 offset 31, i.e. after the pointer record) or explicitly ignore the block at offset 20. Otherwise
 every session invents a fresh content-type and coverage statistics become meaningless.
+
+### `0x2582`–`0x2586` — the MIDI clip/note edit-group family
+
+Present in exactly the 19 corpus sessions that contain MIDI **note/clip content**, and **absent
+from every MIDI session whose tracks are empty** — `one midi note` → 1, `two midi notes bar1 bar2`
+→ 1, but `one midi track no clips`, `two midi tracks no clips` and `midi9` (9 empty MIDI tracks) →
+0. So the family is tied to MIDI clip content, not to MIDI tracks (PROVEN by that correlation;
+the precise role of each member is INFERRED).
+
+Nesting (read from the size-driven walk):
+
+```
+0x2551  (edit group)
+└── 0x2586   indexed, ~1082 B   children: 0x2584, 0x2552, 0x2011
+    └── 0x2584   indexed, ~635 B   children: 0x2552, 0x2011, 0x2582
+        ├── 0x2583   indexed, ~438 B   children: 0x2581, 0x2056, 0x2066
+        │   └── 0x2585   LEAF, 17 B   payload `00 00 01 01 01 01 ff ff`
+        └── 0x2582   ~131 B   child: 0x258C
+            payload begins `01 96 00 00 00 86 00 00 00 01 00 01`
+```
+
+`0x2583`, `0x2584` and `0x2586` are master-indexed (so a writer must register them); `0x2582` and
+`0x2585` are not. Counts per session in the corpus: `0x2583` 41, `0x2585` 41, `0x2582` 22,
+`0x2584` 19, `0x2586` 19 — i.e. one `0x2584`/`0x2586` per session, with `0x2583`/`0x2585`
+multiplying with the number of note/clip objects.
+
+### `0x4827` — reserved marker under `0x2077`
+
+37 bytes, all-zero payload, not indexed, parent `0x2077`; seen in 2 corpus sessions (7 instances).
+Same shape as the zero-valued reserved-marker family above — nothing in the corpus gives it a
+non-zero value, so its purpose is UNPROVEN.
