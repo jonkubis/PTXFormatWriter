@@ -902,3 +902,30 @@ hypothesis. Two of my three "blockers" for click dup dissolved on inspection —
 The session's format findings are now in `docs/ptx-format-spec.md`, not just this TODO: the three
 per-track record variants + their kind-specific track-list entries/counts, and the 0x2589
 `ordinals == range(name entries)` invariant with the name-entry-order == display-order proof.
+
+## TRACK-EDIT MATRIX COMPLETE (commit 2ffab52) — last-entry dup lifted, click/aux unblocked
+The "cannot duplicate the last track" limitation is gone, because the format question behind it is
+ANSWERED (see the spec's 0x2519 trailer section): a full entry ends `<ordinal:u16><next_kind:u16>
+<pad>` with next_kind == (kind of NEXT entry) << 8 (audio 0x0000 / MIDI 0x0100 / click 0x0200),
+verified on 4321 corpus entries — so the LAST entry is short simply because there is no next entry.
+Duplicating it promotes the source to the 23-byte form (next_kind = kind(copy) << 8) and appends
+the copy as the new short last with ordinal N+1 — the exact mirror of remove's truncation.
+
+CORPUS SWEEP, before -> after this turn's two fixes (#19 + last-entry):
+  duplicate->remove round-trips   166 -> 263   (the 97 that used to raise now all work, 0 failures)
+  0x2589 invariant holds          153 -> 250
+  raised(limitation)               97 -> 0
+  orig_not_1:1 (our synth output)  13 -> 13    (still correctly skipped)
+
+Now supported for BOTH duplicate and remove, as perfect inverses: audio (mono/stereo), MIDI,
+click/aux (0x261E), the LAST name entry, and single-track sessions.
+
+## Remaining frontier
+  1. SYNTH-PATH writer bugs (our OWN output; uncaught because the synth oracles are audio-only):
+     - pure-MIDI synth: 0x1015 = track count (midi9 -> 9, should be 0 audio); 0x1058 off by one.
+     - mixed audio+MIDI synth: DUPLICATE 0x2589 ordinals ([1,0,1,2,3,4]) -> these 13 sessions are
+       the ones view-chain attribution must skip. Fixing this extends #19's coverage to them.
+     - name-entry `next_kind` written wrong in 13 entries of our synthesized files.
+     All three are the same shape: our writer does not reproduce a PT invariant we have now pinned.
+  2. add-clip with NEW audio (0x2628 geometry, PT-gated).
+  3. PT verification of the whole in-place edit suite (user-gated; PT remains the only real oracle).
