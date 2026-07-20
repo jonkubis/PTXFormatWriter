@@ -9,8 +9,9 @@ Measured with the **size-driven block walk** (`body_synth._size_driven_blocks`) 
 > **Correction (2026-07-20).** This file previously claimed *280/280 = 100.000%* over a
 > 26-session corpus. That count came from the older `0x5A`-scan enumeration, which
 > **undercounts real sessions** (see spec §3). Re-measuring with the size-driven walk over
-> the full corpus surfaces 469 types, not 280 — including ~0 that occur in EVERY session
-> yet appear in neither this tracker nor the spec. They are unambiguously real: correct
+> the full corpus surfaces 469 types, not 280 — including 20 that occurred in EVERY session
+> yet appeared in neither this tracker nor the spec (those 20 have since been documented; see the
+> session-scaffold sections of the spec). They are unambiguously real: correct
 > `5A` framing, sane declared sizes, a matching content-type word, real parents, and
 > several are master-indexed. The format is **not** yet fully documented.
 
