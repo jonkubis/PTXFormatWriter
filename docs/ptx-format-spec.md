@@ -2778,3 +2778,31 @@ ordinal `R+1` and every existing chain with an ordinal `> R` shifts up one; remo
 the inverse. A copy that gets no chain leaves `N+1` name entries with only `N` chains, breaking
 the invariant — and because a duplicate→remove pair breaks it symmetrically, a byte-exact
 round-trip will not detect the violation.
+
+### `0x2519` inline name entry — the trailer, and why the LAST entry is 2 bytes shorter
+
+An inline entry is `<name_len:u32> <name> <trailer>`. The trailer is:
+
+```
+<flags:u32> <2 zero bytes> <2A 00 00 00 tag> <GUID:8> <ordinal:u16> <next_kind:u16> <pad:1>   = 23 bytes
+<flags:u32> <2 zero bytes> <2A 00 00 00 tag> <GUID:8> <ordinal:u16>                 <pad:1>   = 21 bytes  (LAST entry)
+```
+
+- **`ordinal`** is the entry's **1-based index** in the table (`Audio 1`→1, `Audio 2`→2, …).
+- **`next_kind`** is `(kind of the NEXT entry) << 8` — `0x0000` audio, `0x0100` MIDI, `0x0200`
+  click. Verified on **4321 entries** across the corpus; the only exceptions are our own
+  synthesized files (13 entries), i.e. a writer bug on our side, not a format variant.
+
+**This is why the final entry uses the short 21-byte form: there is no next entry, so the
+`next_kind` field is simply absent.** Treating the last entry as 23 bytes over-splices 2 bytes and
+misframes the table → Pro Tools "end of stream". (Note also that the *stride* is not a constant
+even mid-table — see the 21-vs-23 caveat under `_next_name_entry`: at least one PT session carries
+a short entry at a non-final index.)
+
+Consequences for editing:
+
+- **Removing the last entry** strands the new final entry with a `next_kind` it should not have —
+  it must be truncated to the 21-byte form.
+- **Duplicating the last entry** is the mirror: the source stops being last, so it must be
+  *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
+  kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
