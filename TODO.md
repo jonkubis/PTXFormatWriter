@@ -883,3 +883,22 @@ the 13 whose ORIGINAL violates it (our synth output) stay safely skipped. 183 te
      ([1,0,1,2,3,4]) — which is why 13 corpus sessions can't be view-chain-attributed at all.
      Fixing this would also let #19's attribution cover those 13.
   3. add-clip with NEW audio (0x2628 geometry, PT-gated); PT verification of all edits (user-gated).
+
+## CORRECTION — the canonicalize `else 0x261C` hardcode is BENIGN, not a landmine
+I twice listed `canonicalize_after_track_add`'s `child_type = 0x251A if is_lane else 0x261C`
+(final_index.py:432) as a click/aux-dup blocker "ranking a 0x261E element as 1<<30". Checked it
+instead of repeating it: both `r_orig` and `r_copy` are ranked with the SAME child_type, so a wrong
+type gives BOTH the `1 << 30` default, and Python's stable `sorted()` therefore preserves
+`(r_orig, r_copy)` — the identical order the correct rank produces. No misbehaviour, and MIDI dup
+empirically round-trips byte-exact with the invariant holding. "Fixing" it would be speculative and
+could CHANGE working output, so it stays. **Click/aux duplicate has ONE real blocker left: the
+click is always the last 0x2519 entry (short 21-byte trailer).**
+
+Lesson (small, but the same shape as the big ones): an alarming-looking hardcode is still a
+hypothesis. Two of my three "blockers" for click dup dissolved on inspection — one cleared by
+#17's audio-gate, one benign all along.
+
+## Spec updated (commit 574c461)
+The session's format findings are now in `docs/ptx-format-spec.md`, not just this TODO: the three
+per-track record variants + their kind-specific track-list entries/counts, and the 0x2589
+`ordinals == range(name entries)` invariant with the name-entry-order == display-order proof.
