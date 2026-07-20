@@ -4977,6 +4977,23 @@ def remove_track(data: bytes, track_name: str) -> bytes:
                     ident.add(z2589)
                     break
 
+    # Off the synth path, the EXACT INVERSE of duplicate_track's chain handling: attribute against
+    # the NAME-TABLE entries (display rows -- a click has one, `track_types` does not report it),
+    # drop the removed track's chain, and shift every chain BELOW it up one so the ordinals stay
+    # `range(name entries)`. See duplicate_track for why the track_types basis was unsound and why
+    # skipping (the old behaviour) silently violated that PT invariant.
+    _rm_view_row: "int | None" = None
+    _nt_b = [(z, e) for z, e, c in bl if c == 0x2519]
+    if s2589 and pl_ranges and not _do_renumber and _nt_b:
+        ents = [n for n, _p in _inline_name_entries(data, _nt_b[0][0], _nt_b[0][1], bl)]
+        if sorted(o for _z, o in s2589) == list(range(len(ents))) and track_name in ents:
+            row = ents.index(track_name)
+            for z2589, ordinal in s2589:
+                if ordinal == row:
+                    ident.add(z2589)
+                    _rm_view_row = row
+                    break
+
     # ---- INLINE per-track splices (byte-ranges added to nt_ranges, NOT whole blocks) ----
     # (a) 0x202a/0x202b <ALL> ordinal lists: drop the LAST 2-byte ordinal of each (identity
     #     means "last" == the removed rank). Operate on the 0x202b container so both nested
@@ -5027,6 +5044,14 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         body += data[prev:z]
         prev = e
     body += data[prev : ref.start]
+    # Inverse of duplicate_track's chain fixup: with the removed track's chain gone, every chain
+    # BELOW its display row moves up one, keeping ordinals == range(name entries).
+    if _rm_view_row is not None:
+        for _z2589, _ordv in s2589:
+            if _ordv > _rm_view_row:
+                _nz = shift(_z2589)
+                if _nz is not None:
+                    body[_nz + 9 : _nz + 11] = (_ordv - 1).to_bytes(2, "little")
     for z, e, _c in bl:                                  # shrink enclosing containers
         if z in ident:
             continue
@@ -5247,6 +5272,26 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                     ident.add(z2589)
                     break
 
+    # OFF the synth path the chain is attributed against the NAME-TABLE entries, not
+    # `track_types`: the ordinals are display rows, and a click has a row but no track_types
+    # entry, which is exactly why the track_types basis reported "no 1:1" and skipped. The
+    # name-entry basis IS sound -- on 162/162 PT-authored corpus sessions the chain ordinals are
+    # exactly `range(len(name entries))`. Skipping left the copy with NO view chain (N+1 entries,
+    # N chains), silently violating that invariant; the byte-exact round-trip hid it because
+    # remove skipped symmetrically. `_dup_view_chain` carries (source chain zmark, its row) to the
+    # post-splice ordinal fixup below.
+    _dup_view_chain: "tuple[int, int] | None" = None
+    _nt = [(z, e) for z, e, c in bl if c == 0x2519]
+    if s2589 and pl_ranges and not _do_renumber and _nt:
+        ents = [n for n, _p in _inline_name_entries(data, _nt[0][0], _nt[0][1], bl)]
+        if sorted(o for _z, o in s2589) == list(range(len(ents))) and source_track in ents:
+            row = ents.index(source_track)
+            for z2589, ordinal in s2589:
+                if ordinal == row:
+                    ident.add(z2589)
+                    _dup_view_chain = (z2589, row)
+                    break
+
     # fresh per-channel GUIDs (deterministic, guaranteed absent)
     gmap: "dict[bytes, bytes]" = {}
     for g in seed:
@@ -5301,6 +5346,21 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
             if z <= src_block < e:
                 return unit_copy[z] + (src_block - z)
         return None
+
+    # Off-synth view-chain ordinals: the copy sits at display row R+1 (the name entry is spliced
+    # directly after the source's), so the verbatim copy -- which still carries the source's row R
+    # -- is restamped R+1 and every chain BELOW the source shifts down one. Keeps the PT invariant
+    # `chain ordinals == range(name entries)` that a real session always satisfies. remove_track
+    # applies the exact inverse, so dup->remove stays byte-exact.
+    if _dup_view_chain is not None:
+        _src2589, _row = _dup_view_chain
+        _co = copy_off(_src2589)
+        if _co is not None:
+            body[_co + 9 : _co + 11] = (_row + 1).to_bytes(2, "little")
+            for _z2589, _ordv in s2589:
+                if _ordv > _row:
+                    _nz = shift(_z2589)
+                    body[_nz + 9 : _nz + 11] = (_ordv + 1).to_bytes(2, "little")
 
     for z, e, _c in bl:                              # grow enclosing containers
         if z in ident:

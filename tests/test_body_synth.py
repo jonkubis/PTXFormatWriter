@@ -1370,6 +1370,46 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(stored, 3, msg="0x1058 count must track its 0x1057 entries after the dup")
         self.assertEqual(BS.remove_track(dup, "MZ"), data, msg="round-trip stays byte-exact")
 
+    @unittest.skipUnless((CONTROL_DIR.parent / "3 stereo plus click.ptx").exists()
+                         or list(ROOT.glob("control_files/**/3 stereo plus click.ptx")),
+                         "click control not present")
+    def test_non_synth_duplicate_gives_the_copy_a_view_chain(self):
+        """REGRESSION (bug #19): every PT session satisfies `0x2589 ordinals == range(name
+        entries)` -- one view chain per display row (162/162 corpus sessions). The off-synth
+        duplicate used to SKIP the chain (it attributed against `track_types`, which omits the
+        click, so the 1:1 check failed), leaving N+1 name entries with only N chains and silently
+        violating that invariant. The byte-exact round-trip hid it because remove skipped
+        symmetrically -- the same "check the intermediate" lesson as #17/#18.
+
+        A click-bearing control is the discriminating fixture: 4 name entries but only 3
+        `track_types`, which is exactly what defeated the old basis. Attribution is now against the
+        NAME-TABLE entries, and the copy is restamped to display row R+1 with the rows below it
+        shifted down."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/3 stereo plus click.ptx"))))
+
+        def chains(d):
+            bl = BS._size_driven_blocks(d)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            nents = len(BS._inline_name_entries(d, z, e, bl))
+            ords = sorted(int.from_bytes(d[zz + 9 : zz + 11], "little")
+                          for zz, _ee, cc in bl if cc == 0x2589)
+            return nents, ords
+
+        n0, o0 = chains(data)
+        self.assertGreater(n0, len(BS.track_types(data)),
+                           msg="the click gives more name entries than track_types rows -- the "
+                               "case the old track_types basis could not attribute")
+        self.assertEqual(o0, list(range(n0)), msg="the control satisfies the PT invariant")
+        dup = BS.duplicate_track(data, "Audio 2", "AZZZZZZ")
+        n1, o1 = chains(dup)
+        self.assertEqual(n1, n0 + 1)
+        self.assertEqual(len(o1), n1, msg="the copy must get its own 0x2589 view chain")
+        self.assertEqual(o1, list(range(n1)),
+                         msg="chain ordinals must stay == range(name entries) after the dup")
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(BS.remove_track(dup, "AZZZZZZ"), data,
+                         msg="remove must invert the chain copy + ordinal shift byte-exact")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
