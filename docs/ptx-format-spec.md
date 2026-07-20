@@ -2806,3 +2806,49 @@ Consequences for editing:
 - **Duplicating the last entry** is the mirror: the source stops being last, so it must be
   *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
   kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
+
+### Ubiquitous session-scaffold types (previously undocumented)
+
+These occur in **every one of the 282 corpus sessions** with a **fixed instance count that does not
+scale with track or clip count** — they are session-level scaffold, not per-track structures. All
+counts below were measured across the full corpus with the size-driven walk.
+
+| type | per session | payload across the corpus | parent |
+|---|---:|---|---|
+| `0x4807` | 12 | **varies** (9 distinct sets) | `0x2553` |
+| `0x1048` | 9 (10 in one session) | 2 distinct sets | `0x1049` |
+| `0x4833` | 5 | **byte-identical in all 282** | `0x271A` |
+| `0x251C` | 5 | 2 distinct (280 identical) | `0x251B` |
+| `0x4809` | 4 | **byte-identical in all 282** | `0x1021` |
+| `0x4828` / `0x4824` | 2 each | **byte-identical**, and identical *to each other* | — |
+| `0x2567` | 1 | **byte-identical in all 282** | top level, indexed |
+| `0x2701` | 1 | **byte-identical in all 282** | top level, indexed |
+
+A writer can emit the byte-identical ones verbatim; they carry no session-specific state.
+
+#### `0x4807` — plugin / AudioSuite registry entry
+
+Payload: `<plugin_id:12 bytes (three 4-char codes)> <name_len:u32> <name:ASCII>`. Read directly
+off the bytes — e.g. `63 6e 74 44 41 32 56 53 63 63 63 6a | 1a 00 00 00 | "Synthesizer V Studio 2
+Pro"`, `70 74 5a 69 31 53 5a 72 37 53 5a 72 | 12 00 00 00 | "RX Spectral Editor"`, and
+`elecGLPMT2MA | 08 00 00 00 | "Melodyne"`. An **empty slot** is 16 zero bytes (span 25).
+
+The 12 slots appear as 3 groups of 4, each group starting with an empty slot. One character of the
+plugin id differs between sessions (`…7SZr` vs `…5SZr`, `…T2MA` vs `…T3MA`) — **INFERRED** to be a
+channel-format code, not proven.
+
+#### `0x251B` → `0x251C` — a fixed 5-slot enumerated table
+
+`0x251B` is count-prefixed (`u32` at payload+0 = `5`) and holds exactly five `0x251C` children.
+Each `0x251C` payload is 11 bytes: `<slot_index:u32> <3 pad> <slot_index:u8> <3 pad>` — the slot
+index appears twice, running 0..4:
+
+```
+0x251c[0]  00 00 00 00  00 00 00  00  00 00 00
+0x251c[1]  01 00 00 00  00 00 00  01  00 00 00
+...
+0x251c[4]  04 00 00 00  00 00 00  04  00 00 00
+```
+
+Every `0x251C` is master-indexed. The table is identical in 280/282 sessions. **What the five slots
+enumerate is UNKNOWN** — the structure is proven, the meaning is not.
