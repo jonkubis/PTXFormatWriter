@@ -2852,3 +2852,60 @@ index appears twice, running 0..4:
 
 Every `0x251C` is master-indexed. The table is identical in 280/282 sessions. **What the five slots
 enumerate is UNKNOWN** — the structure is proven, the meaning is not.
+
+#### `0x4702` — built-in track/stem name preset dictionary (LEAF)
+
+One per session, top-level, master-indexed, **byte-identical across the corpus** (payload digest
+identical in every session checked). Payload is an exact count-prefixed string table:
+
+```
+<count:u32 = 1252>  then  count × ( <len:u32> <ASCII bytes> )
+```
+
+The walk consumes the payload **exactly** (1252 strings, 14726 of 14726 bytes, no remainder), which
+confirms the layout. The contents are Pro Tools' shipped naming presets — the classic
+post-production stems and their abbreviations lead the list:
+
+`Dialog, Music, Effects, Narration, DIAL, MUS, FX, BG, FOL, DX, GRP, MX, DX ADD, GRP ADD, FLY,
+FX EXT, MUSIC BED, DIAL BED, FX BED, …`
+
+Being invariant, a writer can emit this block verbatim.
+
+#### `0x4823` — plugin-registry group (container of `0x4807`)
+
+Top-level, master-indexed. Payload begins `<u32 = 0><u32 = 3>` followed by framed `0x4807`
+children — i.e. a count-prefixed group of plugin entries (see `0x4807` above).
+
+#### The 4-byte "reserved / empty extension" marker family
+
+A recurring 13-byte block whose entire payload is a single zero `u32`, attached as the last child
+of a specific container. The *type* identifies which container it belongs to:
+
+| type | attached to | per session |
+|---|---|---:|
+| `0x4828` | `0x1054` (shared lane container) | 2 |
+| `0x4829` | `0x1015` (audio track list) | 1 |
+| `0x4824` | `0x4501` | 2 |
+| `0x1048` | `0x1049` | 9 |
+| `0x483B` | top level | 1 |
+| `0x483D` | `0x2519` (name table) — payload is a 2-byte zero, not 4 | 1 |
+| `0x4833` | `0x271A` — payload is 5 zero bytes | 5 |
+
+`0x4828`, `0x4829` and `0x483B` are master-indexed; the others are not. Every one of these is
+byte-identical corpus-wide. **INFERRED** (not proven): they are reserved/extension slots that a
+newer writer would populate — nothing in the corpus ever gives them a non-zero value.
+
+#### Other top-level singletons
+
+- **`0x4834` / `0x4841`** — twins: identical 37-byte blocks, top-level, master-indexed, each
+  wrapping one `0x2011`. Purpose UNKNOWN.
+- **`0x4501`** — large top-level indexed container (≈20.9 KB) holding `0x4824`.
+- **`0x4808`** — top-level, indexed, 51 bytes; payload starts `01 00 00 00 01 00 00 00 00 00 00 00`
+  then `e2 ff ff ff` (= −30 as `i32`). Purpose UNKNOWN.
+- **`0x4820`** — top-level, indexed, 33 bytes, all-zero payload. Purpose UNKNOWN.
+- **`0x4809`** — 4 per session under `0x1021`; payload `01 00 00 00 02 00 01 00 00 00 41 …`
+  (note the `0x41` byte). Purpose UNKNOWN.
+- **`0x4826`** — 1 per session (7 and 9 in two outlier sessions) under `0x20A2`. Purpose UNKNOWN.
+
+Layouts and relationships above are read from the bytes; every "purpose UNKNOWN" is stated as such
+rather than guessed.
