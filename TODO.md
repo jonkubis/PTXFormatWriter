@@ -853,3 +853,33 @@ always pending there).
 Our MIDI synthesis sets 0x1015 = track count (midi9 -> 9, should be 0 audio) AND 0x1058 off-by-one
 (midi9 -> 8 for 9 MIDI; should be 9). PT-authored sessions have both correct. Uncaught (synth
 oracles are audio-only). Fix the MIDI synth to set both to the PT convention, regenerate fixtures.
+
+## BUG #19 FIXED (commit 6fdbfb8) — the 0x2589 view-chain gap is CLOSED
+The gap documented alongside #17/#18 is resolved. THE INVARIANT: every PT session has
+`0x2589 ordinals == range(name entries)` — one view chain per display row (162/162 PT-authored
+corpus sessions). The off-synth dup skipped the chain, emitting N+1 entries with N chains (the copy
+had no view state) — hidden by the byte-exact round-trip because remove skipped symmetrically.
+
+WHY THE OLD SKIP WAS WRONG: its stated reason ("0x2589 does not correspond 1:1 to track_types") is
+true but uses the WRONG BASIS — the ordinals are DISPLAY ROWS and a click HAS a row while
+track_types never reports it (`3 stereo plus click`: 4 entries vs 3 track_types). Against the
+NAME-TABLE entries the correspondence is exact. Name-entry order IS display order (verified against
+the authoritative 0x2624 playlist order on `multiple track types`).
+
+FIX: dup attributes by name-entry row R, copies the chain, restamps the copy to R+1 (its name entry
+splices directly after the source's) and shifts chains below R down one (via the splice machinery's
+existing `copy_off`); remove does the exact inverse. Off-synth only — the PT-confirmed synth
+oracles are untouched. Sweep: 166 round-trips / 0 failures; invariant now holds on 153 sessions;
+the 13 whose ORIGINAL violates it (our synth output) stay safely skipped. 183 tests.
+
+## Remaining frontier
+  1. CLICK/AUX (0x261E) DUPLICATE — 2 blockers: (a) the click is always the LAST 0x2519 entry
+     (short 21-byte trailer, can't be copied as a 23-byte entry); (b) canonicalize_after_track_add's
+     body-rank sort hardcodes `else 0x261C` -> a 0x261E element ranks as 1<<30.
+     (The 0x1015-count blocker was cleared by #17's audio-gate.)
+  2. SYNTH-PATH count/ordinal bugs (our synth output, uncaught because the synth oracles are
+     audio-only): pure-MIDI synth sets 0x1015 = track count (midi9 -> 9, should be 0 audio) and
+     0x1058 off-by-one (8 for 9 MIDI); the mixed audio+MIDI synth emits DUPLICATE 0x2589 ordinals
+     ([1,0,1,2,3,4]) — which is why 13 corpus sessions can't be view-chain-attributed at all.
+     Fixing this would also let #19's attribution cover those 13.
+  3. add-clip with NEW audio (0x2628 geometry, PT-gated); PT verification of all edits (user-gated).
