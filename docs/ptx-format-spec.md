@@ -2909,3 +2909,29 @@ newer writer would populate — nothing in the corpus ever gives them a non-zero
 
 Layouts and relationships above are read from the bytes; every "purpose UNKNOWN" is stated as such
 rather than guessed.
+
+### The file-header index pointer is NOT a block (the biggest phantom source)
+
+The body opens with a **20-byte header** — `03`, an ASCII version/product string, then two bytes —
+immediately followed at **offset 20** by an 11-byte run that *looks* perfectly framed:
+
+```
+5a 01 00 | 04 00 00 00 | XX XX | YY YY
+ ^marker    ^size = 4     ^"content_type"   ^"payload"
+```
+
+It is not a block. **The `u32` at body offset 27 is the FINAL-INDEX START OFFSET** — verified
+exactly on every session tested (`stereo mono stereo` → 74895, `512 stereo tracks` → 1370101,
+`2 stereo plus click` → 75880, `8 MIDI tracks` → 78881, `one midi note` → 70320, each equal to
+`final_index_ref(data).start`). A block walk that starts at offset 20 therefore reads the low half
+of that pointer as a content-type.
+
+Because the pointer value differs per session, this single slot manufactures a **different phantom
+type in every session** — 212 distinct bogus types across the 282-session corpus, and **64% of all
+"undocumented" block occurrences**. The spec's earlier one-off entries `0x254D` and `0x2298`
+("artifact of the file-header index pointer" / "file-header stub") are two samples of this same
+artifact, not two distinct oddities.
+
+**Rule for any tool that enumerates content types:** skip the header region (start the walk at
+offset 31, i.e. after the pointer record) or explicitly ignore the block at offset 20. Otherwise
+every session invents a fresh content-type and coverage statistics become meaningless.
