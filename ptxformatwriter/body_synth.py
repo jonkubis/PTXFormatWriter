@@ -4890,6 +4890,15 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     for i, (z, e) in enumerate(lanes):
         nlen = int.from_bytes(body[z + 11 : z + 15], "little")
         su16(z + 15 + nlen + 18, (i % n) + 1)
+
+    # 0x261C "C4" per-track counter. Block-END anchored, so it is the one 0x261C field whose offset
+    # does not depend on the track's kind (C1/C2/C3 sit at per-kind `_B261C` offsets and are NOT
+    # re-keyed here). Its value is the AUDIO-ONLY index -- measured on 43 discriminating PT-authored
+    # sessions with ZERO exceptions: `multiple track types` (Click, MIDI, Audio 1, Audio 2) stores
+    # [0, 1], not the global display slots [2, 3]. A duplicate cloned it verbatim ([0,1,2,2] for
+    # four audio tracks), giving two tracks the same identity.
+    for s, (z, e) in enumerate(by.get(0x261C, [])):
+        su32(e - _B261C_C4_FROM_END, s)
     return bytes(body)
 
 

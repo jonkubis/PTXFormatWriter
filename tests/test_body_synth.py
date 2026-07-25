@@ -1253,8 +1253,16 @@ class ViewChainAttributionTests(unittest.TestCase):
         return Counter(c for _z, _e, c in BS._raw_block_bounds(data, ref.start))
 
     def _non_synth_session(self):
-        # a MIDI-bearing session fails _is_synth_shaped -> takes the real-session path
-        return BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2])
+        # A MIDI-bearing session fails _is_synth_shaped -> takes the real-session path.
+        # Normalised through `_rekey_offsynth_positional` because our mixed-MIDI SYNTH emits
+        # per-track ordinals that do not follow the PT convention (its 0x261C C4 runs
+        # [0,1,3,4,5] where every one of 43 discriminating PT-authored sessions uses the
+        # audio-only index [0,1,2,3,4]). Without this the fixture is not a faithful stand-in for
+        # a real session, and the editors' repair pass would show up as a round-trip difference
+        # that has nothing to do with the behaviour under test. Repairing the SYNTH writer itself
+        # is the proper fix, but that path is PT-confirmed and is tracked separately.
+        return BS._rekey_offsynth_positional(
+            BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2]))
 
     def test_duplicate_remove_is_a_perfect_inverse_off_the_synth_path(self):
         data = self._non_synth_session()
@@ -1476,6 +1484,32 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(BS.validate(dup), [])
         self.assertEqual(BS.remove_track(dup, "MIDI 3"),
                          BS._rekey_offsynth_positional(data))
+
+    def test_duplicate_gives_the_copy_its_own_0x261c_counter(self):
+        """REGRESSION (bug #23): the 0x261C per-track "C4" counter (block-END anchored, so its
+        offset is kind-independent) is the track's AUDIO-ONLY index -- measured on 43
+        discriminating PT-authored sessions with ZERO exceptions, e.g. `multiple track types`
+        (Click 1, MIDI 1, Audio 1, Audio 2) stores [0, 1], NOT the global display slots [2, 3].
+
+        A duplicate cloned it verbatim, so two tracks carried the same identity ([0,1,2,2] for
+        four audio tracks). Pro Tools resolves tracks through these per-track ordinals, which is
+        why duplicates showed the copy under the SOURCE's name."""
+        data = _load_path(next(iter(ROOT.glob(
+            "control_files/**/multiple track types no click.ptx"))))
+
+        def c4(d):
+            return [int.from_bytes(d[e - BS._B261C_C4_FROM_END : e - BS._B261C_C4_FROM_END + 4],
+                                   "little")
+                    for z, e in BS._blocks_by_type(d).get(0x261C, [])]
+
+        base = c4(data)
+        self.assertEqual(base, list(range(len(base))), msg="PT control uses the audio-only index")
+        dup = BS.duplicate_track(data, "Audio 1", "Audio 3")
+        got = c4(dup)
+        self.assertEqual(len(got), len(base) + 1)
+        self.assertEqual(len(set(got)), len(got), msg="every track needs its own C4 counter")
+        self.assertEqual(got, list(range(len(got))))
+        self.assertEqual(BS.validate(dup), [])
 
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
