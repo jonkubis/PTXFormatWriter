@@ -1747,6 +1747,36 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual([v for v in BS.validate_pt_invariants(out)
                           if v["severity"] == "error"], [])
 
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/one clip bar 1.ptx")),
+                         "clip control not present")
+    def test_region_length_is_the_wav_sample_count(self):
+        """The FIRST field of a 0x2628 variable section is the region's length in samples --
+        verified against the source WAVs on every corpus region whose file is on disk (40/40 equal
+        to `wav_clip_identity(wav)[0]`). This is sharper than the spec's earlier "final field ==
+        source-file length", which was refuted as universal.
+
+        `set_region_length` is the piece `retarget_audio_file` deliberately leaves alone: pointing
+        a registration at a WAV of a different length leaves the region describing the old one."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/one clip bar 1.ptx"))))
+        n = len(BS.region_list(data))
+        before = [BS.region_length(data, i) for i in range(n)]
+        self.assertTrue(all(v is not None for v in before))
+
+        out = BS.set_region_length(data, 0, 4321)
+        after = [BS.region_length(out, i) for i in range(n)]
+        self.assertEqual(after[0], 4321)
+        self.assertEqual(after[1:], before[1:], msg="other regions must be untouched")
+        self.assertEqual(len(out), len(data), msg="must be size-neutral")
+        self.assertEqual(BS.validate(out), [])
+        self.assertEqual([v for v in BS.validate_pt_invariants(out)
+                          if v["severity"] == "error"], [])
+        self.assertEqual(BS.set_region_length(out, 0, before[0]), data,
+                         msg="setting it back must be byte-exact")
+
+        # the width limit is REPORTED, never silently truncated
+        with self.assertRaises(ValueError):
+            BS.set_region_length(data, 0, 10_000_000)
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

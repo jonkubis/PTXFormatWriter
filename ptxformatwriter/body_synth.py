@@ -3997,6 +3997,78 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     return bytes(out)
 
 
+def region_length(data: bytes, region_index: int) -> "int | None":
+    """The region's length in samples: the FIRST present field of its `0x2628` variable section.
+
+    Proven against the source WAVs -- for every corpus region whose file is on disk, this field
+    equals `wav_clip_identity(wav)[0]` exactly (40/40). The field's width comes from the
+    descriptor nibbles (2 bytes in ~94% of records, sometimes 3 or 4), so it is read at the width
+    the descriptor declares, not a fixed one. Returns None if the region declares no field."""
+    z28 = _region_2628(data, region_index)
+    if z28 is None:
+        return None
+    z, nl = z28
+    desc = data[z + 13 + nl : z + 13 + nl + 5]
+    widths = [desc[1] >> 4, desc[1] & 15, desc[2] >> 4, desc[2] & 15, desc[3] >> 4, desc[3] & 15]
+    w = next((x for x in widths if x), 0)
+    if not w:
+        return None
+    at = z + 13 + nl + 5
+    return int.from_bytes(data[at : at + w], "little")
+
+
+def _region_2628(data: bytes, region_index: int) -> "tuple[int, int] | None":
+    """`(zmark_of_0x2628, namelen)` for region `region_index`, or None."""
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    lists = [(z, e) for z, e, c in bl if c == 0x262A]
+    if not lists:
+        return None
+    lz, le = lists[0]
+    entries = sorted((z, e) for z, e, c in bl if c == 0x2629 and lz < z < le)
+    if not 0 <= region_index < len(entries):
+        return None
+    sz, se = entries[region_index]
+    for z, e, c in bl:
+        if c == 0x2628 and sz < z < se:
+            nl = int.from_bytes(data[z + 9 : z + 13], "little")
+            return (z, nl) if 0 < nl <= 128 else None
+    return None
+
+
+def set_region_length(data: bytes, region_index: int, sample_count: int) -> bytes:
+    """Set region `region_index`'s length (samples) -- the first field of its `0x2628` variable
+    section. Size-neutral; raises rather than guessing when the value will not fit.
+
+    This is the field `retarget_audio_file` deliberately leaves alone: retargeting a registration
+    at a WAV of a DIFFERENT length leaves the region's geometry describing the old one. Call this
+    with `wav_clip_identity(wav)[0]` to finish the job.
+
+    WIDTH LIMIT, stated rather than worked around: the field's byte width is declared by the
+    descriptor nibbles and is 2 bytes in ~94% of corpus records, so counts above 65535 do not fit.
+    Widening it means rewriting the descriptor nibble AND resizing the block, which changes every
+    enclosing size and index offset -- that is the genuinely unfinished part of the `0x2628`
+    model, so this raises instead of silently truncating."""
+    z28 = _region_2628(data, region_index)
+    if z28 is None:
+        raise ValueError(f"no 0x2628 record for region {region_index}")
+    z, nl = z28
+    desc = data[z + 13 + nl : z + 13 + nl + 5]
+    widths = [desc[1] >> 4, desc[1] & 15, desc[2] >> 4, desc[2] & 15, desc[3] >> 4, desc[3] & 15]
+    w = next((x for x in widths if x), 0)
+    if not w:
+        raise ValueError(f"region {region_index} declares no length field (descriptor {desc.hex()})")
+    if sample_count < 0 or sample_count >= (1 << (8 * w)):
+        raise ValueError(
+            f"sample_count {sample_count} does not fit the region's {w}-byte length field; "
+            f"widening requires rewriting the descriptor nibble and resizing the block "
+            f"(unimplemented -- see the 0x2628 notes in docs/ptx-format-spec.md)")
+    out = bytearray(data)
+    at = z + 13 + nl + 5
+    out[at : at + w] = int(sample_count).to_bytes(w, "little")
+    return bytes(out)
+
+
 def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
     """Point ONE registered audio file (the `file_index`-th `0x1003` record) at `wav_path`,
     leaving every other file, region, clip and track byte-identical.

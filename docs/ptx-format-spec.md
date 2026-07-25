@@ -352,7 +352,19 @@ The nibble model still describes the variable section's internal fields (below),
 `legacy_audio_*` sessions) overshoot by exactly one byte. Searching for the terminator is
 therefore the reliable strategy; the nibbles remain useful only for interpreting the fields.
 
-**Field SEMANTICS remain partly open** (which slot is length vs offset vs source position) — see
+**FIRST variable field = the region's LENGTH IN SAMPLES (proven).** For every corpus region whose
+source WAV is present on disk, the first field the descriptor declares equals
+`wav_clip_identity(wav)[0]` exactly — **40/40**, across 2-, 3- and 4-byte widths. This is sharper
+than the earlier note below, which framed it as "final field == source-file length" and reported
+that as refuted: it is the FIRST declared field, read at the width the nibbles give.
+`body_synth.region_length()` / `set_region_length()` read and write it.
+
+The field's WIDTH is the practical limit on writing it: 2 bytes in ~94% of records, so a count
+above 65535 does not fit. Widening means rewriting the descriptor nibble AND resizing the block
+(which moves every enclosing size and index offset) — that remains unimplemented, and
+`set_region_length` raises rather than truncating.
+
+**Remaining field SEMANTICS are partly open** (which slot is length vs offset vs source position) — see
 the original note below. That affects creating a region for NEW audio, not copying an existing one.
 
 **Original descriptor note (retained).** After
