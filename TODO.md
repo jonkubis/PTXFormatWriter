@@ -3,6 +3,29 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## BLOCKED — the corpus drive is DISCONNECTED (2026-07-25)
+
+`/Volumes/Backups/AI/__PTX corpus` is gone mid-session: `mount` and `diskutil list` show no
+filesystem and no unmounted volume named `Backups` (the only unmounted partitions are Apple_RAID
+members, all accounted for by `Samples`/`SAMPLES BACKUP`). The drive is physically disconnected, not
+merely unmounted -- it cannot be brought back from software. **The user must reconnect it.**
+
+Watch out for the SILENT failure mode this produced: a probe looping over `glob(corpus/*.ptx)` with
+`except Exception: continue` reported "0 real sessions: 0x1DB6 present in 0" -- a confident,
+completely fabricated measurement, because the glob was EMPTY rather than erroring. Any corpus
+script must assert the file list is non-empty before reporting a hit rate.
+
+A fan-out to mine PT's own track additions was launched and stopped when the drive vanished (1 of 9
+agents finished, correctly reporting the blocker rather than guessing). To resume once the drive is
+back -- completed agents return cached results:
+
+    Workflow({scriptPath: "/Users/jonkubis/.claude/projects/-Volumes-Dropbox-SSD-Dropbox-PYTHON---CODEX-PTFORMAT/3a0a9e53-a6be-45d5-b89f-fbd530cb9103/workflows/scripts/ptx-addpath-groundtruth-wf_df17a211-b85.js",
+              resumeFromRunId: "wf_df17a211-b85"})
+
+It scans six `.bak` families for PT-made track additions (the oracle), then diffs our
+`duplicate_track` against PT's on each, and separately derives the three unfixed re-key rules
+(`0x251A` restart boundary, what really lives at `0x261C` end-19, the `0x2015` convention).
+
 ## METHOD UNLOCK — PRO TOOLS' OWN EDITS ARE IN THE CORPUS (2026-07-25)
 
 The `.bak.NNN` files are INCREMENTAL SAVES of one session, so consecutive pairs isolate a single
