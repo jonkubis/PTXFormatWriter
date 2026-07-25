@@ -4902,6 +4902,108 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     return bytes(body)
 
 
+def validate_pt_invariants(data: bytes) -> "list[dict]":
+    """Check the structural rules Pro Tools enforces. Returns [] when clean; each entry carries a
+    `severity` of "error" or "nonconforming".
+
+    These are NOT guesses. Each was measured across the PT-authored corpus, and every "error" here
+    was violated by an edit that `validate()`, a clean reload (`rc=0`) AND a byte-exact
+    duplicate->remove round-trip all accepted -- while Pro Tools rejected the file. The round-trip
+    only proves `remove . duplicate = identity`, which stays true when both sides are wrong the
+    same way; this checks the INTERMEDIATE against ground truth instead.
+
+    **error** -- PT is known to REJECT these (each is calibrated against a real PT verdict):
+      * containment: every 0x2589/0x1057/0x210B/0x2620/0x261C lies inside its container. A copy
+        spliced at a container's exact end landed OUTSIDE it and CRASHED PT ON LOAD (bug #22).
+      * uniqueness of the per-track ordinals (0x2519 entries, 0x251A lanes, the per-track subtree
+        field, 0x261C C4) and of track names. Duplicated ordinals are what made PT show a copy
+        under the SOURCE's name and then crash on close (bugs #20/#23).
+      * 0x2589 view-chain ordinals: one per NAME ENTRY, no repeats. The basis is the name table,
+        not `track_types`, which omits the click (bug #19).
+
+    **nonconforming** -- PT-authored sessions are always dense, but PT ACCEPTS gaps, so this is a
+    style note rather than a fault. Calibration: our own `12_audio_remove_in_click_session.ptx`
+    carries 0x2519 ordinals [1, 3, 4] after a middle track was removed and Pro Tools opened AND
+    closed it cleanly. Reporting density as an error would have made this function reject a file PT
+    demonstrably accepts.
+    """
+    out: "list[dict]" = []
+
+    def err(kind: str, detail: str) -> None:
+        out.append({"severity": "error", "invariant": kind, "detail": detail})
+
+    def note(kind: str, detail: str) -> None:
+        out.append({"severity": "nonconforming", "invariant": kind, "detail": detail})
+
+    bl = _size_driven_blocks(data)
+    by = _blocks_by_type(data)
+    nt = [(z, e) for z, e, c in bl if c == 0x2519]
+    if not nt:
+        return [{"severity": "error", "invariant": "name-table", "detail": "no 0x2519 block"}]
+    entries = _inline_name_entries(data, nt[0][0], nt[0][1], bl)
+    names = [n for n, _p in entries]
+    n_ents = len(entries)
+
+    for child, parent in ((0x2589, 0x258A), (0x1057, 0x1058), (0x210B, 0x2107),
+                          (0x2620, 0x2624), (0x261C, 0x2624)):
+        spans = [(z, e) for z, e, c in bl if c == parent]
+        if not spans:
+            continue
+        for z, e, c in bl:
+            if c == child and not any(pz < z and e <= pe for pz, pe in spans):
+                err("containment", f"0x{child:04x} at {z} is outside every 0x{parent:04x}")
+
+    if len(set(names)) != len(names):
+        err("unique-track-names",
+            f"repeated: {sorted({n for n in names if names.count(n) > 1})}")
+
+    def check(kind: str, vals: "list[int]", dense_from: "int | None") -> None:
+        if len(set(vals)) != len(vals):
+            err(kind, f"repeated values in {vals}")
+        elif dense_from is not None and vals != list(range(dense_from, dense_from + len(vals))):
+            note(kind, f"{vals} is unique but not dense from {dense_from}")
+
+    check("0x2519-entry-ordinals",
+          [int.from_bytes(data[p + len(n) + 18 : p + len(n) + 20], "little")
+           for n, p in entries], 1)
+
+    lanes = by.get(0x251A, [])
+    if lanes:
+        nl = len(lanes) // 2 or 1
+        lv = [int.from_bytes(
+                  data[z + 15 + int.from_bytes(data[z + 11 : z + 15], "little") + 18:][:2],
+                  "little")
+              for z, _e in lanes]
+        # lane-major: the same ordinal list repeated once per lane
+        for half in range(0, len(lv), nl):
+            check("0x251A-lane-ordinals", lv[half : half + nl], None)
+        if lv[:nl] != lv[nl:]:
+            err("0x251A-lane-ordinals", f"{lv} is not the same run repeated per lane")
+
+    anchors = set()
+    for ct in (0x200A, 0x200B, 0x2015):
+        for z, e in by.get(ct, []):
+            a = data.find(_ORD2015_ANCHOR, z, e)
+            if a >= 0:
+                anchors.add(a)
+    check("per-track-subtree-ordinal",
+          [int.from_bytes(data[a + 18 : a + 22], "little") for a in sorted(anchors)], 1)
+
+    chains = sorted(int.from_bytes(data[z + 9 : z + 11], "little")
+                    for z, _e in by.get(0x2589, []))
+    if chains:
+        if len(set(chains)) != len(chains):
+            err("0x2589-view-chains", f"repeated display rows in {chains}")
+        elif len(chains) != n_ents:
+            err("0x2589-view-chains",
+                f"{len(chains)} chains for {n_ents} name entries")
+
+    check("0x261C-C4",
+          [int.from_bytes(data[e - _B261C_C4_FROM_END : e - _B261C_C4_FROM_END + 4], "little")
+           for z, e in by.get(0x261C, [])], 0)
+    return out
+
+
 def _renumber_body_after_duplicate(data: bytes, copy_slot: int, kinds: "list[int]",
                                    base_n: int, donor_free: "list[tuple[int, bytes]]") -> bytes:
     """BODY renumber run at the END of `duplicate_track`. `copy_slot` is the copy's 0-based

@@ -9,6 +9,7 @@ from this pipeline is confirmed to open in Pro Tools.
 from collections import Counter
 from pathlib import Path
 import tempfile
+import pathlib
 import unittest
 
 from ptxformatwriter.core import PTFFormat
@@ -1510,6 +1511,45 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(len(set(got)), len(got), msg="every track needs its own C4 counter")
         self.assertEqual(got, list(range(len(got))))
         self.assertEqual(BS.validate(dup), [])
+
+    @unittest.skipUnless(
+        (pathlib.Path("/Users/jonkubis/Desktop/PTX_VERIFY_2026-07-23")).exists(),
+        "the PT-verdict corpus is not present on this machine")
+    def test_pt_invariant_validator_matches_real_pro_tools_verdicts(self):
+        """`validate_pt_invariants` is CALIBRATED against 12 files a human ran through Pro Tools
+        on 2026-07-23: 8 were rejected (3 crash-on-load, 4 duplicate-names-then-crash-on-close, 1
+        "Zoom Memories" stream error) and 4 were accepted. It must flag an error on every rejected
+        file and none on any accepted one.
+
+        The severity split exists because of file 12: PT ACCEPTED it with 0x2519 ordinals [1,3,4]
+        (a gap left by removing a middle track). Density is therefore a normalisation PT-authored
+        files happen to have, NOT a requirement -- reporting it as an error would reject a file PT
+        demonstrably opens and closes cleanly. UNIQUENESS is the hard rule."""
+        root = pathlib.Path("/Users/jonkubis/Desktop/PTX_VERIFY_2026-07-23")
+        verdicts = {
+            "A_no_audio_needed/01_MIDI_duplicate_track.ptx": False,
+            "A_no_audio_needed/02_MIDI_remove_track.ptx": True,
+            "A_no_audio_needed/03_MIDI_duplicate_last_entry.ptx": False,
+            "A_no_audio_needed/04_MIDI_single_track_duplicate.ptx": False,
+            "A_no_audio_needed/05_audio_duplicate_last_entry.ptx": False,
+            "A_no_audio_needed/06_mixed_duplicate_audio.ptx": False,
+            "A_no_audio_needed/07_mixed_duplicate_MIDI.ptx": False,
+            "A_no_audio_needed/08_mixed_remove_audio.ptx": True,
+            "B_click_session_with_audio/09_click_remove.ptx": True,
+            "B_click_session_with_audio/10_click_duplicate.ptx": False,
+            "B_click_session_with_audio/11_audio_dup_in_click_session.ptx": False,
+            "B_click_session_with_audio/12_audio_remove_in_click_session.ptx": True,
+        }
+        for rel, pt_accepted in verdicts.items():
+            path = root / rel
+            if not path.exists():
+                continue
+            errs = [v for v in BS.validate_pt_invariants(_load_path(path))
+                    if v["severity"] == "error"]
+            if pt_accepted:
+                self.assertEqual(errs, [], msg=f"{rel}: PT ACCEPTED this — must not error")
+            else:
+                self.assertNotEqual(errs, [], msg=f"{rel}: PT REJECTED this — must be flagged")
 
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
