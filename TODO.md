@@ -1235,3 +1235,31 @@ Either those files are genuinely malformed, or `track_types` over-reports on som
 gate does NOT check track_types against the name table, so it is blind to whichever it is. I have
 not added a rule because I cannot calibrate one against a PT verdict -- adding uncalibrated rules
 is what produced the two false positives the gate itself later caught.
+
+## The remaining UNKNOWNs are now MEASURED, not just asserted
+I had been saying "these need new captures" without proving it. Measured every flagged type's
+payload across all 282 sessions:
+
+  MONOMORPHIC (1 distinct payload — provably NO signal in this corpus, 8 types):
+      0x2502, 0x206f, 0x2103, 0x2020, 0x258f, 0x2435, 0x2715, 0x4827
+  HAS SIGNAL (tractable from the corpus, 4 types):
+      0x201f (5 variants), 0x258e (4), 0x103d (2), 0x1041 (2)
+
+That is the difference between "I gave up" and "the data cannot answer this": for the eight, every
+instance is byte-identical, so no correlation with any session property is even possible. Their
+LAYOUTS are documented; only the meaning of an invariant constant is open.
+
+WORKED THE HIGHEST-SIGNAL ONE (0x201f, saved window geometry) down to a single field:
+  * the discriminator is the u32 at payload+24, taking only 0x0000 or 0x0100
+  * REFUTED "it tracks MIDI content": flag=0 in 4 sessions WITH the MIDI clip family; flag=256 in
+    14 sessions with NO MIDI track
+  * REFUTED "it is the MIDI editor": `midi note editor closed` = 256, same as editor-open sessions
+  * CANDIDATE, explicitly NOT claimed: `memory locations window closed` = 0. Suggestive only —
+    that file is not a controlled variant (it also differs by the whole 0x2582-0x2586 family), so
+    it is a separate capture, not a one-variable change. I checked this BEFORE writing it down,
+    which is the step I skipped with the clean/.bak oracles.
+
+THE EXPERIMENT THAT SETTLES IT (cheap, and the same recipe for all four signal-bearing types):
+save one session twice changing ONLY whether a given window is open, then diff payload+24.
+
+Remaining as before: 0x2628 new-audio geometry, and PT re-test of the 12 staged files.
