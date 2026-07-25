@@ -1468,3 +1468,28 @@ the editors and nothing was holding it to these invariants. 196 tests.
 The mixed-MIDI paths report "nonconforming" notes (repeated 0x2589 rows, non-dense subtree
 ordinals) and that is correct: PT opens those files (confirmed 2026-06-20). Only ERRORS are
 asserted -- the severity split earned its keep again.
+
+## Second measurement pass: I had only measured 12 of the 21 flagged types
+Enumerating every spec section carrying an UNKNOWN/UNPROVEN marker gives **21 types**, not the 12
+I measured earlier. Measured the other nine:
+
+  MONOMORPHIC (no signal in this corpus): 0x201e, 0x2025, 0x2049, 0x2508, 0x2509  (+0x207b, below)
+  HAS SIGNAL: 0x1017 (3 payloads), 0x2056 (9 real payloads)
+
+**0x207b CORRECTED — its documented "two forms" was a phantom.** 282/282 sessions carry ONE
+124-byte record. The apparent second form (an 11-byte block with payload `01 00`, in a single
+session) sits at body offset 20 -- the file-header INDEX POINTER, not a block. Its "content type"
+is the low half of the final-index offset, which in that session read as 0x207b. So 0x207b is
+monomorphic.
+
+**GENERAL RULE, now in the spec:** any per-type variant count must EXCLUDE blocks below body offset
+31. The same phantom had also inflated 0x2056 (10 apparent payloads -> 9 real). This is the third
+distinct place the offset-20 pointer has corrupted a measurement this session (coverage tracker,
+0x207b's "two forms", 0x2056's variant count) -- it is worth checking FIRST whenever a rare variant
+appears in exactly one session.
+
+RUNNING TALLY across both passes: 14 monomorphic, 4 with signal, 3 closed (0x1041 resolved,
+0x103d explained by parent, 0x258e scope corrected).
+
+NEXT TRACTABLE: 0x1017 -- 3 payloads, and NOT explained by parent context (0x1018 alone holds 2),
+so unlike 0x103d there is genuine within-context variation to correlate. 0x2056 has 9.
