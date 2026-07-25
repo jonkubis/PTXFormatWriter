@@ -1136,3 +1136,32 @@ LESSON: before inventing a semantic for a field, GREP THE SPEC FOR IT. §8 alrea
 right; I spent a fix, a revert and two false invariants rediscovering it wrongly. And an "oracle"
 needs its provenance checked before its conclusions are trusted -- I validated the conclusions and
 never the premise.
+
+## NEW CAPABILITY — `validate_pt_invariants()`, calibrated against real PT verdicts
+Not another fix: a correctness GATE. Every bug this session (#19-#23) passed `validate()`, rc=0 AND
+the byte-exact round-trip, and PT rejected the file anyway. This checks the INTERMEDIATE against
+invariants measured from PT-authored sessions.
+
+CALIBRATION (committed as a test): against the 12 PT-tested files it scores 8/8 rejections flagged,
+4/4 acceptances clean, 0 false positives, 0 misses.
+
+It also FALSIFIED one of my own invariants on first run. v1 required the ordinals to be DENSE 1..N
+-- what every PT-AUTHORED session shows -- and that flagged file 12, which PT ACCEPTED with [1,3,4]
+(the gap left by removing a middle track). So:
+    DENSITY  = a normalisation PT-authored files happen to have  -> severity "nonconforming"
+    UNIQUENESS = the rule PT actually enforces                   -> severity "error"
+Third time this session that "all PT files look like X" turned out to be normalisation rather than
+constraint, so the distinction now lives in the API instead of in my head.
+
+USE IT as the gate before shipping any edited session; the 12 files staged for re-test report 0
+errors and 0 notes.
+
+## Remaining frontier (unchanged, and honestly bounded)
+  1. ~17 spec entries still say UNKNOWN/UNPROVEN. Attempted this turn and STOPPED: the corpus has
+     no discriminating evidence for them (the "window closed" pairs also drop the whole MIDI-clip
+     family, so they are not controlled experiments). Resolving these needs NEW targeted sessions,
+     not more inference over the existing corpus -- inference is exactly what produced #24.
+  2. add-clip with NEW audio (0x2628 geometry).
+  3. Synth-path writer bugs (mixed-MIDI 0x2589 ordinals). Deliberately untouched: that path is
+     PT-confirmed, and a speculative fix there risks breaking something that works.
+  4. PT re-test of the 12 staged files -- still the only thing that can confirm #20-#23.
