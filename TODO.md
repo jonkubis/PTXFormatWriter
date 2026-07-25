@@ -3,6 +3,75 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## THE RE-KEY CORRUPTS REAL SESSIONS — one pass FIXED, three MEASURED AND STILL WRONG (2026-07-25)
+
+Method that produced all of this: stop asking whether the round-trip closes, and measure the
+edit against the CORPUS. A bare `_rekey_offsynth_positional(d)` on an UNTOUCHED real session
+should be a no-op. It was not: **10,624 bytes rewritten across 25 untouched sessions.**
+
+### FIXED and committed (7461bba) — the `0x2519` name-table ordinals
+
+Two separate defects in the same pass:
+
+  1. **The 32-char cap.** The re-key's name walk accepted `1 <= nlen <= 32`, so any longer name
+     was SKIPPED and every following ordinal written one slot early. The corpus session whose
+     first entry is the 33-char `Dancing In The Street Macy's 2017` had all 38 ordinals shifted
+     by one. The walk now delegates to the structural enumerator `_inline_name_entries` uses
+     (`_name_table_shift` + `_next_name_entry`), so the two can no longer disagree about the
+     entry set -- they DID disagree, and that is also why the dense-vs-real check was answering
+     for a different set of entries than the one being rewritten.
+  2. **Zero is a sentinel, not a value to overwrite.** Measured over 300 random corpus sessions:
+     **40.6%** of entries have ordinal `0`, **40.1%** repeat another entry's value, and the
+     NONZERO ordinals in table order are exactly `1..k` -- **300/300, no exceptions**. Shapes
+     like `[1,2,3,4,0,0,5,0,6,...]` are normal. Renumbering only the nonzeros took this field
+     from **1,608 ordinals rewritten across 25 untouched sessions to 0**, while synth sessions
+     (no zeros) renumber densely exactly as before, so the PT-confirmed oracles are untouched.
+
+     This also DELETED the pre-edit `dense` sampling flag: an add creates a duplicate among the
+     nonzeros and a remove leaves a gap, and renumbering the nonzeros repairs both without
+     needing to know the pre-edit shape. Three earlier attempts at this fix failed because they
+     tried to infer the convention AFTER the edit; the right rule needs no inference.
+
+### STILL WRONG — measured, not yet fixed. Remaining churn 10,624 bytes / 25 sessions:
+
+    0x251A  4630    0x261C  2682    0x2015  2218    0x200B  1094
+
+  * **`0x261C` C4 is a SYNTH-ONLY FIELD and we write it into every real session.** The spec
+    calls `_B261C_C4_FROM_END = 19` an audio display index "43/43". That 43/43 was measured on
+    synth/control files. In real sessions **`c4 == 0..k-1` holds in 0 of 149**, the last bytes
+    of a real `0x261C` are zeros or unrelated data, and a bare re-key **changes the C4 slot of
+    2,432 of 2,448 records (99%)** across 25 untouched sessions. Same class of error as the
+    `0x1015` and `midi9` mistakes: a corpus-scoped measurement restated as a format law. Before
+    "fixing" the writer, re-derive what (if anything) lives at that offset in real sessions --
+    my READER may be as wrong as the rule.
+  * **`0x2015`/`0x200A`/`0x200B` dense `1..n`** holds in only **33 of 149** real sessions.
+  * **`0x251A` lane ordinals**: the synth rule is `(i % N) + 1`, which matches **7/25**. The
+    real invariant is weaker and does hold: the nonzeros are **ascending runs restarting at 1**
+    (`[1,2,3,4,1,2,3,4]`, `[0,...,0,1,2,3,4,5,6,7,0,0]`) -- **25/25**, and 148/149 on the wider
+    sample. What triggers a restart is NOT yet known, and that is what a correct writer needs.
+
+### PT verdicts on the 12 staged files — the split is perfectly clean
+
+    REMOVE  02, 08, 09, 12   4/4 open AND close cleanly
+    DUPLICATE 01,03,04,05,06,07,10,11   8/8 fail (3 crash on load, 4 on close, 1 stream error)
+
+The remove path is sound; the ADD path is not. Root cause NOT yet found. Ruled OUT this session,
+each by measurement rather than argument:
+
+  * Name strings: the copy is renamed in all five name-bearing blocks (`0x2519`, `0x251A` x2,
+    `0x1057`/`0x1052`, `0x210B`, `0x2619`) -- string profile identical to a genuine track.
+  * GUIDs: the copy's fresh GUID has the same reference profile as an original (1x `0x2519`,
+    4x `0x251A`, 1x `0x210B`, 3x `0x2619`). GUIDs are NOT session-scoped (0/80 share a prefix)
+    and they PERSIST across saves, so a random one is not obviously illegal.
+  * `0x2589` low-word uniqueness is the ONLY universal invariant found (68/68 real sessions) and
+    it holds in all 12 staged files -- so it does not discriminate.
+
+The user's observation stands as the best lead and is NOT yet explained: PT displayed
+`[MIDI 1, MIDI 3, MIDI 3]` for a file whose name table is `[MIDI 1, MIDI 2, MIDI 3]` with three
+distinct GUIDs and dense ordinals. **PT resolves the displayed name through a reference we have
+not identified, and two tracks resolve to the same entry.** Find that reference and the add path
+is probably fixed. Do NOT stage more duplicates for PT until it is found -- 8/8 is not a fluke.
+
 ## Session bar-number offset — SESSION START BAR SOLVED (2026-06-30)
 
 Pro Tools lets a session's bar numbering start at an arbitrary bar (`-22`, `-1`, `0`, `2`).
