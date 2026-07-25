@@ -1054,3 +1054,28 @@ at byte-identical offsets to the rejected set. The narrow check was simply wrong
   2. 0x104F+11 MIDI clip-slot id cloned on clip-bearing MIDI tracks (never repeats in PT sessions).
   3. Awaiting PT re-test of /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-24/ (12 files, all now
      orphan-free with unique names and every pinned ordinal invariant satisfied).
+
+## Bug #23 FIXED (0x261C C4), and a 0x104F fix ATTEMPTED then REVERTED
+#23 — the 0x261C "C4" counter semantic is now PINNED from the corpus rather than guessed: it is the
+track's AUDIO-ONLY index, measured on 43 discriminating PT-authored sessions with ZERO exceptions
+(`multiple track types` = Click, MIDI, Audio 1, Audio 2 stores [0,1], NOT the global slots [2,3]).
+Our mixed synth's [0,1,3,4,5] is our own non-conforming output, not a second convention. Duplicates
+cloned the counter, so two tracks shared an identity ([0,1,2,2]). Fixed + tested; no-op on every
+PT-authored session. 186 tests.
+
+REVERTED — the 0x104F MIDI clip-slot id (u16 at +11, carried only by clip-bearing MIDI tracks).
+The DEFECT IS REAL: PT-authored sessions never repeat a value (`two midi tracks one note each` =
+[0,2] with a gap, `two clips same track clean` = [0,1] on ONE track — so the invariant is
+UNIQUENESS, not density), while a duplicate clones it ([0,0], visible in shipped file 04). My
+minimal de-duplication (keep the first occurrence, move only collisions to the lowest free value)
+was a NO-OP on every PT-authored session and produced unique ids after a dup -- but the corpus
+sweep collapsed from 252 round-trip-exact to 207 (failures 11 -> 56). remove cannot invert the
+renumber, and I do not yet understand the asymmetry, so it is NOT shipped: a fix that quadruples
+round-trip failures is worse than the defect it repairs. Baseline restored and re-verified at
+252/11. NEXT: work out why remove fails to invert the id assignment (likely the copy's id must be
+derived from something remove can recompute, rather than "lowest free").
+
+## Awaiting PT re-test — /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-24/ (12 files)
+All 12 are orphan-free (the proven crash discriminator), have unique names, distinct dense 0x261C
+C4 counters, satisfy every pinned ordinal invariant, and reload rc=0. Known remaining defect in the
+set: file 04 carries repeating 0x104F clip-slot ids (see above).
