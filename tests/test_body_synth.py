@@ -1639,6 +1639,39 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertGreaterEqual(checked["track"], 5, msg="expected several track-edit samples")
         self.assertGreaterEqual(checked["clip"], 5, msg="expected several clip-edit samples")
 
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/one clip bar 1.ptx")),
+                         "clip control not present")
+    def test_duplicate_region_and_place_a_clip_referencing_it(self):
+        """NEW CAPABILITY: `duplicate_region` appends a copy of a region under a new name, and
+        `add_clip(region_index=...)` can then place a clip that REFERENCES it.
+
+        This is unlocked by the 0x2628 layout being pinned: the record's variable section is
+        delimited by a constant 12-byte tail with a fixed 27-byte trailer (2774/2774 corpus
+        records), so `span == 57 + namelen + varlen` and duplicating a region only requires
+        rewriting the NAME -- no field semantics. Neither 0x2629 nor 0x2628 is a master-index
+        target (only the 0x262A list is), so no index entries are added."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/one clip bar 1.ptx"))))
+        before = BS.region_list(data)
+        self.assertGreater(len(before), 0)
+
+        step1 = BS.duplicate_region(data, 0, "NEWRGN")
+        after = BS.region_list(step1)
+        self.assertEqual(len(after), len(before) + 1)
+        self.assertEqual(after[-1][1], "NEWRGN")
+        self.assertEqual([n for _z, n in after[:-1]], [n for _z, n in before],
+                         msg="existing regions must be untouched")
+        self.assertEqual(BS.validate(step1), [])
+        self.assertEqual([v for v in BS.validate_pt_invariants(step1)
+                          if v["severity"] == "error"], [])
+
+        lane = [l for l in BS.clip_lanes(step1) if l[2] > 0][0][0]
+        step2 = BS.add_clip(step1, lane, position=3_000_000, region_index=len(after) - 1)
+        self.assertIn("NEWRGN", BS.clip_names(step2, lane),
+                      msg="the placed clip must reference the NEW region")
+        self.assertEqual(BS.validate(step2), [])
+        self.assertEqual([v for v in BS.validate_pt_invariants(step2)
+                          if v["severity"] == "error"], [])
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

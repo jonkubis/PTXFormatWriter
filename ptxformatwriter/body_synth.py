@@ -3997,6 +3997,100 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     return bytes(out)
 
 
+def region_list(data: bytes) -> "list[tuple[int, str]]":
+    """Every audio region in the session as `(zmark_of_0x2629, name)`, in file order -- the same
+    order the `0x104F` placement `+11` region INDEX refers to."""
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    lists = [(z, e) for z, e, c in bl if c == 0x262A]
+    if not lists:
+        return []
+    lz, le = lists[0]
+    out = []
+    for z, e, c in bl:
+        if c != 0x2629 or not (lz < z < le):
+            continue
+        nm = ""
+        for rz, re_, rc in bl:
+            if rc == 0x2628 and z < rz < e:
+                nl = int.from_bytes(data[rz + 9 : rz + 13], "little")
+                if 0 < nl <= 128:
+                    nm = data[rz + 13 : rz + 13 + nl].decode("latin1")
+                break
+        out.append((z, nm))
+    return sorted(out)
+
+
+def duplicate_region(data: bytes, region_index: int, new_name: str) -> bytes:
+    """Append a copy of region `region_index` under `new_name`, leaving everything else intact.
+
+    A region entry is a self-contained `0x2629` (holding its `0x2628` name+geometry record plus
+    `0x4403`/`0x1000` siblings) inside the `0x262A` list, whose `u32` at payload+0 is the entry
+    count. Neither `0x2629` nor `0x2628` is a master-index target -- only the `0x262A` list is --
+    so adding one needs NO new index entries, just an offset slide for whatever sits past the
+    insertion point.
+
+    The copy's geometry is taken VERBATIM, which is exactly right: `0x2628`'s variable section is
+    delimited by a constant 12-byte tail with a fixed 27-byte trailer (2774/2774 corpus records),
+    so `span == 57 + namelen + varlen` and only the NAME needs rewriting. That is why this works
+    without the field semantics that creating a region for genuinely new audio still requires.
+
+    Returns the new body; the new region is the last entry, so its index is `len(before)`.
+    """
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    lists = [(z, e) for z, e, c in bl if c == 0x262A]
+    if not lists:
+        raise ValueError("session has no 0x262A region list")
+    lz, le = lists[0]
+    entries = sorted((z, e) for z, e, c in bl if c == 0x2629 and lz < z < le)
+    if not 0 <= region_index < len(entries):
+        raise ValueError(f"region_index {region_index} out of range ({len(entries)} regions)")
+    sz, se = entries[region_index]
+    blob = bytearray(data[sz:se])
+
+    r28 = [(rz, re_) for rz, re_, rc in bl if rc == 0x2628 and sz < rz < se]
+    if not r28:
+        raise ValueError("region entry has no 0x2628 record")
+    rz, _re = r28[0]
+    off = rz - sz                                     # 0x2628 start inside the copied blob
+    old_len = int.from_bytes(blob[off + 9 : off + 13], "little")
+    nn = new_name.encode("latin1")
+    delta = len(nn) - old_len
+    blob[off + 13 : off + 13 + old_len] = nn
+    blob[off + 9 : off + 13] = len(nn).to_bytes(4, "little")
+    for at in (off, 0):                               # 0x2628 then the enclosing 0x2629
+        blob[at + 3 : at + 7] = (
+            int.from_bytes(blob[at + 3 : at + 7], "little") + delta
+        ).to_bytes(4, "little")
+
+    at_ins = entries[-1][1]                           # append after the last entry
+    grow = len(blob)
+    out = bytearray(data[:at_ins] + bytes(blob) + data[at_ins:])
+    for z, e, _c in bl:                               # grow every container spanning the insert
+        if z < at_ins <= e:
+            out[z + 3 : z + 7] = (
+                int.from_bytes(out[z + 3 : z + 7], "little") + grow
+            ).to_bytes(4, "little")
+    out[lz + 9 : lz + 13] = (
+        int.from_bytes(out[lz + 9 : lz + 13], "little") + 1
+    ).to_bytes(4, "little")
+
+    recs = _FI.parse_records(ref.data, {c for _z, _e, c in bl}, {z for z, _e, _c in bl})
+    def bump(abs_pos: int, val: int) -> None:
+        if val >= at_ins:
+            out[abs_pos + grow : abs_pos + grow + 4] = (val + grow).to_bytes(4, "little")
+    for r in recs:
+        for c in r.child_refs:
+            bump(ref.start + r.start + c.rel + 2, c.offset)
+        for el in r.elements:
+            for i, o in enumerate(el.offsets):
+                bump(ref.start + r.start + el.rel + 5 + 4 * i, o)
+    first_offset = min(z for z, _e, _c in bl) + 7
+    out[first_offset : first_offset + 4] = (ref.start + grow).to_bytes(4, "little")
+    return bytes(out)
+
+
 def add_clip(data: bytes, lane_zmark: int, position: int,
              region_index: "int | None" = None, template_clip_index: int = 0) -> bytes:
     """Add a clip to the lane at `lane_zmark`, reusing a region already in the session.
