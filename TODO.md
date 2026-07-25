@@ -1795,3 +1795,25 @@ untested and its 0x4701 subtree may need what 0x261B gives the audio path.
 
 STILL UNACCOUNTED: that session has 383 name entries but only 367 recognised records -- ~16 more
 tracks of kinds still unknown. The real per-track kind inventory is larger than four.
+
+## ALL SIX per-track kinds registered — a real 383-track session now accounts fully
+Enumerated by taking the DIRECT children of 0x2624 in real sessions, rather than collecting what
+the control corpus happened to have:
+    0x261C audio | 0x2620 MIDI | 0x261E click/aux | 0x263B folder/VCA | 0x2621 instrument | 0x261D master/bus
+0x2621 in 18/22 real sessions, 0x261D in 16/22; all six indexed. Names read from each record's
+nested 0x2619.
+
+S3101 PT PREP F.ptx: 383 name entries, 383 recognised records (343+23+9+7+1) -- previously 366, so
+17 tracks were invisible to both editors. remove_track('DRUMS MSTR') works on a master track,
+validate clean. 200 tests unchanged.
+
+OPEN: PT unseen. Instrument removal untested (that session's 0x2621 names are not in the name
+table -- worth understanding, it may mean instrument tracks are named elsewhere). Duplication
+untested for all three new kinds. Their 0x4701/0x2626 subtrees may need what 0x261B gives audio.
+
+### The pattern, stated once
+Six of my confident claims this session were properties of the 282-session corpus that I stated as
+properties of the FORMAT: the type inventory (256 vs 326+), the 14 "monomorphic" types (10 have
+signal), the gate's "0 false positives" (29/30 real sessions error), "three track kinds" (six), the
+editors' completeness (they ignored 17 of 383 tracks), and "documentation is capture-bound" (the
+captures existed). The corpus was mounted the whole time and named in my own memory file.
