@@ -1189,3 +1189,23 @@ them -- containment, and uniqueness of the 0x2519/0x251A/0x261C ordinals + track
 else PT-authored files share is recorded as "nonconforming", i.e. style, not law. That distinction
 is the single most useful thing this session produced, because I got it wrong four separate times
 by eyeballing PT-authored files and generalising.
+
+## Clip layer AUDITED (clean) + regression harness that PROVABLY catches this session's bugs
+Ran the calibrated gate over the clip primitives, which had never been checked against it:
+`add_clip` / `remove_clip` / `move_clip` produce ZERO error-severity violations across all 51
+clip-bearing corpus sessions. The track layer's disease does NOT extend to clips -- a placement
+legitimately reuses its region reference (`two clips same track` has two placements pointing at the
+SAME region), which independently confirms the 0x104F conclusion that got bug #24 reverted.
+
+New test `test_every_editing_primitive_produces_pt_clean_output` runs the gate over the OUTPUT of
+every track/clip editor across a corpus sample. VERIFIED to catch a real regression: disabling the
+bug-#20 re-key makes it fail immediately on the 0x251A lane ordinals. Future defects in these
+families are now caught by the suite rather than by a human hitting a PT crash. 190 tests.
+
+## `add_clip` ALREADY EXISTS — the frontier item was overstated
+The TODO listed "add-clip with NEW audio (0x2628 geometry)" as if clip insertion were missing.
+`add_clip(data, lane_zmark, position, region_index=None)` has been there and is the exact inverse
+of `remove_clip`; it places a region ALREADY in the session. The genuine gap is narrower: importing
+audio that is not yet in the session, which needs the 0x2628 region geometry -- and the spec
+already marks that "descriptor model (PARTIAL -- not add/replace-ready)". NOT attempted: building
+on partially-understood geometry is exactly what produced #24 and its revert.
