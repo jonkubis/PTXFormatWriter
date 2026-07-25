@@ -1454,3 +1454,17 @@ FOUND WHILE BUILDING IT (real API trap, now documented): lane/region zmarks are 
 ONE body, so every splice invalidates them. Chaining edits with a lane zmark captured before the
 chain fails with "no 0x1052 lane at zmark N". `region_list`/`clip_lanes` now say so, and recommend
 carrying region INDICES (stable under append) rather than zmarks.
+
+## Synthesis paths swept with the gate — clean, and now pinned
+The gate had only ever been run over `control_files/`. Sweeping `generated/` (413 of our own
+outputs) found 29 with ERROR-severity violations: 0x2589 chain counts (23), 0x261C C4 (11),
+0x251A lane ordinals (6).
+
+Checked before reacting: EVERY LIVE synthesis path is clean (stereo 8/12, mono 8, mixed-MIDI x2,
+click) -- so the 29 are artifacts of older code, not a live bug. New test
+`test_synthesis_paths_are_pt_invariant_clean` pins it, because synthesis is a SEPARATE writer from
+the editors and nothing was holding it to these invariants. 196 tests.
+
+The mixed-MIDI paths report "nonconforming" notes (repeated 0x2589 rows, non-dense subtree
+ordinals) and that is correct: PT opens those files (confirmed 2026-06-20). Only ERRORS are
+asserted -- the severity split earned its keep again.
