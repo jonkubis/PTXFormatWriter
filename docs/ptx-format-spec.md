@@ -3283,3 +3283,48 @@ variation is structural rather than per-byte.
 These are measured shapes, not semantics. The external corpus is large enough that correlating
 these offsets against session properties is now a tractable exercise, where against 282 sessions
 it was not.
+
+### The PT-invariant gate is calibrated to SMALL sessions — real-world sessions break it
+
+`body_synth.validate_pt_invariants` was measured against the 282-session `control_files` corpus and
+12 Pro-Tools-tested files, where it scored 8/8 rejections flagged, 4/4 acceptances clean and zero
+false positives. **That calibration does not survive contact with the external corpus.**
+
+Sampling real studio sessions from `/Volumes/Backups/AI/__PTX corpus`: **29 of 30 report
+error-severity violations**, and they are genuine Pro Tools files (session backups PT wrote itself).
+The failing rules are:
+
+| rule | what real sessions do |
+|---|---|
+| `0x2519-entry-ordinals` | repeated values in large tables |
+| `0x251A-lane-ordinals` | repeated values |
+| `0x261C-C4` | e.g. `512` for a session's single `0x261C` — the "audio-only index" reading (proven 43/43 on small sessions) does not hold |
+| `0x2589-view-chains` | chain count ≠ name-entry count |
+
+The reader is NOT at fault: spot-checking a real session parses 10 name entries with sane names,
+dense unique ordinals and no anomalies. The INVARIANTS are the problem — they were derived from
+small sessions (mostly ≤16 tracks, many synthetic-adjacent) and do not generalise to sessions with
+hundreds of tracks and richer track kinds.
+
+**Consequence:** every "PT-invariant" claim in this spec should be read as *"holds on the 282-session
+control corpus"*, not *"holds for Pro Tools"*. The rules remain useful — they DID catch all 8
+PT-rejected edits — but their error severity is only justified for sessions resembling the
+calibration set. Re-deriving them against the external corpus is the outstanding work, and until
+that is done the gate must not be treated as an authority on real-world sessions.
+
+### `0x263B` — a FOURTH per-track record kind (folder / VCA-style tracks)
+
+Absent from the 282-session corpus entirely; present in **27 of 40** sampled external sessions.
+
+- **Indexed:** 115/115 instances are master-index targets, like the other per-track records.
+- **Parent:** `0x2624`, the track list — so it is a sibling of `0x261C` (audio), `0x2620` (MIDI) and
+  `0x261E` (click/aux).
+- **Children:** a `0x2619` identity (name + GUID), a view chain (`0x2037`/`0x2038`/`0x203b`),
+  `0x4301`, and a `0x4701` playlist subtree (`0x4701`'s parent is always `0x263B`; it holds the
+  `0x200A`/`0x2015` display chain).
+- **Names observed:** `BGVS`, `RT MIX TRACKS`, `COMS` — i.e. folder/VCA-style grouping tracks.
+
+**Implication for editing:** `duplicate_track`/`remove_track` identify a track by walking the
+container set `{0x261C, 0x2620, 0x261E}`. `0x263B` is not in it, so these tracks are invisible to
+both editors on the majority of real sessions. Adding it is not a one-line change: the `0x4701`
+subtree and the indexed status both need handling.
