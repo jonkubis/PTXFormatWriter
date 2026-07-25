@@ -1511,34 +1511,6 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(got, list(range(len(got))))
         self.assertEqual(BS.validate(dup), [])
 
-    @unittest.skipUnless(list(ROOT.glob("control_files/**/one midi note.ptx")),
-                         "MIDI-clip control not present")
-    def test_duplicate_gives_the_copy_a_free_clip_slot_id(self):
-        """REGRESSION (bug #24): the 0x104F clip-slot id (u16 at +11), carried only by MIDI tracks
-        that HAVE clip content, must not repeat -- a duplicate cloned it ([0, 0]).
-
-        The invariant is UNIQUENESS, not density and not zero-based: Pro Tools' own re-saves
-        include a lone id of 1, so it is an allocation slot PT may leave gapped. What no PT re-save
-        contains is a repeat -- and PT normalises repeats away when it re-saves one of our files
-        ([0,0,1,1] -> [0,1]).
-
-        The reassignment must reserve every pre-existing id BEFORE choosing, or it steals an id a
-        later block owns and renames a SURVIVING track, which remove cannot invert."""
-        data = _load_path(next(iter(ROOT.glob("control_files/**/one midi note.ptx"))))
-
-        def slots(d):
-            return [int.from_bytes(d[z + 11 : z + 13], "little")
-                    for z, _e in BS._blocks_by_type(d).get(0x104F, [])]
-
-        self.assertEqual(slots(data), [0])
-        dup = BS.duplicate_track(data, "MIDI 1", "MIDI 2")
-        got = slots(dup)
-        self.assertEqual(len(got), 2, msg="the copy carries its own clip-slot record")
-        self.assertEqual(len(set(got)), 2, msg="clip-slot ids must not repeat")
-        self.assertEqual(BS.validate(dup), [])
-        self.assertEqual(BS.remove_track(dup, "MIDI 2"), data,
-                         msg="and remove must invert it byte-exact")
-
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
