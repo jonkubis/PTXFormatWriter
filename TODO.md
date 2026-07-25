@@ -1778,3 +1778,20 @@ structurally complete" was, again, a statement about the small corpus.
   3. Re-measure the type inventory properly: 326 types in 220 external sessions vs 256 in 282
      control files, 35 not in the spec. The "100% documented" claim needs restating against the
      real inventory.
+
+## 0x263B folder/VCA tracks are now REACHABLE by the editors
+Two changes, and the obvious one alone was insufficient:
+  1. `_TRACK_RECORD_TYPES` = {0x261C, 0x2620, 0x261E, 0x263B} -- container walk + gate enumerations.
+  2. The identification walk keyed on 0x102D, but a 0x263B record HAS NO 0x102D; its identity is a
+     bare 0x2619. Accepting 0x2619 as an identity carrier is what made them locatable. With only
+     change 1, remove_track still raised "cannot locate track".
+
+VERIFIED ON A REAL STUDIO SESSION: S3101 PT PREP F.ptx, 205,298 blocks, 383 name entries. Editors
+now see 367 per-track records (343 audio / 23 click / 1 folder); remove_track('BGVS') succeeds,
+validate clean, 4.1s. 200 tests unchanged.
+
+NOT proven: one session, one folder track, one operation, PT unseen. Duplicating a 0x263B is
+untested and its 0x4701 subtree may need what 0x261B gives the audio path.
+
+STILL UNACCOUNTED: that session has 383 name entries but only 367 recognised records -- ~16 more
+tracks of kinds still unknown. The real per-track kind inventory is larger than four.
