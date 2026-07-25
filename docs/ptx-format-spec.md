@@ -1980,7 +1980,21 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** Records a REFERENCED SOURCE/TEMPLATE's format, not the live session master clock — +6 mismatches sessionrate() in 5/19 and +4 mismatches true session bit depth in 6/19. The Form-A source GUID also appears in the audio-source-reference blocks 0x2033/0x2602/0x260e in the same file, confirming it links this descriptor to a specific source object. Root-sibling invariant: 0x2050 before, 0x207b after (19/19; the raw byte-adjacent predecessor is a child of 0x2050's subtree). CORRECTIONS from proposal: (1) '+4 matches session bit depth' is FALSE — it is SOURCE bit depth, mismatches in 6/19; (2) the tail is NOT a single '+18 GUID then optional name' layout — the name-string offset is form-dependent (Form A ends at GUID or +60; Form B at fixed +46).
 - **confidence:** HIGH for the fixed header +0..+17 (+10=5, +16=0 constant; +12 in {1,2}; +2/+3 pair set; +6 cross-checked vs sessionrate(); +4 in {16,24,32}) and structural facts (singleton, LEAF/ROOT, sibling 0x2050/0x207b, payload=size-2, 8-byte GUID after `2A 00 00 00` cross-corroborated in 0x2033/0x2602/0x260e). MEDIUM for the variable tail: the two forms and their GUID/name-string offsets are decoded and consistent within each form, but not unified into one generalized schema.
 
-### 0x207b — Session timecode/SMPTE-config record (two forms)
+### 0x207b — Session timecode/SMPTE-config record (ONE form; the "second" was a phantom)
+
+> **CORRECTION (measured on all 282 corpus sessions).** This entry described "two forms". There is
+> one: a 124-byte record (9-byte header + 115-byte payload), byte-identical in **282/282**
+> sessions. The apparent second form — an 11-byte block with a 2-byte `01 00` payload, seen in a
+> single session — sits at **body offset 20**, which is the file-header INDEX-POINTER record, not a
+> block. Its "content type" is the low half of the final-index offset, so in that one session the
+> pointer happened to read as `0x207b` (`5a 01 00 04 00 00 00 7b 20 01 00`).
+>
+> So `0x207b` is MONOMORPHIC: the corpus carries no signal to correlate its fields against, and
+> resolving its semantics needs a capture where a timecode/SMPTE setting actually differs.
+>
+> **General rule this illustrates:** any per-type variant count must EXCLUDE blocks below body
+> offset 31. Sweeping the flagged types, this phantom had also inflated `0x2056` (10 apparent
+> payloads → 9 real).
 
 - **kind:** Both, determined by block_type. block_type=0x02 (13/19) → LEAF, span 18, 9-byte payload, no children. block_type=0x03 (6/19) → CONTAINER, span 115, with exactly one child: content-type 0x4530 (block_type 0x01, whose OWN span is 97, NOT 115). Parent always top-level (None) in all 19. block_type deterministically predicts child presence.
 - **size:** Bimodal, exactly 1 per session (19/19). Small form: span=18, size_field=11, payload=9 bytes, block_type=0x02 (13 sessions). Large form: span=115, size_field=108, payload=9 bytes of own data + nested 0x4530 child (child size_field=90, child span=97), block_type=0x03 (6 sessions).
@@ -3097,6 +3111,14 @@ different situations. For each type, every instance's payload was compared acros
 | `0x1041` | 564 | 282 | 2 | **RESOLVED**: the variation is a length-prefixed groove-template NAME — see its entry |
 | `0x258e` | 3102 | 282 | 4 | **scope corrected**: a fixed set of 11 per session, not per-track — see its entry |
 | `0x201f` | 282 | 282 | 5 | reduced to ONE 2-valued field (payload+24); two readings refuted, still open |
+
+A second pass covered the nine flagged types the first pass had missed. Five more are monomorphic —
+`0x201e`, `0x2025`, `0x2049`, `0x2508`, `0x2509` (282 instances each, one payload each) — and
+`0x207b` joins them once its phantom is excluded (see its entry). Three carry real signal:
+`0x1017` (3 payloads, and NOT explained by its two parent contexts — `0x1018` alone holds 2),
+`0x2056` (9 real payloads), and `0x201f`. Counting the flagged types measured across both passes:
+**14 monomorphic, 4 with signal, 3 closed** (`0x1041` resolved, `0x103d` explained by parent,
+`0x258e` scope corrected).
 
 **The eight monomorphic types are provably unresolvable from this corpus.** Every instance is
 byte-identical, so there is no variation to correlate with any session property. Their layouts are
