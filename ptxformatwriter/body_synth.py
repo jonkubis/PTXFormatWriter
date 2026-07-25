@@ -3533,6 +3533,32 @@ def _renumber_tracks_per_type(data: bytes) -> bytes:
     return set_track_names(data, targets)
 
 
+def _sync_kind_track_counts(data: bytes) -> bytes:
+    """Set `0x1015` to the session's AUDIO track count and `0x1058` to its MIDI count, reading
+    each from the children the container actually frames. Size-neutral and idempotent.
+
+    Safe to RECOMPUTE (unlike the editors, which adjust by delta) because both conventions are
+    now pinned: `0x1015` == the number of `0x1014` entries and `0x1058` == the number of `0x1057`
+    entries, with ZERO mismatches across 162 PT-authored sessions. Bug #17 forbade recomputing
+    only while the convention was unknown; the mixed-MIDI SYNTH has been writing `0x1015` as the
+    TOTAL track count and `0x1058` off by one ever since, which is what the gate's
+    `container-count` note localised on 13 of our own files.
+
+    Pro Tools tolerates the stale values -- `mixedmidi_click_*` opened with them (2026-06-20) --
+    so this is conformance, not a crash fix."""
+    bl = _size_driven_blocks(data)
+    out = bytearray(data)
+    for cont, child in ((0x1015, 0x1014), (0x1058, 0x1057)):
+        for z, e, c in bl:
+            if c != cont or z < 31:
+                continue
+            n = sum(1 for zz, _ee, cc in bl if z < zz < e and cc == child)
+            if n:                                   # only the instance that frames children
+                out[z + 9 : z + 13] = n.to_bytes(4, "little")
+                break
+    return bytes(out)
+
+
 def synthesize_mixed_midi(
     spec: "list[int]",
     donor_data: bytes,
@@ -3584,6 +3610,7 @@ def synthesize_mixed_midi(
     # Grown tracks are named by internal position (gaps: Audio 1,2,4,6 / MIDI 1,5); renumber to
     # clean per-type counters (Audio 1..A / MIDI 1..M) as a hand-built PT session would read.
     out = _renumber_tracks_per_type(out)
+    out = _sync_kind_track_counts(out)   # 0x1015 = audio count, 0x1058 = MIDI count
     return set_waveform_view(out)
 
 

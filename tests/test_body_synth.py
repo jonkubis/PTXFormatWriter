@@ -1905,6 +1905,32 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertIn("region-reference", kinds,
                       msg="a placement pointing at a non-existent region must be an error")
 
+    def test_mixed_midi_synth_writes_the_kind_track_counts(self):
+        """REGRESSION (bug #26): the mixed-MIDI SYNTH wrote 0x1015 as the TOTAL track count and
+        0x1058 off by one, where PT's convention is 0x1015 == the audio (0x1014) count and
+        0x1058 == the MIDI (0x1057) count -- zero mismatches on 162 PT-authored sessions.
+
+        This is the synth-path twin of editor bug #17, and the gate's `container-count` note is
+        what localised it on 13 of our own files. Recomputing is safe HERE (unlike in the editors,
+        which adjust by delta) precisely because the convention is now pinned."""
+        for spec in ([1, 0, 2], [1, 0, 2, 2, 1, 2]):
+            with self.subTest(spec=spec):
+                data = BS.synthesize_mixed_midi_inline(spec)
+                bl = BS._size_driven_blocks(data)
+                for cont, child in ((0x1015, 0x1014), (0x1058, 0x1057)):
+                    for z, e, c in bl:
+                        if c != cont or z < 31:
+                            continue
+                        framed = sum(1 for zz, _ee, cc in bl if z < zz < e and cc == child)
+                        if not framed:
+                            continue
+                        stored = int.from_bytes(data[z + 9 : z + 13], "little")
+                        self.assertEqual(stored, framed,
+                                         msg=f"0x{cont:04x} must equal its 0x{child:04x} count")
+                        break
+                self.assertNotIn("container-count",
+                                 [v["invariant"] for v in BS.validate_pt_invariants(data)])
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
