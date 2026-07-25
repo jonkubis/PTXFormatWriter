@@ -1711,3 +1711,34 @@ BLOCKED ON INPUT I CANNOT PRODUCE:
   2. ~16 spec entries: 14 monomorphic types (zero variance across all 282 sessions -- provably no
      signal here), plus 0x201f and 0x2056's eight fields. One session saved twice with ONE UI
      setting changed would move all of them.
+
+## MAJOR CORRECTION — the external corpus was mounted the whole time (43,454 sessions)
+For many turns I asserted that ~14 spec entries were "monomorphic — provably no signal" and that
+the remaining documentation gaps were CAPTURE-BOUND, needing the user to save new sessions. I said
+it repeatedly and with confidence. It was wrong.
+
+`/Volumes/Backups/AI/__PTX corpus` holds **43,454 .ptx files** — 154x the 282-session corpus I had
+been measuring. A 350-session sample from it shows **10 of the 14 "monomorphic" types carry real
+variation**: 0x2508 (252 distinct payloads), 0x2502 (144), 0x2025 (48), 0x201e (45), 0x2020 (33),
+0x207b (26), 0x258f (9), 0x2049 (9), 0x206f (2), 0x2509 (2). Only 0x2103, 0x2435, 0x2715 and
+0x4827 are still invariant at that sample size.
+
+THE ERROR, precisely: I measured on the corpus in front of me, correctly concluded "no variation
+HERE", and then silently promoted that to "no variation EXISTS, so this needs new captures". The
+memory file even names the external corpus path. I never checked whether it was mounted.
+
+This is the same over-generalisation that produced the 0x207b phantom "two forms" and the
+`clean`/`.bak` false oracles, but more costly: it turned a tractable measurement problem into an
+imagined external dependency, and I used it to justify stopping.
+
+DONE THIS TURN: field maps for six of them (fixed-length records, variation confined to a handful of
+offsets, e.g. 0x201e 19/27 bytes constant with +9 in {9,18,32,64,128,134,135,144}) and the spec
+correction.
+
+### NEXT (now genuinely tractable, no new captures needed)
+  1. Correlate the mapped offsets against session properties over a LARGE external sample -- with
+     43k sessions the correlation sweeps that found nothing over 282 have real power.
+  2. Re-run the same measurement for 0x201f and 0x2056: both were "no perfect predictor over 282
+     sessions", which is now a much weaker statement than I treated it as.
+  3. Re-measure the coverage tracker against the external corpus -- 256 types was ALSO a
+     282-session number, and the real type inventory is probably larger.
