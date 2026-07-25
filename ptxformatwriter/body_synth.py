@@ -3997,6 +3997,41 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     return bytes(out)
 
 
+def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
+    """Point ONE registered audio file (the `file_index`-th `0x1003` record) at `wav_path`,
+    leaving every other file, region, clip and track byte-identical.
+
+    This is the piece that turns `duplicate_audio_file` (which copies a record verbatim, so the
+    copy describes the SAME audio) into genuine NEW-audio registration. The identity fields Pro
+    Tools matches on are the ones `set_clip_wav` already writes for the synthesis path, applied
+    here to a single record instead of all of them:
+
+      * `+15`  u32  sample count (data-chunk bytes / block align)
+      * `+44`  8 B  the WAV's `umid` material, `2a`-marked
+      * `+292` 8 B  the same material with a `00` prefix instead of the `2a` marker
+      * `+301` 2 B  `id2`, from the bext SMPTE-UMID marker
+
+    Size-neutral -- every field is fixed-width, so no block sizes or index offsets move.
+
+    Only PT/BWF WAVs carry the `umid`/`bext` chunks this needs; `wav_clip_identity` raises on a
+    raw WAV. The region's own length field (`0x2628`, first variable slot) is NOT touched here --
+    see `set_clip_wav`, which writes it as part of a whole-clip retarget.
+    """
+    sample_count, umid_material, id2 = wav_clip_identity(wav_path)
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    recs = sorted((z, e) for z, e, c in bl if c == 0x1003)
+    if not 0 <= file_index < len(recs):
+        raise ValueError(f"file_index {file_index} out of range ({len(recs)} audio files)")
+    z, e = recs[file_index]
+    out = bytearray(data)
+    out[z + 15 : z + 19] = int(sample_count).to_bytes(4, "little")
+    out[z + 44 : z + 52] = umid_material
+    out[z + 292 : z + 300] = b"\x00" + umid_material[1:]
+    out[z + 301 : z + 303] = id2
+    return bytes(out)
+
+
 def _splice_in(data: bytes, at: int, blob: bytes) -> bytes:
     """Insert `blob` at body offset `at`, growing every container that spans the point and sliding
     every master-index offset that sits at or past it. Size-neutral bookkeeping only -- the caller

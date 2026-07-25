@@ -1705,6 +1705,48 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual([v for v in BS.validate_pt_invariants(d)
                               if v["severity"] == "error"], [], msg=f"PT gate after {stage}")
 
+    def test_retarget_audio_file_writes_the_wav_identity(self):
+        """NEW CAPABILITY: `retarget_audio_file` points one registered 0x1003 record at a
+        different WAV, which is what turns `duplicate_audio_file` (a verbatim copy, describing the
+        SAME audio) into genuine new-audio registration.
+
+        Writes the identity fields `set_clip_wav` already established for the synthesis path --
+        sample count @+15, umid @+44 and @+292, id2 @+301 -- to ONE record instead of all of them.
+        All fixed-width, so the edit is size-neutral."""
+        sessions = list(ROOT.glob("control_files/**/one clip bar 1.ptx"))
+        wavs = [w for w in sorted(ROOT.glob("control_files/**/Audio Files/*.wav"))]
+        target = None
+        for w in wavs:
+            try:
+                BS.wav_clip_identity(w)
+                target = w
+                break
+            except Exception:
+                continue
+        if not sessions or target is None:
+            self.skipTest("no session + PT/BWF wav available")
+
+        def identities(d):
+            return [(int.from_bytes(d[z + 15 : z + 19], "little"), bytes(d[z + 44 : z + 52]))
+                    for z, e in sorted((z, e) for z, e, c in BS._size_driven_blocks(d)
+                                       if c == 0x1003)]
+
+        data = _load_path(sessions[0])
+        dup = BS.duplicate_audio_file(data, 0, target.name)
+        self.assertEqual(identities(dup)[0], identities(dup)[1],
+                         msg="the copy starts out describing the SAME audio")
+
+        out = BS.retarget_audio_file(dup, 1, target)
+        self.assertEqual(len(out), len(dup), msg="retarget must be size-neutral")
+        want_count, want_umid, _id2 = BS.wav_clip_identity(target)
+        self.assertEqual(identities(out)[1], (want_count, want_umid),
+                         msg="the retargeted record must carry the WAV's identity")
+        self.assertEqual(identities(out)[0], identities(data)[0],
+                         msg="the original registration must be untouched")
+        self.assertEqual(BS.validate(out), [])
+        self.assertEqual([v for v in BS.validate_pt_invariants(out)
+                          if v["severity"] == "error"], [])
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
