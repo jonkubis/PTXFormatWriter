@@ -1209,3 +1209,29 @@ of `remove_clip`; it places a region ALREADY in the session. The genuine gap is 
 audio that is not yet in the session, which needs the 0x2628 region geometry -- and the spec
 already marks that "descriptor model (PARTIAL -- not add/replace-ready)". NOT attempted: building
 on partially-understood geometry is exactly what produced #24 and its revert.
+
+## DEAD END, recorded so it is not retried: there is NO PT re-save oracle in this corpus
+I have now tried THREE times this session to find a "PT opened our file and saved it" oracle, and
+been wrong all three times:
+
+  1. `X.ptx` vs `X clean.ptx` -- REFUTED: the track KIND changes (0x261C audio -> 0x2620 MIDI,
+     "Audio 1" -> "MIDI 1"). Separate captures. This one cost a shipped fix (#24) and its revert.
+  2. `Session File Backups/X.bak.NNN` -- REFUTED: `mixedmidi_click_bottom.bak.000` reports EIGHT
+     tracks for SIX name entries, with duplicated names (Audio 1 x2, MIDI 2 x2) and 0x1014=5 vs our
+     3. A different session state, not a normalisation of ours.
+  3. (The initial `0x104F` "PT closes gaps" reading came from #1 and fell with it.)
+
+WHAT MADE #2 LOOK CONVINCING, and why that was not enough: every .bak scored 0 errors + 0 notes
+under the gate while every corresponding file of ours scored 0 errors + 3 notes -- exactly the
+"PT tolerates on load, normalises on save" story I was hoping for. The numbers fit the hypothesis
+perfectly and the hypothesis was still false. Provenance has to be established BEFORE the
+conclusions are read, not inferred from how well they fit.
+
+DO NOT retry this without external provenance (a file the user confirms Pro Tools wrote).
+
+## OPEN QUESTION surfaced by that dead end (NOT a rule -- uncalibrated)
+`track_types()` reports 8 tracks for a 6-entry name table on those .bak files, with repeated names.
+Either those files are genuinely malformed, or `track_types` over-reports on some structures. The
+gate does NOT check track_types against the name table, so it is blind to whichever it is. I have
+not added a rule because I cannot calibrate one against a PT verdict -- adding uncalibrated rules
+is what produced the two false positives the gate itself later caught.
