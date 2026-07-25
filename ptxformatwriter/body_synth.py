@@ -5461,7 +5461,18 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     for z, e, _c in bl:                              # grow enclosing containers
         if z in ident:
             continue
-        grow = sum(len(ins) for at, ins, _su in inserts if z < at < e)
+        # A copy unit is inserted at `at == e_source_unit`. When the source unit is the LAST child
+        # of an ancestor, that ancestor's declared end EQUALS the insertion offset, so a strict
+        # `at < e` skipped it: the container was not grown and the copy landed just past its
+        # declared end -- ORPHANED. PT-tested 2026-07-23: every duplicate whose copied 0x2589
+        # escaped 0x258A/0x258B this way CRASHED PRO TOOLS ON LOAD (01/04/07) or failed with
+        # "unexpected stream type ... Zoom Memories" (10, the 0x2551 stream PT reads there); every
+        # duplicate without the orphan merely loaded. 8/8 + 4/4 correlation across the tested set,
+        # with a controlled pair (06 dup-audio grew all four ancestors and LOADED; 07 dup-MIDI on
+        # the SAME session left 0x258A/0x258B ungrown and CRASHED). Grow when the insertion is at
+        # the end too, provided the source unit really is inside this container.
+        grow = sum(len(ins) for at, ins, _su in inserts
+                   if (z < at < e) or (at == e and _su is not None and z < _su))
         if grow:
             nz = shift(z)
             body[nz + 3 : nz + 7] = (

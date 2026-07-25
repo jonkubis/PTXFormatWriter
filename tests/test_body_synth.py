@@ -1451,6 +1451,32 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(BS.remove_track(dup, "ZZZZZZZ"), data,
                          msg="remove must invert the promotion byte-exact")
 
+    def test_copy_is_not_orphaned_out_of_its_container(self):
+        """REGRESSION (bug #22, the PT CRASH-ON-LOAD cause). A copy unit is spliced at
+        `at == end_of_source_unit`. When the source is the LAST child of an ancestor, that
+        ancestor's declared end EQUALS the insertion offset, so the old strict `z < at < e`
+        growth test skipped it: the container kept its old size and the copy landed just past
+        its declared end -- a block ORPHANED out of its parent.
+
+        Pro Tools verdict (2026-07-23): every duplicate whose copied 0x2589 escaped 0x258A/0x258B
+        this way CRASHED ON LOAD, or failed with "unexpected stream type ... Zoom Memories"; every
+        duplicate without the orphan at least loaded. `two midi tracks no clips` is the minimal
+        reproduction -- MIDI 1's view chain is the LAST child of 0x258A, so duplicating it hits
+        the boundary exactly."""
+        data = _load_path(next(iter(ROOT.glob(
+            "control_files/**/two midi tracks no clips.ptx"))))
+        dup = BS.duplicate_track(data, "MIDI 1", "MIDI 3")
+        bl = BS._size_driven_blocks(dup)
+        for child, parent in ((0x2589, 0x258A), (0x1057, 0x1058), (0x210B, 0x2107),
+                              (0x2620, 0x2624)):
+            spans = [(z, e) for z, e, c in bl if c == parent]
+            loose = [z for z, e, c in bl if c == child
+                     and not any(pz < z and e <= pe for pz, pe in spans)]
+            self.assertEqual(loose, [], msg=f"0x{child:04x} orphaned out of 0x{parent:04x}")
+        self.assertEqual(BS.validate(dup), [])
+        self.assertEqual(BS.remove_track(dup, "MIDI 3"),
+                         BS._rekey_offsynth_positional(data))
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
