@@ -3559,6 +3559,46 @@ def _sync_kind_track_counts(data: bytes) -> bytes:
     return bytes(out)
 
 
+def _repair_view_chain_ordinals(data: bytes) -> bytes:
+    """Make the `0x2589` display-row ordinals a permutation of `range(name entries)`.
+
+    Every PT-authored session satisfies that (one chain per display row); the mixed-MIDI synth
+    emits a COLLISION -- `[1, 0, 1]` for three entries, `[1, 0, 1, 2, 3, 4]` for six -- because
+    `grow_one_midi_track` appends a COPY of an existing chain without restamping its ordinal.
+
+    Minimal repair, the same shape that worked for the 0x104F clip-slot ids: reserve every ordinal
+    already present, then move only the SECOND and later occurrences of a repeat to the lowest
+    value still missing from the range. Assignments that are already correct are never touched, so
+    a session whose chains are fine is returned unchanged. Size-neutral.
+
+    Chain->track attribution is deliberately NOT inferred here: file order is not display order,
+    so nothing in the synth output says which track a colliding chain belongs to. This only
+    guarantees the invariant PT files satisfy; Pro Tools recomputes view state on load, and it
+    ACCEPTED these files with the collision (2026-06-20), so this is conformance."""
+    bl = _size_driven_blocks(data)
+    nt = [(z, e) for z, e, c in bl if c == 0x2519]
+    chains = [z for z, _e, c in bl if c == 0x2589]
+    if not nt or not chains:
+        return data
+    n = len(_inline_name_entries(data, nt[0][0], nt[0][1], bl))
+    vals = [int.from_bytes(data[z + 9 : z + 11], "little") for z in chains]
+    if sorted(vals) == list(range(n)):
+        return data                                   # already a clean permutation
+    out = bytearray(data)
+    used, seen = set(vals), set()
+    free = [v for v in range(n) if v not in used]
+    for z, v in zip(chains, vals):
+        if v in seen or v >= n:
+            if not free:
+                break
+            nv = free.pop(0)
+            used.add(nv)
+            out[z + 9 : z + 11] = nv.to_bytes(2, "little")
+        else:
+            seen.add(v)
+    return bytes(out)
+
+
 def synthesize_mixed_midi(
     spec: "list[int]",
     donor_data: bytes,
@@ -3611,6 +3651,13 @@ def synthesize_mixed_midi(
     # clean per-type counters (Audio 1..A / MIDI 1..M) as a hand-built PT session would read.
     out = _renumber_tracks_per_type(out)
     out = _sync_kind_track_counts(out)   # 0x1015 = audio count, 0x1058 = MIDI count
+    out = _repair_view_chain_ordinals(out)   # one 0x2589 chain per display row, no collisions
+    # 0x261C "C4" is the AUDIO-ONLY display index (43/43 discriminating PT sessions). The mixed
+    # synth left gaps ([0,1,3,4,5]) by numbering against the full track list.
+    _b = bytearray(out)
+    for _s, (_z, _e) in enumerate(_blocks_by_type(out).get(0x261C, [])):
+        _b[_e - _B261C_C4_FROM_END : _e - _B261C_C4_FROM_END + 4] = _s.to_bytes(4, "little")
+    out = bytes(_b)
     return set_waveform_view(out)
 
 

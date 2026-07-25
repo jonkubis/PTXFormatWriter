@@ -1828,9 +1828,10 @@ class ViewChainAttributionTests(unittest.TestCase):
         counters, 0x251A lane ordinals). Every LIVE path is clean, so those are artifacts of older
         code -- this test keeps it that way.
 
-        Note the mixed-MIDI paths legitimately report "nonconforming" notes (repeated 0x2589
-        display rows and non-dense subtree ordinals). Pro Tools opens those files -- confirmed
-        2026-06-20 -- so they are style, not faults, and only ERRORS are asserted."""
+        As of bugs #26-#28 the mixed-MIDI paths are also free of nonconforming NOTES: the kind
+        track counts, the 0x2589 chain permutation and the 0x261C C4 audio index are all repaired
+        at the end of `synthesize_mixed_midi`. This test asserts BOTH severities for every path,
+        so a regression in either is caught."""
         def errors(d):
             return [v for v in BS.validate_pt_invariants(d) if v["severity"] == "error"]
 
@@ -1843,7 +1844,11 @@ class ViewChainAttributionTests(unittest.TestCase):
              lambda: BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2])),
         ):
             with self.subTest(path=label):
-                self.assertEqual(errors(build()), [], msg=f"{label} must be PT-invariant clean")
+                data = build()
+                self.assertEqual(errors(data), [], msg=f"{label} must be PT-invariant clean")
+                notes = [v["invariant"] for v in BS.validate_pt_invariants(data)
+                         if v["severity"] == "nonconforming"]
+                self.assertEqual(notes, [], msg=f"{label} must also be free of nonconforming notes")
 
     @unittest.skipUnless(list(ROOT.glob("control_files/**/arbitrary wav relinked.ptx")),
                          "relinked control not present")
