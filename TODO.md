@@ -1107,3 +1107,32 @@ how both the density claim and the uniqueness claim got settled.
 Zero known defects remain in the set: orphan-free (the proven crash discriminator), unique track
 names, distinct 0x261C C4 counters, unique 0x104F clip-slot ids, every ordinal invariant satisfied,
 validate() clean, reload rc=0.
+
+## BUG #24 REVERTED — it was a CATEGORY ERROR, and the spec already had the answer
+I shipped #24 ("de-duplicate the 0x104F clip-slot id") last turn on the strength of two claims. Both
+were wrong, and mining the corpus further is what exposed them:
+
+  1. THE "PT RE-SAVE" ORACLE DOES NOT EXIST. I treated `X.ptx` / `X clean.ptx` as before/after of one
+     session. Diffing them structurally: `two clips same track` goes from an AUDIO track (0x261C,
+     "Audio 1") to a MIDI track (0x2620, "MIDI 1"), and the third pair drops the entire
+     0x2582-0x2586 MIDI-clip family. They are SEPARATE CAPTURES, not re-saves. Every
+     "normalisation rule" I derived from them (PT closes gaps, PT removes repeats) was an artifact
+     of comparing unrelated files.
+  2. `0x104F +11` IS NOT AN OBJECT ID -- it is the REGION INDEX into the 0x2629 list, and §8 of the
+     spec has documented it as such, "verified high", the whole time. Repeated values are correct BY
+     DEFINITION: the same region placed twice, and a stereo track's two lanes referencing the same
+     regions. `two clips same track.ptx` -- PT-authored on independent grounds (it satisfies every
+     invariant our own writer gets wrong) -- stores [0,0,1,1] for ONE stereo track.
+
+So the fix was renumbering PT-conforming data. Reverted (commit 1925c2c); corpus back to the 252/11
+baseline; 186 tests.
+
+GENUINELY NEW, and kept in the spec: `0x104F` hangs off TWO parent chains --
+`0x1054 > 0x1052(lane) > 0x1050 > 0x104F` for audio, `0x1058 > 0x1057(track) > 0x1056 > 0x104F` for
+MIDI. An editor walking only one chain misses every placement of the other kind. Also recorded: the
+`* clean.ptx` caveat, so nobody rebuilds the phantom oracle.
+
+LESSON: before inventing a semantic for a field, GREP THE SPEC FOR IT. §8 already had `0x104F +11`
+right; I spent a fix, a revert and two false invariants rediscovering it wrongly. And an "oracle"
+needs its provenance checked before its conclusions are trusted -- I validated the conclusions and
+never the premise.
