@@ -3,6 +3,60 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## THE 8/8 DUPLICATE FAILURES MAY BE THE SOURCES, NOT THE EDIT (2026-07-25)
+
+With the external drive gone I went looking locally and found the corpus was never the only ground
+truth: **`control_files/` holds 282 PT-generated sessions**, including LADDERS (`lots of mono
+tracks/{n} mono tracks.ptx`, n = 0..16). Consecutive rungs differ by exactly one track and BOTH were
+made by Pro Tools -- a local oracle for adding a track, no external volume needed.
+
+### Our add path reproduces PT almost exactly on a GENUINE source
+
+`duplicate_track` on PT's `4 mono tracks.ptx` vs PT's own `5 mono tracks.ptx`:
+
+    block-type deltas ................. IDENTICAL, zero mismatches across every type
+    total blocks ...................... 936 vs 936
+    blocks BYTE-IDENTICAL to PT's ..... 905 of 936
+    0x251A lane ordinals .............. [1,2,3,4,5,1,2,3,4,5] -- EXACTLY PT's
+    0x2589 overview ................... right SET, different slot: PT [1,4,0,3,2], ours [1,0,3,4,2]
+
+The one real discrepancy is where the new track's `0x2589` chain sits in the block stream. Whether
+that matters is UNKNOWN -- if the mapping is by containment/GUID rather than position it is benign.
+
+### The likely confound: every previous PT test used a PRE-BROKEN source
+
+Checking the `next_kind` chain across all 282 controls partitions them **exactly** along provenance:
+
+    chain CLEAN  : 272   (genuine PT captures)
+    chain BROKEN :  10   -- midi9, mixedmidi_5_AMSmM, mixedmidi_6_noextfiles, mixedmidi_9_mix3midi,
+                           mixedmidi_click_{top,middle,bottom}, mixedmidi_reorder_MIDImiddle,
+                           synth_4mono_8stereo, robust_audio_mixed12  -- ALL our own synth output
+
+The 12 staged files were all built from that broken set. So **our SYNTH WRITER emits a bad
+`next_kind` for mixed-kind sessions** -- a defect in synthesis, not just editing -- and the 8
+duplicate failures were duplicates OF ALREADY-INVALID SESSIONS. That does not prove the add path is
+sound, but it does mean the previous experiment could not have told us either way.
+
+PT's own re-saves confirm the direction: `Session File Backups/mixedmidi_click_bottom.bak.00{0,1}`
+are PT-generated and chain-CLEAN, while our `mixedmidi_click_bottom.ptx` with the same six track
+names is chain-BROKEN.
+
+### STAGED FOR PT — /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-25_GENUINE/ (6 files)
+
+Every source is a chain-clean genuine PT session; every output is chain-clean, `validate()`
+error-free, reloads rc=0, and has UNIQUE track names (the user's confirmed crash-on-close trigger).
+File 01's block profile is identical to PT's own `5 mono tracks.ptx`.
+
+    A_mono_ladder/01_dup_4_mono_tracks.ptx              4 -> 5 audio
+    A_mono_ladder/02_rm_4_mono_tracks.ptx               4 -> 3 audio
+    B_stereo/03_dup_3_stereo_tracks.ptx                 3 -> 4 stereo
+    C_mixedkind/04_dup_multiple_track_types_no_cl.ptx   MIDI+audio, 3 -> 4
+    C_mixedkind/05_rm_multiple_track_types_no_cl.ptx    MIDI+audio, 3 -> 2
+    D_withclick/06_dup_multiple_track_types.ptx         click+MIDI+audio, 4 -> 5
+
+TODO NEXT: fix the SYNTH writer's next_kind so newly synthesized mixed sessions are valid, and
+regenerate the 10 broken controls (they are checked-in artifacts used as test inputs).
+
 ## BLOCKED — the corpus drive is DISCONNECTED (2026-07-25)
 
 `/Volumes/Backups/AI/__PTX corpus` is gone mid-session: `mount` and `diskutil list` show no
