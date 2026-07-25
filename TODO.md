@@ -113,8 +113,15 @@ explain the 8 staged failures: those synth sessions have ZERO markers, so the ma
 ### FIXED from this oracle: the `next_kind` chain (`a940fd5`)
 
 `next_kind` names the NEXT entry's kind, so an insert/delete re-points it. We never updated the
-source's, so duplicating `MIDI 1` in a mixed session left `MIDI 1 -> MIDI 2` tagged audio and PT
-crashed on load (staged file 07). Fixed in BOTH editors (remove hands the predecessor the removed
+source's, so duplicating `MIDI 1` in a mixed session left `MIDI 1 -> MIDI 2` tagged audio.
+
+**CORRECTION (same day): a violation is NOT known to be fatal.** I wrote that this crashed staged
+file 07 on load. That was an inference from ONE file that both crashed and had a broken chain.
+`mixedmidi_click_{top,middle,bottom}` and `mixedmidi_reorder_MIDImiddle` each carry an
+`Audio 3 -> MIDI 2` violation and are PT-CONFIRMED TO OPEN (2026-06-20). So the rule describes what
+PT writes and matching it is right, but it explains NO observed crash, and it must be
+`nonconforming` rather than `error` in the gate -- as an error rule it would fire on four
+PT-confirmed-good files, which is exactly the over-strictness trap hit three times already. Fixed in BOTH editors (remove hands the predecessor the removed
 entry's value, an exact inverse). Chain intact after duplicating a middle track in **14/14** real
 sessions; 201 tests green. Also corrected the field's documentation: there are **six** kind codes
 (0/1/2 audio/MIDI/click plus 5 folder-VCA, 7 instrument, 11 master-bus), which is where the

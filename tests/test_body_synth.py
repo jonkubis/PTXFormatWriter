@@ -849,9 +849,12 @@ class MixedMidiTests(unittest.TestCase):
 
         This is why 10 of the 282 control files fail a chain check and the other 272 pass — the 10
         are exactly our own synth output, and the violation count equals the number of MIDI tracks
-        beyond the first (1, 2 and 3 for the sessions with 2, 3 and 4 MIDI tracks). Every file
-        previously sent for Pro Tools verification was built from that broken set, so the duplicate
-        results could not distinguish a bad edit from a bad source.
+        beyond the first (1, 2 and 3 for the sessions with 2, 3 and 4 MIDI tracks).
+
+        A violation is NOT known to be fatal: `mixedmidi_click_{top,middle,bottom}` and
+        `mixedmidi_reorder_MIDImiddle` all carry one and are PT-confirmed to OPEN. The point of
+        this test is that we should write what Pro Tools writes (3379/3379 consecutive pairs over
+        40 real sessions), not that a violation crashes anything.
         """
         KIND = {0x261C: 0, 0x2620: 1, 0x261E: 2, 0x263B: 5, 0x2621: 7, 0x261D: 11}
 

@@ -6123,7 +6123,9 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # u16 describing the kind of the entry that FOLLOWS it -- now describes the COPY, i.e. it must
     # become the source's own kind. It was left untouched, so the chain kept naming whatever used
     # to follow: duplicating `MIDI 1` in a mixed session produced `MIDI 1 -> MIDI 2` still tagged
-    # 0x0000 (audio) instead of 0x0100 (MIDI), and PT crashed on load. Pro Tools' own duplicate of
+    # 0x0000 (audio) instead of 0x0100 (MIDI). A violation is NOT known to be fatal -- four control
+    # files carry one and are PT-confirmed to OPEN -- so this is about writing what PT writes, not
+    # about a crash. Pro Tools' own duplicate of
     # an audio track (corpus pair THE WIND_Vocal Tracking bak.095 -> bak.096, which is PT's Duplicate
     # Track writing `Voc 2.dup1`) keeps this chain exact, and ours did not.
     #

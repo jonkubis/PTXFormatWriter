@@ -2962,7 +2962,14 @@ insertion or deletion re-points it:
 
 - **Inserting** a copy directly after its source makes the SOURCE's `next_kind` describe the copy —
   it must be rewritten to the source's own kind. Leaving it alone produced `MIDI 1 -> MIDI 2` still
-  tagged `0x0000` (audio) in a mixed session, and **Pro Tools crashed that file on load**.
+  tagged `0x0000` (audio) in a mixed session.
+
+  **A violation is NOT known to be fatal.** An earlier revision of this section claimed Pro Tools
+  crashed that file on load. That was an inference from one file that both crashed and had a broken
+  chain — and it is refuted by four counterexamples: `mixedmidi_click_{top,middle,bottom}` and
+  `mixedmidi_reorder_MIDImiddle` each carry an `Audio 3 -> MIDI 2` violation and were **confirmed
+  to open in Pro Tools** (2026-06-20). So the rule describes what PT WRITES, and matching it is
+  correct, but it is `nonconforming`, not `error`, and it does not explain any observed crash.
 - **Removing** a non-last entry must hand the predecessor the REMOVED entry's `next_kind` — which is
   already the correct value, so the repair is a copy, and an exact inverse of the insertion case.
 
