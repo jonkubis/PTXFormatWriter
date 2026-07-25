@@ -3997,6 +3997,95 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     return bytes(out)
 
 
+def _splice_in(data: bytes, at: int, blob: bytes) -> bytes:
+    """Insert `blob` at body offset `at`, growing every container that spans the point and sliding
+    every master-index offset that sits at or past it. Size-neutral bookkeeping only -- the caller
+    is responsible for any COUNT field the new element belongs to.
+
+    Extracted from `duplicate_region` / `add_clip` / `remove_clip`, which had each grown their own
+    copy of this. It is only valid for elements that are NOT master-index targets (verified for
+    0x2629/0x2628 regions and 0x1003/0x103A audio-file records); an indexed element additionally
+    needs its own index entry, which `duplicate_track` handles separately."""
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    grow = len(blob)
+    out = bytearray(data[:at] + blob + data[at:])
+    for z, e, _c in bl:
+        if z < at <= e:
+            out[z + 3 : z + 7] = (
+                int.from_bytes(out[z + 3 : z + 7], "little") + grow
+            ).to_bytes(4, "little")
+    recs = _FI.parse_records(ref.data, {c for _z, _e, c in bl}, {z for z, _e, _c in bl})
+    def bump(abs_pos: int, val: int) -> None:
+        if val >= at:
+            out[abs_pos + grow : abs_pos + grow + 4] = (val + grow).to_bytes(4, "little")
+    for r in recs:
+        for c in r.child_refs:
+            bump(ref.start + r.start + c.rel + 2, c.offset)
+        for el in r.elements:
+            for i, o in enumerate(el.offsets):
+                bump(ref.start + r.start + el.rel + 5 + 4 * i, o)
+    first_offset = min(z for z, _e, _c in bl) + 7
+    out[first_offset : first_offset + 4] = (ref.start + grow).to_bytes(4, "little")
+    return bytes(out)
+
+
+def _audio_file_list(data: bytes) -> "tuple[int, int, list[tuple[int, str]]]":
+    """`(list_zmark, entries_end, [(entry_offset, filename)])` for the `0x103A` audio-file list.
+
+    Entries pack back-to-back after the `"Audio Files"` anchor + a `u32`, each
+    `02 00 00 00 00 <u32 namelen> <name> "EVAW"` -- stride `13 + namelen`. A session carries
+    several 0x103A blocks; the real list is the one holding the anchor."""
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    for z, e, c in bl:
+        if c != 0x103A or e - z <= 60:
+            continue
+        a = data.find(b"Audio Files", z, e)
+        if a < 0:
+            continue
+        i = a + len(b"Audio Files") + 4
+        out = []
+        while i + 9 <= e and data[i : i + 4] == b"\x02\x00\x00\x00":
+            nlen = int.from_bytes(data[i + 5 : i + 9], "little")
+            if nlen <= 0 or i + 13 + nlen > e:
+                break
+            out.append((i, data[i + 9 : i + 9 + nlen].decode("latin1")))
+            i += 13 + nlen
+        return z, i, out
+    raise ValueError("session has no 0x103A audio-file list")
+
+
+def duplicate_audio_file(data: bytes, file_index: int, new_filename: str) -> bytes:
+    """Register another audio file by copying entry `file_index` under `new_filename`.
+
+    Adds BOTH halves of a wav's registration: the `0x103A` list entry (the filename Pro Tools
+    matches on) and a copy of the corresponding per-wav `0x1003` record -- the corpus shows these
+    are 1:1 (4 wavs -> 4 records; 1300 -> 1300). Neither is a master-index target, so no index
+    entries are needed, only the offset slide `_splice_in` performs.
+
+    The `0x1003` body is copied VERBATIM, so the new registration describes the SAME audio as the
+    source. That makes this "register the same audio under a second name", which is what an
+    in-place editor needs to attach a duplicated region to a filename. Pointing the record at
+    genuinely DIFFERENT audio additionally requires rewriting the identity fields inside `0x1003`
+    (length/rate/GUID) -- see `wav_clip_identity`.
+    """
+    lz, entries_end, entries = _audio_file_list(data)
+    if not 0 <= file_index < len(entries):
+        raise ValueError(f"file_index {file_index} out of range ({len(entries)} files)")
+    nb = new_filename.encode("latin1")
+    entry = b"\x02\x00\x00\x00\x00" + len(nb).to_bytes(4, "little") + nb + b"EVAW"
+    out = _splice_in(data, entries_end, entry)
+
+    ref = _FI.final_index_ref(out)
+    bl = sorted(_raw_block_bounds(out, ref.start))
+    recs = sorted((z, e) for z, e, c in bl if c == 0x1003)
+    if recs:
+        sz, se = recs[min(file_index, len(recs) - 1)]
+        out = _splice_in(out, recs[-1][1], bytes(out[sz:se]))
+    return out
+
+
 def region_list(data: bytes) -> "list[tuple[int, str]]":
     """Every audio region in the session as `(zmark_of_0x2629, name)`, in file order -- the same
     order the `0x104F` placement `+11` region INDEX refers to."""

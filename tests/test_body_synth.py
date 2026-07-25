@@ -1672,6 +1672,39 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual([v for v in BS.validate_pt_invariants(step2)
                           if v["severity"] == "error"], [])
 
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/one clip bar 1.ptx")),
+                         "clip control not present")
+    def test_register_audio_file_then_region_then_clip(self):
+        """NEW CAPABILITY: the three-step chain an in-place editor needs to introduce audio --
+        `duplicate_audio_file` (0x103A filename entry + its 1:1 0x1003 record),
+        `duplicate_region` (0x2629/0x2628), then `add_clip(region_index=...)`.
+
+        None of 0x103A / 0x1003 / 0x2629 / 0x2628 is a master-index target, so every step is a
+        plain splice plus an offset slide -- no index entries.
+
+        SCOPE: the 0x1003 body is copied verbatim, so the new registration describes the SAME
+        audio as the source. Pointing it at genuinely different audio additionally requires
+        rewriting the identity fields inside 0x1003. PT has NOT verified this chain."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/one clip bar 1.ptx"))))
+        files0, regions0 = BS._audio_filenames(data), BS.region_list(data)
+
+        s1 = BS.duplicate_audio_file(data, 0, "IMPORTED.wav")
+        self.assertEqual(BS._audio_filenames(s1), files0 + ["IMPORTED.wav"])
+
+        s2 = BS.duplicate_region(s1, 0, "IMPORTED")
+        self.assertEqual([n for _z, n in BS.region_list(s2)],
+                         [n for _z, n in regions0] + ["IMPORTED"])
+
+        lane = [l for l in BS.clip_lanes(s2) if l[2] > 0][0][0]
+        s3 = BS.add_clip(s2, lane, position=4_000_000,
+                         region_index=len(BS.region_list(s2)) - 1)
+        self.assertIn("IMPORTED", BS.clip_names(s3, lane))
+
+        for stage, d in (("file", s1), ("region", s2), ("clip", s3)):
+            self.assertEqual(BS.validate(d), [], msg=f"validate after {stage}")
+            self.assertEqual([v for v in BS.validate_pt_invariants(d)
+                              if v["severity"] == "error"], [], msg=f"PT gate after {stage}")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
