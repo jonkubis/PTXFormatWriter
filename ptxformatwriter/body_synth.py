@@ -5099,6 +5099,28 @@ def _set_b261c_free_field(body: bytearray, z: int, e: int, kind: int,
     body[ne + off["blob"] : ne + off["blob"] + _B261C_BLOB_LEN] = blob
 
 
+def _name_entry_ordinal_slots(body, z: int, region_end: int) -> "list[int]":
+    """Byte offset of each `0x2519` inline entry's NAME END, in table order.
+
+    The ordinal for entry i is the `u16` at `slot + 18`. Extracted because this walk existed
+    VERBATIM in both `_rekey_positional_by_slot` (synth path) and `_rekey_offsynth_positional`
+    (real-session path). The duplication is not cosmetic: an attempt to change the off-synth
+    behaviour anchored on the loop text and silently patched the SYNTH copy instead, producing
+    nine errors in a function that never had the new parameter. One walk, one call site each.
+    """
+    slots, p = [], z + 4
+    while p < region_end:
+        nlen = int.from_bytes(body[p - 4 : p], "little")
+        if 1 <= nlen <= 32 and all(0x20 <= c < 0x7F for c in body[p : p + nlen]):
+            ne = p + nlen
+            if ne + 20 <= region_end:
+                slots.append(ne)
+            p = ne + 1
+        else:
+            p += 1
+    return slots
+
+
 def _rekey_positional_by_slot(data: bytes, kinds: "list[int] | None" = None,
                               base_n: "int | None" = None) -> bytes:
     """Re-key every per-track BODY position field to its physical slot's canonical value,
@@ -5144,17 +5166,8 @@ def _rekey_positional_by_slot(data: bytes, kinds: "list[int] | None" = None,
         z, e = by[0x2519][0]
         inside = [cz for cs in by.values() for cz, _ce in cs if z < cz < e]
         region_end = min(inside) if inside else e
-        p, idx = z + 4, 0
-        while p < region_end:
-            nlen = int.from_bytes(body[p - 4 : p], "little")
-            if 1 <= nlen <= 32 and all(0x20 <= c < 0x7F for c in body[p : p + nlen]):
-                ne = p + nlen
-                if ne + 20 <= region_end:
-                    su16(ne + 18, idx + 1)
-                    idx += 1
-                p = ne + 1
-            else:
-                p += 1
+        for _i, _ne in enumerate(_name_entry_ordinal_slots(body, z, region_end)):
+            su16(_ne + 18, _i + 1)
 
     for i, (z, e) in enumerate(by.get(0x251A, [])):        # lane ordinals ((idx mod N)+1)
         nlen = struct.unpack_from("<I", body, z + 11)[0]
@@ -5284,17 +5297,8 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
         z, e = by[0x2519][0]
         inside = [cz for cs in by.values() for cz, _ce in cs if z < cz < e]
         region_end = min(inside) if inside else e
-        p, idx = z + 4, 0
-        while p < region_end:
-            nlen = int.from_bytes(body[p - 4 : p], "little")
-            if 1 <= nlen <= 32 and all(0x20 <= c < 0x7F for c in body[p : p + nlen]):
-                ne = p + nlen
-                if ne + 20 <= region_end:
-                    su16(ne + 18, idx + 1)
-                    idx += 1
-                p = ne + 1
-            else:
-                p += 1
+        for _i, _ne in enumerate(_name_entry_ordinal_slots(body, z, region_end)):
+            su16(_ne + 18, _i + 1)
 
     lanes = by.get(0x251A, [])
     n = len(lanes) // 2 or 1                    # two lane entries per track, click included
