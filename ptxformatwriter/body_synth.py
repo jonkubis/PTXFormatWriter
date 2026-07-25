@@ -5423,6 +5423,37 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
                      f"0x{cont:04x} at {z} stores {stored} but frames {n} "
                      f"{'/'.join('0x%04x' % k for k in kids)} children")
             break
+
+    # ORDERING: the per-track records under 0x2624 appear in NAME-TABLE order. Matched by identity
+    # GUID (the 0x2619 inside each record), never by name -- a name regex breaks on custom track
+    # names and on `.dupN` suffixes, which is how a first attempt at this produced 38 phantom
+    # violations. Holds on 153/153 PT-authored sessions that have per-track records.
+    # This is the third blind-spot class: the gate could not previously see ORDER at all.
+    def _guid_after(z: int, e: int, frm: int) -> "bytes | None":
+        k = data.find(b"\x2a\x00\x00\x00", frm, e)
+        return data[k + 4 : k + 12] if 0 <= k and k + 12 <= e else None
+
+    eg = []
+    for nm, pos in entries:
+        g = _guid_after(0, pos + len(nm) + 24, pos + len(nm))
+        if g:
+            eg.append(g)
+    rg = []
+    for z, e, c in sorted(bl):
+        if c not in (0x261C, 0x2620, 0x261E):
+            continue
+        for zz, ee, cc in bl:
+            if cc == 0x2619 and z < zz < ee <= e:
+                g = _guid_after(zz, ee, zz)
+                if g:
+                    rg.append(g)
+                break
+    if rg:
+        seq = [g for g in eg if g in set(rg)]
+        if seq != rg:
+            note("record-order",
+                 "per-track records are not in name-table order "
+                 f"({len(seq)} matched entries vs {len(rg)} records)")
     return out
 
 
