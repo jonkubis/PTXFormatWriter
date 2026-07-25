@@ -1845,6 +1845,32 @@ class ViewChainAttributionTests(unittest.TestCase):
             with self.subTest(path=label):
                 self.assertEqual(errors(build()), [], msg=f"{label} must be PT-invariant clean")
 
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/arbitrary wav relinked.ptx")),
+                         "relinked control not present")
+    def test_audio_file_list_is_not_tied_to_a_folder_named_Audio_Files(self):
+        """REGRESSION (bug #25): the 0x103A audio-file list opens with the MEDIA-FOLDER name,
+        length-prefixed at block offset +18 -- "Audio Files" by default, but whatever the folder is
+        actually called. Both readers searched for the literal string, so a RELINKED session whose
+        media lives elsewhere (here "8192 wavs") parsed as having ZERO audio files, and
+        `duplicate_audio_file` raised "session has no 0x103A audio-file list".
+
+        Found by sweeping the new import primitives across the corpus rather than by a PT verdict:
+        3 of 52 sessions with regions hit it. Reading the length prefix works on 52/52 and agrees
+        with the old literal search on all 49 where the folder really is named "Audio Files"."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/arbitrary wav relinked.ptx"))))
+        names = BS._audio_filenames(data)
+        self.assertEqual(len(names), 1, msg="the relinked session's wav must be found")
+        self.assertTrue(names[0].endswith(".wav"))
+
+        z, end, entries = BS._audio_file_list(data)
+        self.assertEqual([n for _o, n in entries], names,
+                         msg="both readers must agree")
+
+        out = BS.duplicate_audio_file(data, 0, "ZZ.wav")
+        self.assertEqual(BS._audio_filenames(out), names + ["ZZ.wav"])
+        self.assertEqual([v for v in BS.validate_pt_invariants(out)
+                          if v["severity"] == "error"], [])
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

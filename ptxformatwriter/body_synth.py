@@ -1334,10 +1334,17 @@ def _audio_filenames(data: bytes) -> "list[str]":
         if b.content_type != 0x103A or b.block_size <= 10:
             continue
         blk = data[b.offset:b.offset + b.block_size]
-        anchor = blk.find(b"Audio Files")
-        if anchor < 0:
+        # The list opens with the MEDIA-FOLDER name, length-prefixed at block offset +18. It is
+        # "Audio Files" by default but is whatever the folder is actually called -- a relinked
+        # session can carry e.g. "8192 wavs". Searching for the literal made every such session
+        # parse as having ZERO audio files (3 in the corpus). Read the length prefix instead:
+        # verified on 52/52 sessions that hold this list, and it agrees with the old literal
+        # search on all 49 where the folder really is named "Audio Files".
+        # NOTE `b.offset` is zmark+7 in this parser, so the zmark-relative +18/+22 become +11/+15.
+        nl = struct.unpack_from("<I", blk, 11)[0] if len(blk) >= 15 else 0
+        if not (0 < nl <= 64 and 15 + nl <= len(blk)):
             continue
-        i = anchor + len(b"Audio Files") + 4  # skip name + the trailing u32
+        i = 15 + nl + 4                       # skip the folder name + the trailing u32
         while i + 9 <= len(blk):
             if blk[i:i + 4] != b"\x02\x00\x00\x00":
                 break
@@ -4163,10 +4170,11 @@ def _audio_file_list(data: bytes) -> "tuple[int, int, list[tuple[int, str]]]":
     for z, e, c in bl:
         if c != 0x103A or e - z <= 60:
             continue
-        a = data.find(b"Audio Files", z, e)
-        if a < 0:
+        # the media-folder name is length-prefixed at +18, NOT necessarily "Audio Files"
+        nl = int.from_bytes(data[z + 18 : z + 22], "little")
+        if not (0 < nl <= 64 and z + 22 + nl <= e):
             continue
-        i = a + len(b"Audio Files") + 4
+        i = z + 22 + nl + 4
         out = []
         while i + 9 <= e and data[i : i + 4] == b"\x02\x00\x00\x00":
             nlen = int.from_bytes(data[i + 5 : i + 9], "little")
