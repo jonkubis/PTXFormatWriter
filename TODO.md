@@ -1837,3 +1837,26 @@ THE REAL FIX is to split the two cases: dense on the synth path (where it is PT-
 on real sessions (where preserving PT's values is the goal). `_is_synth_shaped` already
 distinguishes them, so this is tractable -- but it must be done deliberately, with the synth
 oracles green and a real-session byte-stability check added alongside.
+
+## The renumbering fix: SECOND attempt also reverted, with a sharper diagnosis
+Tried "follow the session's own convention": densify if the session was dense before the copy,
+otherwise repair collisions only. It still broke the PT-confirmed oracles, and the failure is
+instructive -- it is in the REMOVE direction, not the add.
+
+    remove_track(dup, "Audio Z") != base8      # ordinal 3 where base8 has 2
+
+WHY: `_rekey_offsynth_positional` runs on BOTH add and remove. On add, the copy duplicates an
+ordinal, so "was this dense before?" is answerable -- drop the duplicate and compare. On REMOVE the
+copy is already gone, leaving a GAP, so the same test reports "not dense" and declines to densify.
+The convention cannot be inferred post-hoc from the post-edit state.
+
+WHAT THAT MEANS: the fix is not a smarter predicate inside the shared function. Add and remove need
+to be told explicitly which convention the session had -- captured BEFORE the edit and threaded
+through, the way `_base_n`/`_donor_free` already are for the synth path. That is a design change to
+both editors, not a patch, and doing it at the end of a long session with the PT-confirmed oracles
+as the only safety net is how bug #24 happened.
+
+STATUS: the dense renumbering stays. The RISK is documented in the spec (2,447 bytes rewritten in a
+real 383-track session) and the editors are safe on synth-shaped sessions, renumbering on real ones.
+Two attempts, two reverts -- recorded so a third starts from the right diagnosis rather than
+re-deriving it.
