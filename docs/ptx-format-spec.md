@@ -1322,7 +1322,26 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** Media/file cross-reference under the 0x2426 container: each instance binds a contiguous run of global "referenced item" indices to a single on-disk file location (volume + folder chain + filename). ALL 39 carry BOTH an index list AND a filesystem path — they are NOT two co-existing shapes (path-only vs idxlist-only). Within a session the per-instance index ranges are contiguous, start at 0, and partition ONE global 0..M item-index space (e.g. DWTS: 0-14,15-29,30-171,172-313,314-328,329-343,344-361) — strongest evidence for the "referenced item indices" semantics. Genuinely undecoded: the SEMANTIC target of the global item indices (which table they index into) and the exact derivation of the per-volume 4-byte id.
 - **Confidence:** high.
 
-### 0x1041 — Groove-template descriptor
+### 0x1041 — Groove-template descriptor (name RESOLVED)
+
+> **RESOLVED (measured on all 564 corpus instances).** The record carries a **length-prefixed
+> ASCII name** at payload+13: a `u32` little-endian length followed by that many characters. Only
+> two names occur in the corpus and both are self-describing:
+>
+> | payload len | `u32` @+13 | name |
+> |---|---|---|
+> | 74 | 6 | `<none>` |
+> | 95 | 27 | `<groove saved with session>` |
+>
+> The whole length difference is the name: **`len(payload) == 68 + namelen`** holds for every
+> distinct payload, so the record is a fixed 68-byte body with the name spliced in at +13. This is
+> what the entry's earlier "2 variants, meaning unpinned" note was seeing — the variation is just
+> the name, not a semantic flag.
+>
+> Exactly **2 instances per session** (282/282), always with parent `0x1040`, and the two always
+> carry the SAME name (`<none>,<none>` in 246 sessions; `<groove saved with session>` twice in 36).
+> A writer must therefore keep the pair in agreement and recompute the block size from the name
+> length.
 
 - **Kind:** CONTAINER. Parent ALWAYS 0x1040; ALWAYS exactly one immediate child, ALWAYS 0x1042 (child-count {1:38}). Frame block_type @z+1 = 0x0002; content_type @z+7 = 0x1041 (all 38).
 - **Size:** Block SPAN = 104 bytes for the built-in default (declared size field @z+3 = 97; payload = span − 9 = 95); span = size_field + 7. Real imported grooves grow: Bianca's 'MPC 65% 16th Swing' is span 869 / size-field 862 / payload 860. Growth is entirely in the 0x1042 grid child (which for the custom groove holds 9× 0x1043 grid-point sub-blocks; the built-in 0x1042 is span 47 with no children). The 0x1041 header itself is fixed-length up to the name.
