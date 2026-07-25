@@ -2935,10 +2935,40 @@ An inline entry is `<name_len:u32> <name> <trailer>`. The trailer is:
 <flags:u32> <2 zero bytes> <2A 00 00 00 tag> <GUID:8> <ordinal:u16>                 <pad:1>   = 21 bytes  (LAST entry)
 ```
 
-- **`ordinal`** is the entry's **1-based index** in the table (`Audio 1`→1, `Audio 2`→2, …).
-- **`next_kind`** is `(kind of the NEXT entry) << 8` — `0x0000` audio, `0x0100` MIDI, `0x0200`
-  click. Verified on **4321 entries** across the corpus; the only exceptions are our own
-  synthesized files (13 entries), i.e. a writer bug on our side, not a format variant.
+- **`ordinal`** — see the corrected rule below. It is **not** simply a 1-based index: `0` is a
+  *not-numbered* sentinel (40.6% of entries in real sessions), and it is the **NONZERO** ordinals
+  that run `1..k` in table order — 300/300 random corpus sessions. A 0-based dense session
+  (`[0,1,2,…,n-1]`, which Pro Tools also writes) satisfies that rule trivially, since dropping its
+  leading `0` leaves `1..n-1`. Sequences like `[1,2,3,4,0,0,5,0,6,…]` are normal, not corruption.
+- **`next_kind`** is `(kind of the NEXT entry) << 8`. The kind codes are **not just three** —
+  measured over 40 real sessions (**3379/3379 consecutive pairs, 40/40 files clean**):
+
+  | code | `<< 8` | track record | kind |
+  |---|---|---|---|
+  | 0 | `0x0000` | `0x261C` | audio |
+  | 1 | `0x0100` | `0x2620` | MIDI |
+  | 2 | `0x0200` | `0x261E` | click / aux |
+  | 5 | `0x0500` | `0x263B` | folder / VCA |
+  | 7 | `0x0700` | `0x2621` | instrument |
+  | 11 | `0x0B00` | `0x261D` | master / bus |
+
+  The three extra codes are exactly the three track-record kinds added when the "three track kinds"
+  claim was corrected to six, and they account for the `0x0500`/`0x0700`/`0x0B00` values that an
+  audio/MIDI/click-only model had to treat as anomalies. The earlier "4321 entries verified" was
+  measured with that three-kind model.
+
+**`next_kind` IS A CHAIN, AND BOTH EDITORS MUST MAINTAIN IT.** It describes the *neighbour*, so any
+insertion or deletion re-points it:
+
+- **Inserting** a copy directly after its source makes the SOURCE's `next_kind` describe the copy —
+  it must be rewritten to the source's own kind. Leaving it alone produced `MIDI 1 -> MIDI 2` still
+  tagged `0x0000` (audio) in a mixed session, and **Pro Tools crashed that file on load**.
+- **Removing** a non-last entry must hand the predecessor the REMOVED entry's `next_kind` — which is
+  already the correct value, so the repair is a copy, and an exact inverse of the insertion case.
+
+Ground truth for both: the corpus `.bak.NNN` files are incremental saves, so **Pro Tools' own
+Duplicate Track is captured in them** — `THE WIND_Vocal Tracking.bak.095 → .096` writes `Voc 2.dup1`
+and keeps this chain exact. Diffing our output against PT's on the same session is the oracle.
 
 **This is why the final entry uses the short 21-byte form: there is no next entry, so the
 `next_kind` field is simply absent.** Treating the last entry as 23 bytes over-splices 2 bytes and

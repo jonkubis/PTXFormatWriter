@@ -3,6 +3,56 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## METHOD UNLOCK — PRO TOOLS' OWN EDITS ARE IN THE CORPUS (2026-07-25)
+
+The `.bak.NNN` files are INCREMENTAL SAVES of one session, so consecutive pairs isolate a single
+user edit *as Pro Tools itself wrote it*. Walking a family and comparing the `0x2519` entry count
+save-to-save finds the edits we are trying to reproduce. **`THE WIND_Vocal Tracking.bak.095 ->
+.096` is PT's own DUPLICATE TRACK** (it adds `Voc 2.dup1`). Running our `duplicate_track` on
+bak.095 and diffing against bak.096 is a DIRECT oracle for the add path -- no Pro Tools install and
+no user round-trip needed. This is how the `next_kind` chain bug was found and fixed (`a940fd5`).
+
+Caveat that must be respected: a consecutive pair also contains unrelated churn (a clip removed,
+plugin windows opened/closed -- `0x2613/0x2614/0x2615/0x2616` moved by -4 in this very pair). The
+diff must separate "what PT does to add a track" from "what else that save happened to do".
+
+### What that oracle has already shown about our add path
+
+Block-type deltas, PT vs ours, on `THE WIND` (same session, same source track, same new name):
+
+    matching : 0x102D 0x1052 0x200A 0x200B 0x2015 0x2037 0x2038 0x2434 0x251A(+2)
+               0x260A(+22) 0x260C(+12) 0x260D(+6) 0x2619 0x261B 0x261C 0x2626 0x2627
+    PT ADDS, WE ADD NONE :  0x1014 (+1)   0x1DB6 (+1)   0x2506 (+21)
+    we differ            :  0x260E +8 vs +2,  0x2625 +9 vs +15,  0x1E33 +1 vs 0
+
+The core per-track subtree is right; the gaps are the interesting part. **`0x2506` is a
+MARKER x TRACK matrix** -- `#0x2506 == #0x2077 * #tracks` held 41/50 real sessions with exact
+products on large numbers (318x348 = 110664, 148x133 = 19684). Adding a track therefore REQUIRES
+one new `0x2506` per marker (21 here), and we emit none, leaving the matrix a row short. That is a
+plausible out-of-bounds read for PT, and it also predicts the observed asymmetry -- a REMOVE leaves
+the matrix a row LONG (harmless over-allocation) while an ADD leaves it SHORT. NOTE it cannot
+explain the 8 staged failures: those synth sessions have ZERO markers, so the matrix is vacuous.
+
+### FIXED from this oracle: the `next_kind` chain (`a940fd5`)
+
+`next_kind` names the NEXT entry's kind, so an insert/delete re-points it. We never updated the
+source's, so duplicating `MIDI 1` in a mixed session left `MIDI 1 -> MIDI 2` tagged audio and PT
+crashed on load (staged file 07). Fixed in BOTH editors (remove hands the predecessor the removed
+entry's value, an exact inverse). Chain intact after duplicating a middle track in **14/14** real
+sessions; 201 tests green. Also corrected the field's documentation: there are **six** kind codes
+(0/1/2 audio/MIDI/click plus 5 folder-VCA, 7 instrument, 11 master-bus), which is where the
+unexplained `0x0500`/`0x0700`/`0x0B00` values come from.
+
+This does NOT explain the other 7 staged duplicate failures -- their chains are intact. At least one
+more add-path defect remains.
+
+### A TRAP THIS NEARLY WALKED INTO, worth remembering
+
+An UNEDITED control (`control_files/mixedmidi_5_AMSmM.ptx`) reports a `next_kind` violation, which
+almost made me revert the fix as built on a false model. That file is OUR OWN synth output and
+carries the defect natively -- exactly the `midi9.ptx` trap again. **Settle rules against REAL
+corpus sessions; our control_files are not ground truth.**
+
 ## THE RE-KEY CORRUPTS REAL SESSIONS — one pass FIXED, three MEASURED AND STILL WRONG (2026-07-25)
 
 Method that produced all of this: stop asking whether the round-trip closes, and measure the
