@@ -1397,3 +1397,38 @@ grow-and-slide -- but it is real work, not a measurement.
      the byte-exact round-trip while PT rejected the file. Unverified is not done.
   2. Docs: 0x201f's single 2-valued field; the 8 monomorphic constants (measured: no signal in this
      corpus, so capture-bound rather than inference-bound).
+
+## 0x2628 FIELD WIDENING IMPLEMENTED (commit 77e19de) — no known unimplemented field remains
+The item I called "the one genuinely unfinished piece of the 0x2628 model" one commit ago is done.
+`set_region_length` now widens: rewrite the slot's nibble, splice the extra bytes in, and let
+`_splice_in` grow every enclosing container and slide every index offset.
+
+Verified: 4321 fits (+0 bytes), 70000 and 5000000 widen to 3 bytes (+1) and read back exactly;
+other regions untouched; validate() clean, PT gate 0 errors, rc=0; and `span == 57+namelen+varlen`
+still holds after widening. Only hard stop left: a nibble caps one slot at 15 bytes.
+
+A check I nearly misread as corruption: widening changes the block multiset by one at body offset
+20 (0x1640 -> 0x1641). That is the FILE-HEADER INDEX-POINTER PHANTOM documented earlier this
+session -- its apparent "content type" is the low half of the final-index offset, so growing the
+body shifts it. Total block count unchanged. My own earlier finding predicted it exactly, which is
+the first time this session that a documented result saved me from a false alarm rather than the
+reverse.
+
+Also fixed a now-obsolete assertion: `test_region_length_is_the_wav_sample_count` required a
+ValueError for 10,000,000, which was only true while widening was unimplemented.
+
+### STATE
+IMPLEMENTED, structurally complete, no known unimplemented field:
+    tracks : duplicate_track / remove_track (audio, MIDI, click, last-entry, single-track)
+    clips  : add_clip / remove_clip / move_clip
+    import : duplicate_audio_file -> retarget_audio_file -> duplicate_region
+             -> set_region_length -> add_clip
+    gate   : validate_pt_invariants (calibrated 8/8 + 4/4 against real PT verdicts, 0 FP corpus-wide)
+    195 tests; corpus 252 round-trip-exact.
+
+REMAINING, and both are external-input-bound rather than analysis-bound:
+  1. PRO TOOLS VERIFICATION of the import chain and of the 12 staged files. Bugs #20-#23 each
+     passed validate(), rc=0 AND the byte-exact round-trip while PT rejected the file, so
+     "structurally clean" has a measured false-positive rate. This is the bottleneck.
+  2. Docs: 0x201f's single 2-valued field, and the 8 monomorphic constants -- measured to carry
+     ZERO signal in this corpus, so they need a capture where the value differs.
