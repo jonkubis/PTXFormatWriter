@@ -5102,23 +5102,50 @@ def _set_b261c_free_field(body: bytearray, z: int, e: int, kind: int,
 def _name_entry_ordinal_slots(body, z: int, region_end: int) -> "list[int]":
     """Byte offset of each `0x2519` inline entry's NAME END, in table order.
 
-    The ordinal for entry i is the `u16` at `slot + 18`. Extracted because this walk existed
-    VERBATIM in both `_rekey_positional_by_slot` (synth path) and `_rekey_offsynth_positional`
-    (real-session path). The duplication is not cosmetic: an attempt to change the off-synth
-    behaviour anchored on the loop text and silently patched the SYNTH copy instead, producing
-    nine errors in a function that never had the new parameter. One walk, one call site each.
+    The ordinal for entry i is the `u16` at `slot + 18`. This DELEGATES to the same structural
+    walk `_inline_name_entries` uses (`_name_table_shift` for the start, `_next_name_entry` for
+    the 23-vs-21-byte stride) instead of scanning for plausible-looking length prefixes.
+
+    The scanning version this replaces capped names at 32 chars and so silently SKIPPED any
+    longer one -- a real session whose first entry is the 33-char "Dancing In The Street Macy's
+    2017" lost that entry, and every following ordinal was then written one slot early, shifting
+    all 38 of them. Two enumerators that disagree about the entry set also made the dense-vs-real
+    check answer for a different set than the one being rewritten. One walk now, so they cannot
+    drift apart again.
     """
-    slots, p = [], z + 4
-    while p < region_end:
-        nlen = int.from_bytes(body[p - 4 : p], "little")
-        if 1 <= nlen <= 32 and all(0x20 <= c < 0x7F for c in body[p : p + nlen]):
-            ne = p + nlen
-            if ne + 20 <= region_end:
-                slots.append(ne)
-            p = ne + 1
-        else:
-            p += 1
+    q = z + 9 + 0x14 + _name_table_shift(body, z)
+    slots: "list[int]" = []
+    while True:
+        head = _name_entry_head(body, q, region_end)
+        if head is None:
+            break
+        _name, name_end = head
+        if name_end + 20 <= region_end:
+            slots.append(name_end)
+        q = _next_name_entry(body, name_end, region_end)
     return slots
+
+
+def _renumber_name_entry_ordinals(body, z: int, region_end: int, su16) -> None:
+    """Renumber `0x2519` entry ordinals: the NONZERO ones, in table order, become 1..k.
+
+    Zero is a "not numbered" sentinel and is left alone. Measured over 300 real sessions drawn at
+    random from the corpus, the nonzero ordinals in table order are EXACTLY 1..k -- 300/300, no
+    exceptions -- while 40.6% of all entries are zero and 40.1% are duplicates of another entry's
+    value. Sequences like `[1,2,3,4,0,0,5,0,6,...]` are the normal shape, not corruption.
+
+    This replaces an unconditional 1..n renumber, which treated the zeros as values to overwrite
+    and so rewrote PT's own ordinals across 1,608 entries of 25 untouched sessions. Under this
+    rule a re-key of an unedited real session is a byte-level no-op, while a synthesized session
+    (every ordinal nonzero) renumbers densely exactly as before -- which is why the PT-confirmed
+    synth oracles are unaffected. It also needs no pre-edit sampling: an add creates a duplicate
+    among the nonzeros and a remove leaves a gap, and renumbering the nonzeros fixes both.
+    """
+    k = 0
+    for b in _name_entry_ordinal_slots(body, z, region_end):
+        if int.from_bytes(body[b + 18 : b + 20], "little"):
+            k += 1
+            su16(b + 18, k)
 
 
 def _rekey_positional_by_slot(data: bytes, kinds: "list[int] | None" = None,
@@ -5166,8 +5193,7 @@ def _rekey_positional_by_slot(data: bytes, kinds: "list[int] | None" = None,
         z, e = by[0x2519][0]
         inside = [cz for cs in by.values() for cz, _ce in cs if z < cz < e]
         region_end = min(inside) if inside else e
-        for _i, _ne in enumerate(_name_entry_ordinal_slots(body, z, region_end)):
-            su16(_ne + 18, _i + 1)
+        _renumber_name_entry_ordinals(body, z, region_end, su16)
 
     for i, (z, e) in enumerate(by.get(0x251A, [])):        # lane ordinals ((idx mod N)+1)
         nlen = struct.unpack_from("<I", body, z + 11)[0]
@@ -5297,8 +5323,7 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
         z, e = by[0x2519][0]
         inside = [cz for cs in by.values() for cz, _ce in cs if z < cz < e]
         region_end = min(inside) if inside else e
-        for _i, _ne in enumerate(_name_entry_ordinal_slots(body, z, region_end)):
-            su16(_ne + 18, _i + 1)
+        _renumber_name_entry_ordinals(body, z, region_end, su16)
 
     lanes = by.get(0x251A, [])
     n = len(lanes) // 2 or 1                    # two lane entries per track, click included
