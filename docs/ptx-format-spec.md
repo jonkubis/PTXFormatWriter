@@ -3186,6 +3186,17 @@ two values, `0x0000` and `0x0100`.
   clip family, and flag=256 occurs in 14 sessions with no MIDI track at all.
 - **REFUTED — it is not the MIDI editor.** `midi note editor closed.ptx` has flag=256, the same
   value as sessions whose editor was open.
+- **REFUTED — it is not tempo/meter content**, despite the flag=256 group being dominated by
+  session names like `120 to 140bpm`, `121bpm`, `3-4 meter`, `SYNTH_meter_*`. The tempo/meter block
+  counts are FIXED regardless of the flag (`0x2028`/`0x2029` = 2 each, `0x2718`/`0x2719` = 1 each),
+  and their payload spans OVERLAP between the two groups (both contain 204 and 326 for `0x2028`).
+  The filename pattern is a sampling artifact of how those captures were made, not a rule.
+- **NO PERFECT PREDICTOR** exists among twelve computed session properties (track count, entry
+  count, has click / MIDI / audio / clips / regions / markers / plug-ins / automation / MIDI-clip
+  family, block-count bucket).
+- **The one solid result is a ONE-WAY implication:** flag=256 ⟹ the session has **no audio tracks,
+  no click, no regions and no markers** — 32/32, no exceptions. The converse fails: 27 sessions
+  with flag=0 are also audio-free, and nothing measured here separates those 27 from the 32.
 - **CANDIDATE (unproven).** The one session named `memory locations window closed.ptx` has flag=0.
   This is *suggestive only*: that file is NOT a controlled variant of any baseline here — it also
   differs by the entire `0x2582`-`0x2586` MIDI-clip family, so it is a separate capture, not a
