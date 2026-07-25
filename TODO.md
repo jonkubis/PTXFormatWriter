@@ -1684,3 +1684,30 @@ click track exists). Deliberately NOT fixed: PT ACCEPTED exactly that file (09_c
 and closes cleanly), and removing the descriptor means deleting a block from the 0x1018 registry --
 a real edit whose PT-correctness is unverified. Fixing an accepted behaviour on a hunch is how #24
 happened. The gate names it, so it will not be forgotten.
+
+## Staged PT files re-verified CURRENT (and now guarded)
+I have changed the editors and synth repeatedly since staging (#25-#28). Re-checked all 18 files:
+    PTX_VERIFY_2026-07-24        12 track-edit files   0 stale, 0 error-severity violations
+    PTX_VERIFY_2026-07-25_IMPORT  6 import-ladder files 0 stale, 0 error-severity violations
+A new test asserts a sample of them still equal what the current code produces, so they cannot
+silently rot. A stale file would spend the one input this project cannot generate for itself -- a
+human opening Pro Tools -- on a verdict about code that no longer exists. 200 tests.
+
+## SESSION STATE (accurate as of this commit)
+IMPLEMENTED, corpus-verified, gate-clean:
+    tracks  duplicate/remove -- audio, MIDI, click/aux, last-entry, single-track
+    clips   add / remove / move
+    import  duplicate_audio_file -> retarget_audio_file -> duplicate_region
+            -> set_region_length (incl. descriptor WIDENING) -> add_clip
+    gate    validate_pt_invariants: containment, uniqueness, counts, references,
+            cross-container agreement, order -- calibrated 8/8 + 4/4 against real PT verdicts,
+            0 false positives corpus-wide
+    every LIVE writer path emits neither errors nor nonconforming notes
+    200 tests; corpus 282/282 error-clean
+
+BLOCKED ON INPUT I CANNOT PRODUCE:
+  1. PT verification of the 18 staged files. Not a formality: 8/8 duplicates I shipped in July
+     passed validate(), rc=0 AND the byte-exact round-trip, and PT rejected every one.
+  2. ~16 spec entries: 14 monomorphic types (zero variance across all 282 sessions -- provably no
+     signal here), plus 0x201f and 0x2056's eight fields. One session saved twice with ONE UI
+     setting changed would move all of them.
