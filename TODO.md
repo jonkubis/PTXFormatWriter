@@ -1613,3 +1613,27 @@ WHAT THE 13 NOTES REVEAL: all our own older mixed-MIDI output, writing 0x1015 as
 count instead of the audio count (the SYNTH-path twin of editor bug #17) and 0x1058 off by one.
 The live editors are clean; the live mixed-MIDI SYNTH still writes them. That is a real, bounded
 follow-up with a known-correct target -- and unlike the documentation gaps it needs no new capture.
+
+## Bug #26 FIXED — the mixed-MIDI SYNTH's kind track counts (the gate's first catch)
+The `container-count` note added last turn immediately localised a LIVE defect: the mixed-MIDI
+synthesiser wrote 0x1015 as the TOTAL track count and 0x1058 off by one. PT's convention (162/162,
+zero mismatches) is 0x1015 == audio (0x1014) count, 0x1058 == MIDI (0x1057) count. This is the
+synth-path twin of editor bug #17.
+
+`_sync_kind_track_counts` recomputes both from the framed children; `synthesize_mixed_midi` calls
+it. Recomputation is safe HERE (the editors still adjust by delta) because #17 forbade it only
+while the convention was unknown -- it is pinned now.
+
+WHY IT SURVIVED EVERY EARLIER SWEEP: `_fix_container_counts` covers only 0x1054->0x1052 and 0x2624,
+so running it changed ZERO bytes on these files. The defect was invisible to the one function whose
+name suggests it should have caught it.
+
+Verified: both mixed-MIDI specs lose the note, counts equal framed children, 199 tests, corpus
+282/282 error-clean. PT tolerated the stale values, so this is conformance, not a crash fix.
+
+### Gate blind-spot classes: 2 of 2 named classes now closed
+    references           -> region-reference / audio-file-list   (caught bug #25 retroactively)
+    cross-container      -> container-count                      (caught bug #26, live)
+Both were named BEFORE being checked, and both found a real defect within a turn of being added.
+Remaining unexamined class: ORDERING constraints (does any structure require a specific sibling
+order?). That is the next corpus-supported avenue.
