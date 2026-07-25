@@ -1860,3 +1860,28 @@ STATUS: the dense renumbering stays. The RISK is documented in the spec (2,447 b
 real 383-track session) and the editors are safe on synth-shaped sessions, renumbering on real ones.
 Two attempts, two reverts -- recorded so a third starts from the right diagnosis rather than
 re-deriving it.
+
+## THIRD attempt at the renumbering fix — reverted, and the failure was my own carelessness
+The design was right this time: sample the convention on the PRE-edit body (`_ordinals_were_dense`)
+and thread it into `_rekey_offsynth_positional(out, dense=...)`. Signature, capture sites and call
+sites all landed correctly.
+
+It failed because the name-entry WALK LOOP I patched appears in more than one function, and a
+`str.replace(old, new, 1)` put the `if dense:` branch into the WRONG one -- 9 test errors,
+`NameError: name 'dense' is not defined`, in a function that never had that parameter. I had
+corrupted `_fix_name_table_count`'s neighbourhood while believing I was editing the re-key.
+
+Reverted; 200 tests green.
+
+WHAT TO DO DIFFERENTLY on the next attempt (this is the actionable part):
+  * The duplicated walk loop is the hazard. FACTOR IT OUT FIRST -- one `_name_entry_ordinal_slots()`
+    helper used by every caller -- as a separate, test-green commit. Only then add the dense flag,
+    at a single site.
+  * Anchor edits on text that is unique. I have now been bitten twice by base-offset/duplication
+    assumptions in this file (`_audio_filenames` +11 vs +18, and this), both times because the same
+    shape appears in two places with different conventions.
+
+The RISK itself is unchanged and documented in the spec: real sessions get 2,447 bytes renumbered.
+Three attempts, three reverts -- each with a different cause (wrong behaviour, wrong inference,
+wrong edit site). Recorded so the fourth starts by removing the duplication rather than working
+around it.
