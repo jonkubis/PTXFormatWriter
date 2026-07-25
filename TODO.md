@@ -1742,3 +1742,39 @@ correction.
      sessions", which is now a much weaker statement than I treated it as.
   3. Re-measure the coverage tracker against the external corpus -- 256 types was ALSO a
      282-session number, and the real type inventory is probably larger.
+
+## The external corpus has invalidated two things I was confident about
+Following the 43k-session discovery, two claims I had been repeating do not survive it:
+
+### 1. The gate is calibrated to SMALL sessions; it false-positives on real ones
+`validate_pt_invariants` scored 8/8 + 4/4 with "0 false positives corpus-wide" -- but that corpus
+was 282 small sessions. Against real studio sessions: **29 of 30 report ERROR-severity violations**,
+and they are Pro Tools' OWN backup files. Failing rules: 0x2519-entry-ordinals and
+0x251A-lane-ordinals (repeats in large tables), 0x261C-C4 (reads 512 where the "audio index" rule
+says 0), 0x2589-view-chains (count mismatch).
+
+The READER is fine -- a real session parses 10 entries with sane names and dense unique ordinals.
+The INVARIANTS are what do not generalise: they came from sessions of <=16 tracks, and real
+sessions have hundreds plus richer track kinds.
+
+I have NOT hastily downgraded them: those same rules caught all 8 PT-rejected edits, so weakening
+them blindly would trade a proven detector for a guess. The correct fix is to RE-DERIVE them
+against the external corpus, which is now possible. Until then the gate is authoritative only for
+sessions resembling its calibration set, and the spec says so.
+
+### 2. A FOURTH per-track record kind exists: 0x263B (folder / VCA tracks)
+Zero instances in the 282-session corpus; present in **27 of 40** external sessions. Indexed
+(115/115), parent 0x2624 (sibling of 0x261C/0x2620/0x261E), carries a 0x2619 identity + view chain
++ a 0x4701 playlist subtree. Names seen: BGVS, RT MIX TRACKS, COMS.
+
+**The editors cannot see them.** duplicate_track/remove_track walk {0x261C,0x2620,0x261E}. So on
+the majority of REAL sessions there are tracks both editors silently ignore. "Track editing is
+structurally complete" was, again, a statement about the small corpus.
+
+### NEXT, in priority order (all now corpus-supported, no new captures needed)
+  1. Re-derive the gate's error rules against the external corpus; keep only what holds on real
+     sessions, and re-verify the 8/8 PT-rejection detection survives.
+  2. Add 0x263B (+0x4701) to the editors' container set and re-sweep.
+  3. Re-measure the type inventory properly: 326 types in 220 external sessions vs 256 in 282
+     control files, 35 not in the spec. The "100% documented" claim needs restating against the
+     real inventory.
