@@ -2999,3 +2999,48 @@ that mistake was made here and reverted.
 changing (`0x261C` audio → `0x2620` MIDI, name `Audio 1` → `MIDI 1`); `clean` denotes a separate,
 clip-free or otherwise different capture of a similar scenario. Treating such a pair as a
 before/after of one session manufactures false "normalisation rules" — it briefly produced two here.
+
+
+### Why the remaining `UNKNOWN` entries are unresolved — measured, not hand-waved
+
+The tracker's honest caveat is that ~17 spec entries still say `purpose UNKNOWN` / `UNPROVEN`.
+Measuring the corpus for each of the flagged types shows *why*, and splits them into two very
+different situations. For each type, every instance's payload was compared across all 282 sessions:
+
+| type | instances | sessions | distinct payloads | status |
+|---|---|---|---|---|
+| `0x2502` | 389 | 282 | **1** | monomorphic |
+| `0x206f` | 102 | 69 | **1** | monomorphic |
+| `0x2103` | 4363 | 223 | **1** | monomorphic |
+| `0x2020` | 282 | 282 | **1** | monomorphic |
+| `0x258f` | 282 | 282 | **1** | monomorphic |
+| `0x2435` | 282 | 282 | **1** | monomorphic |
+| `0x2715` | 282 | 282 | **1** | monomorphic |
+| `0x4827` | 7 | 2 | **1** | monomorphic |
+| `0x103d` | 953 | 282 | 2 | has signal |
+| `0x1041` | 564 | 282 | 2 | has signal |
+| `0x258e` | 3102 | 282 | 4 | has signal |
+| `0x201f` | 282 | 282 | 5 | has signal |
+
+**The eight monomorphic types are provably unresolvable from this corpus.** Every instance is
+byte-identical, so there is no variation to correlate with any session property. Their layouts are
+documented; only the *meaning* of constants is open, and no amount of further analysis of these
+282 sessions can distinguish "version marker" from "flag" from "id" when the value never changes.
+Closing them requires a NEW capture in which the suspected property differs — not more inference.
+
+**The four with signal are the tractable ones.** As a worked example, `0x201f` (saved window
+geometry) reduces to a single discriminating field: the `u32` at **payload+24**, which takes only
+two values, `0x0000` and `0x0100`.
+
+- **REFUTED — it is not MIDI content.** flag=0 occurs in 4 sessions that DO have the MIDI
+  clip family, and flag=256 occurs in 14 sessions with no MIDI track at all.
+- **REFUTED — it is not the MIDI editor.** `midi note editor closed.ptx` has flag=256, the same
+  value as sessions whose editor was open.
+- **CANDIDATE (unproven).** The one session named `memory locations window closed.ptx` has flag=0.
+  This is *suggestive only*: that file is NOT a controlled variant of any baseline here — it also
+  differs by the entire `0x2582`-`0x2586` MIDI-clip family, so it is a separate capture, not a
+  one-variable change.
+
+**The experiment that would settle `0x201f`:** save one session twice, changing only whether a
+given window is open, and diff `payload+24`. That single pair also disambiguates which window.
+The same recipe — one variable, two saves — is what each remaining type needs.
