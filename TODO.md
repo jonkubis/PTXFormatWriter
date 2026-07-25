@@ -1016,3 +1016,41 @@ hand-maintained snapshot.
   2. Mixed-MIDI synth `0x2589` ordinal writer bug (diagnosed to the line; see the earlier entry).
   3. add-clip with NEW audio (0x2628 geometry, PT-gated).
   4. PT verification of the in-place edit suite (user-gated — PT remains the only real oracle).
+
+## PT VERDICT 2026-07-23 REFUTED "track-edit matrix complete": ALL 8 DUPLICATES REJECTED
+Removes: 4/4 accepted (open + close cleanly). Duplicates: 0/8. The byte-exact round-trip passed
+every one of them, because it only proves `remove . duplicate = identity` — which stayed true while
+BOTH sides were wrong identically. PT is the only oracle.
+
+THREE root causes found and fixed (bugs #20/#21/#22):
+  #20 off-synth duplicate re-keyed NO positional fields. PT identifies a track by per-track
+      ORDINALS, not the name bytes — the copy had perfect distinct names everywhere and PT still
+      showed it under the SOURCE's name. `_rekey_positional_by_slot` is gated behind `_do_renumber`
+      (synth only), so real sessions got nothing. New `_rekey_offsynth_positional` covers 0x2519
+      entries, 0x251A lanes, and the 0x200A/0x200B/0x2015 field (which are OVERLAPPING VIEWS of one
+      physical per-track ordinal — numbered by distinct anchor offset, not per-type enumeration).
+  #21 0x1058 missing from the container->child maps, so a duplicated MIDI track's 0x1057 stayed
+      PACKED in a two-offset index element instead of its own — the record was one element short of
+      the N+1 every PT session has. Audio's 0x1015 was mapped, which is exactly why audio dups
+      LOADED and MIDI dups did not.
+  #22 THE CRASH-ON-LOAD CAUSE. A copy is spliced at `at == end_of_source_unit`; when the source is
+      the LAST child of an ancestor, that ancestor's declared end EQUALS the insertion offset and
+      the strict `z < at < e` growth test skipped it, ORPHANING the copy outside its parent. 8/8 +
+      4/4 discriminator, with a controlled pair (06 vs 07: same session, same tool — 06 grew all
+      four ancestors and loaded, 07 left 0x258A/0x258B ungrown and crashed).
+
+The round-trip is now `identity . repair`: exact on the 253 corpus sessions whose ordinals are
+already PT-valid, and on the other 10 (our own earlier synth output) it returns the session
+REPAIRED — proven exactly `remove(dup(x)) == rekey(x)`. 185 tests.
+
+A SECOND SELF-CORRECTION: I first reported #22's orphans as already fixed, from a narrow
+four-session in-memory check. Re-measuring across all twelve shipped files showed them still there
+at byte-identical offsets to the rejected set. The narrow check was simply wrong.
+
+## STILL OPEN
+  1. 0x261C per-track C4 counter cloned verbatim (PT distinct [0,1,2]; ours [0,1,2,2]). NOT fixed:
+     the semantic is unpinned — PT-authored mixed shows an audio-only index [0,1] while our own
+     mixed synth writes [0,1,3,4,5]. Needs ground truth before touching.
+  2. 0x104F+11 MIDI clip-slot id cloned on clip-bearing MIDI tracks (never repeats in PT sessions).
+  3. Awaiting PT re-test of /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-24/ (12 files, all now
+     orphan-free with unique names and every pinned ordinal invariant satisfied).
