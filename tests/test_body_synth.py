@@ -1551,6 +1551,42 @@ class ViewChainAttributionTests(unittest.TestCase):
             else:
                 self.assertNotEqual(errs, [], msg=f"{rel}: PT REJECTED this — must be flagged")
 
+    def test_pt_invariant_validator_has_no_false_positives(self):
+        """Negative controls: sessions Pro Tools is KNOWN to open must raise no error.
+
+        These caught two over-strict rules. A first version treated repeated 0x2589 display rows
+        and repeated per-track subtree ordinals as errors -- true of every PT-AUTHORED session, but
+        our own `mixedmidi_click_*` and `mixedmidi_reorder_*` carry duplicates AND were confirmed
+        to open in Pro Tools (2026-06-20). Dropping both rules still catches 8/8 of the known
+        rejections, so they were pure false-positive generators and are now "nonconforming"."""
+        for frag in ("mixedmidi_click_bottom", "mixedmidi_click_top", "mixedmidi_click_middle",
+                     "mixedmidi_reorder_MIDImiddle", "mixedmidi_reorder_SMm"):
+            hits = list(ROOT.glob(f"control_files/**/{frag}.ptx"))
+            if not hits:
+                continue
+            errs = [v for v in BS.validate_pt_invariants(_load_path(hits[0]))
+                    if v["severity"] == "error"]
+            self.assertEqual(errs, [], msg=f"{frag}: PT-confirmed to open — must not error")
+
+    def test_pt_invariant_validator_is_clean_on_the_whole_corpus(self):
+        """Every PT-AUTHORED session in the corpus must be error-free -- they ARE the ground truth
+        the invariants were measured from, so any error is by definition a false positive."""
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            name = path.name
+            if name.startswith(("test_", "synth_", "SYNTH", "mixedmidi", "robust", "midi9")):
+                continue
+            if ".bak." in name:
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            errs = [v for v in BS.validate_pt_invariants(data) if v["severity"] == "error"]
+            self.assertEqual(errs, [], msg=f"{name}: PT-authored — must not error")
+            checked += 1
+        self.assertGreater(checked, 100, msg="expected a substantial PT-authored corpus")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

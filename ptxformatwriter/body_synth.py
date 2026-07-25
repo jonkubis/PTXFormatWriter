@@ -4986,17 +4986,21 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             a = data.find(_ORD2015_ANCHOR, z, e)
             if a >= 0:
                 anchors.add(a)
-    check("per-track-subtree-ordinal",
-          [int.from_bytes(data[a + 18 : a + 22], "little") for a in sorted(anchors)], 1)
+    # NOT an error: PT LOADS sessions whose per-track subtree ordinals repeat. Our own
+    # `mixedmidi_click_{bottom,top,middle}` carry [1,2,5,3,4,3] and were PT-confirmed to open.
+    sub = [int.from_bytes(data[a + 18 : a + 22], "little") for a in sorted(anchors)]
+    if sub != list(range(1, len(sub) + 1)):
+        note("per-track-subtree-ordinal", f"{sub} is not dense 1..{len(sub)}")
 
+    # The COUNT is the rule (bug #19: a copy with no chain at all). Repeated display ROWS are only
+    # nonconforming -- `mixedmidi_reorder_*` and `midi9` repeat them and PT opens them fine.
     chains = sorted(int.from_bytes(data[z + 9 : z + 11], "little")
                     for z, _e in by.get(0x2589, []))
     if chains:
-        if len(set(chains)) != len(chains):
-            err("0x2589-view-chains", f"repeated display rows in {chains}")
-        elif len(chains) != n_ents:
-            err("0x2589-view-chains",
-                f"{len(chains)} chains for {n_ents} name entries")
+        if len(chains) != n_ents:
+            err("0x2589-view-chains", f"{len(chains)} chains for {n_ents} name entries")
+        elif chains != list(range(n_ents)):
+            note("0x2589-view-chains", f"{chains} is not a clean permutation of range({n_ents})")
 
     check("0x261C-C4",
           [int.from_bytes(data[e - _B261C_C4_FROM_END : e - _B261C_C4_FROM_END + 4], "little")
