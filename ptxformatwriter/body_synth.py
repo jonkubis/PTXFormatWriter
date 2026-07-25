@@ -5751,6 +5751,24 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         ord_pos = prev_name_pos + len(prev_name.encode()) + 18   # name_end +6 fixed +4 tag +8 guid
         nt_ranges.append((ord_pos + 2, ord_pos + 4))
 
+    # (c) `next_kind` chain repair -- the exact INVERSE of duplicate_track's. Entry i's `next_kind`
+    # u16 names the KIND of entry i+1 (0 audio / 1 MIDI / 2 click / 5 folder-VCA / 7 instrument /
+    # 11 master-bus, shifted << 8) -- validated 3379/3379 consecutive pairs over 40 real corpus
+    # sessions. Removing a NON-LAST entry leaves its predecessor pointing at whatever followed the
+    # removed one, which is precisely the removed entry's OWN next_kind, so the repair is a copy.
+    # (Removing the LAST entry is handled by the truncation above: the predecessor becomes last and
+    # loses the field entirely.) Without this, duplicate->remove stopped inverting byte-exactly --
+    # the predecessor kept naming the copy's kind after the copy was gone.
+    _idx = next((i for i, (n, _q) in enumerate(_entries) if n == track_name), None)
+    if _idx is not None and 0 < _idx < len(_entries) - 1:
+        _pn, _pp = _entries[_idx - 1]
+        _cn, _cp = _entries[_idx]
+        _dst = _pp + len(_pn.encode()) + 20      # predecessor's next_kind (name_end + 18 + 2)
+        _src = _cp + len(_cn.encode()) + 20      # the removed entry's next_kind
+        _d = bytearray(data)
+        _d[_dst : _dst + 2] = data[_src : _src + 2]
+        data = bytes(_d)
+
     # outermost removed blocks (a subtree parent covers its children) + the name-table entries
     ranges = [(z, zend[z]) for z in ident
               if not any(zz < z and zend[zz] >= zend[z] for zz in ident if zz != z)]
@@ -6051,6 +6069,24 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                    if not any(zz < z and zend[zz] >= zend[z] for zz in ident if zz != z))
     inserts = [(e, transform(data[z:e]), z) for z, e in units]
     inserts += [(b, transform(data[a:b]), None) for a, b in nt_ranges]
+
+    # The copy is spliced in IMMEDIATELY AFTER the source entry, so the source's `next_kind` -- a
+    # u16 describing the kind of the entry that FOLLOWS it -- now describes the COPY, i.e. it must
+    # become the source's own kind. It was left untouched, so the chain kept naming whatever used
+    # to follow: duplicating `MIDI 1` in a mixed session produced `MIDI 1 -> MIDI 2` still tagged
+    # 0x0000 (audio) instead of 0x0100 (MIDI), and PT crashed on load. Pro Tools' own duplicate of
+    # an audio track (corpus pair THE WIND_Vocal Tracking bak.095 -> bak.096, which is PT's Duplicate
+    # Track writing `Voc 2.dup1`) keeps this chain exact, and ours did not.
+    #
+    # The COPY keeps the source's ORIGINAL next_kind, which correctly describes what follows IT --
+    # so this patch must land AFTER the copy blobs above are materialised from the unpatched bytes.
+    if nt_ranges:
+        _srck = {0x261C: 0, 0x2620: 1, 0x261E: 2}.get(
+            next((c for z, e, c in bl if (z, e) in [(pz, pe) for pz, pe in pl_ranges]), 0x261C), 0)
+        _d = bytearray(data)
+        for _a, _b in nt_ranges:
+            _d[_b - 3 : _b - 1] = (_srck << 8).to_bytes(2, "little")   # 2 bytes before the pad
+        data = bytes(_d)
 
     # Duplicating the LAST name entry (see the 0x2519 trailer section of the spec): the source is
     # promoted to the 23-byte form by inserting its `next_kind` u16 -- the kind of the entry that

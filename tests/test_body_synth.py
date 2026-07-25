@@ -1305,6 +1305,50 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_next_kind_chain_survives_duplicate_and_remove(self):
+        """`next_kind` is a CHAIN field: entry i's u16 names the KIND of entry i+1, shifted << 8
+        (0 audio / 1 MIDI / 2 click / 5 folder-VCA / 7 instrument / 11 master-bus). Verified
+        3379/3379 consecutive pairs across 40 real corpus sessions, and on Pro Tools' OWN duplicate
+        (corpus pair THE WIND_Vocal Tracking bak.095 -> bak.096, PT writing `Voc 2.dup1`).
+
+        Inserting a copy directly after its source makes the SOURCE's next_kind describe the copy,
+        so it must be rewritten to the source's own kind; removing a non-last entry must hand the
+        predecessor the removed entry's next_kind. Neither happened, so duplicating `MIDI 1` in a
+        mixed session left `MIDI 1 -> MIDI 2` tagged 0x0000 (audio) instead of 0x0100 -- the file
+        PT crashed on load. Both directions are asserted here because fixing only the add side
+        silently broke the duplicate->remove inverse.
+        """
+        KIND = {0x261C: 0, 0x2620: 1, 0x261E: 2, 0x263B: 5, 0x2621: 7, 0x261D: 11}
+
+        def violations(d):
+            bl = BS._size_driven_blocks(d)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+            ents = BS._inline_name_entries(d, z, e, bl)
+            slots = BS._name_entry_ordinal_slots(d, z, end)
+            kinds = []
+            for b in slots:
+                g = d[b + 10 : b + 18]
+                kinds.append(next((KIND[cc] for zz, ee, cc in bl
+                                   if cc in KIND and g in d[zz:ee]), None))
+            out = []
+            for i in range(len(slots) - 1):
+                if kinds[i + 1] is None:
+                    continue
+                got = int.from_bytes(d[slots[i] + 20 : slots[i] + 22], "little")
+                if got != (kinds[i + 1] << 8):
+                    out.append(f"{ents[i][0]}->{ents[i + 1][0]} got 0x{got:04X}")
+            return out
+
+        data = self._non_synth_session()
+        self.assertEqual(violations(data), [], msg="the control's own chain must be intact")
+        for src in [t.name for t in BS.track_types(data)][:3]:
+            dup = BS.duplicate_track(data, src, "ZKind")
+            self.assertEqual(violations(dup), [],
+                             msg=f"duplicating {src!r} must keep the next_kind chain exact")
+            self.assertEqual(BS.remove_track(dup, "ZKind"), data,
+                             msg=f"and the chain repair must invert byte-exact for {src!r}")
+
     def test_duplicate_remove_midi_track(self):
         """remove_track/duplicate_track now handle MIDI tracks (no 0x1014/0x1052/0x261B/0x261C;
         the track-list entry is 0x1057 in 0x1058, the per-track record is 0x2620). Identification
