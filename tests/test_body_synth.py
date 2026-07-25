@@ -1820,6 +1820,31 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(end - z, 57 + nl + (k - (z + 13 + nl + 5)),
                              msg="span == 57 + namelen + varlen must survive widening")
 
+    def test_synthesis_paths_are_pt_invariant_clean(self):
+        """The SYNTHESIS paths must satisfy the same PT invariants the in-place editors do.
+
+        Worth pinning because they are a separate writer: sweeping `generated/` found 29 of 413
+        historical outputs carrying error-severity violations (0x2589 chain counts, 0x261C C4
+        counters, 0x251A lane ordinals). Every LIVE path is clean, so those are artifacts of older
+        code -- this test keeps it that way.
+
+        Note the mixed-MIDI paths legitimately report "nonconforming" notes (repeated 0x2589
+        display rows and non-dense subtree ordinals). Pro Tools opens those files -- confirmed
+        2026-06-20 -- so they are style, not faults, and only ERRORS are asserted."""
+        def errors(d):
+            return [v for v in BS.validate_pt_invariants(d) if v["severity"] == "error"]
+
+        for label, build in (
+            ("stereo_inline(8)", lambda: BS.synthesize_stereo_inline(8)),
+            ("stereo_inline(12)", lambda: BS.synthesize_stereo_inline(12)),
+            ("mono_inline(8)", lambda: BS.synthesize_mono_inline(8)),
+            ("mixed_midi([1,0,2])", lambda: BS.synthesize_mixed_midi_inline([1, 0, 2])),
+            ("mixed_midi([1,0,2,2,1,2])",
+             lambda: BS.synthesize_mixed_midi_inline([1, 0, 2, 2, 1, 2])),
+        ):
+            with self.subTest(path=label):
+                self.assertEqual(errors(build()), [], msg=f"{label} must be PT-invariant clean")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
