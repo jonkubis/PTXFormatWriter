@@ -5316,6 +5316,25 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     check("0x261C-C4",
           [int.from_bytes(data[e - _B261C_C4_FROM_END : e - _B261C_C4_FROM_END + 4], "little")
            for z, e in by.get(0x261C, [])], 0)
+
+    # The `Click II` plug-in descriptor (0x1017 under 0x1018) is present IFF the session has a
+    # click track -- 35 sessions with both, 247 with neither, 0 exceptions across all 282.
+    # NONCONFORMING rather than an error: removing the last click leaves the descriptor behind,
+    # and Pro Tools ACCEPTED exactly that file (09_click_remove, opened and closed cleanly), so
+    # PT tolerates the stale entry even though it never emits one.
+    names = []
+    for z, e in by.get(0x1017, []):
+        if z < 31:
+            continue
+        pl = data[z + 9 : e]
+        nl = int.from_bytes(pl[1:5], "little")
+        if 0 < nl <= 64:
+            names.append(pl[5 : 5 + nl].decode("latin1", "replace"))
+    has_desc = "Click II" in names
+    has_click = any(n.lower().startswith("click") for n in [n for n, _p in entries])
+    if has_desc != has_click:
+        note("click-plugin-descriptor",
+             f"'Click II' descriptor present={has_desc} but click track present={has_click}")
     return out
 
 
