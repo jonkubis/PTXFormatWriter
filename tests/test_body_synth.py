@@ -1936,6 +1936,45 @@ class ViewChainAttributionTests(unittest.TestCase):
                 self.assertNotIn("container-count",
                                  [v["invariant"] for v in BS.validate_pt_invariants(data)])
 
+    def test_staged_pt_verification_files_are_not_stale(self):
+        """The files staged for Pro Tools testing must still be what the current code produces.
+
+        They were generated several fixes ago and the editors have changed since (bugs #25-#28).
+        A stale file wastes the one input this project cannot generate for itself -- a human
+        opening Pro Tools -- and would produce a verdict about code that no longer exists."""
+        root = pathlib.Path("/Users/jonkubis/Desktop/PTX_VERIFY_2026-07-24")
+        if not root.exists():
+            self.skipTest("staged verification set not present on this machine")
+
+        def ctl(frag):
+            hits = list(ROOT.glob(f"control_files/**/{frag}.ptx"))
+            return _load_path(hits[0]) if hits else None
+
+        jobs = [
+            ("A_no_audio_needed/01_MIDI_duplicate_track.ptx",
+             "two midi tracks no clips", "dup", "MIDI 1", "MIDI 3"),
+            ("A_no_audio_needed/05_audio_duplicate_last_entry.ptx",
+             "stereo mono stereo", "dup", "Audio 3", "Audio 4"),
+            ("A_no_audio_needed/08_mixed_remove_audio.ptx",
+             "multiple track types no click", "rm", "Audio 2", None),
+            ("B_click_session_with_audio/10_click_duplicate.ptx",
+             "3 stereo plus click", "dup", "Click 1", "Click 2"),
+            ("B_click_session_with_audio/12_audio_remove_in_click_session.ptx",
+             "3 stereo plus click", "rm", "Audio 2", None),
+        ]
+        checked = 0
+        for rel, frag, op, track, new in jobs:
+            path = root / rel
+            src = ctl(frag)
+            if src is None or not path.exists():
+                continue
+            want = (BS.duplicate_track(src, track, new) if op == "dup"
+                    else BS.remove_track(src, track))
+            self.assertEqual(_load_path(path), want,
+                             msg=f"{rel} is STALE — regenerate before asking for a PT run")
+            checked += 1
+        self.assertGreaterEqual(checked, 3, msg="expected several staged files to verify")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""
