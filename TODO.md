@@ -1493,3 +1493,24 @@ RUNNING TALLY across both passes: 14 monomorphic, 4 with signal, 3 closed (0x104
 
 NEXT TRACTABLE: 0x1017 -- 3 payloads, and NOT explained by parent context (0x1018 alone holds 2),
 so unlike 0x103d there is genuine within-context variation to correlate. 0x2056 has 9.
+
+## 0x1017 RESOLVED — and it found a code divergence (commit b277f90 + gate note)
+Fully decoded from the corpus, phantom-filtered:
+  parent 0x204a : 564 instances, 40-byte all-`ff` PLACEHOLDER (one payload)
+  parent 0x1018 : a PLUG-IN DESCRIPTOR -- `<u8 kind><u32 namelen><ASCII name><FourCC reversed>`
+                  282x `"Polyphonic"`, 35x `"Click II"`; the FourCC `igiD` reads back as `Digi`,
+                  the same reversal the 0x4807 registry uses.
+PROVEN PRESENCE RULE: the `Click II` descriptor is present IFF the session has a click track --
+35 with both, 247 with neither, 0 exceptions across all 282.
+
+CROSS-CHECK FOUND A DIVERGENCE: `remove_track("Click 1")` leaves the descriptor behind, so the
+session declares a click plug-in with no click track. Classified NONCONFORMING, not an error,
+because PT ACCEPTED exactly that file (09_click_remove opens and closes cleanly). The gate now
+reports it by name; calibration re-verified at 8/8 + 4/4 + 0 FP.
+
+Notable: this is the first defect this session found BY DOCUMENTING rather than by testing. The
+presence rule came out of spec work, and the code divergence fell out of checking the
+implementation against it -- the reverse of the usual direction.
+
+TALLY of the 21 flagged types: 14 monomorphic, 3 with signal remaining (0x2056 x9, 0x201f x5,
+and 0x1017 now closed), 4 closed (0x1041, 0x103d, 0x258e, 0x1017), 1 corrected (0x207b).
