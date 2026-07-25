@@ -4577,7 +4577,18 @@ _COUNT_CONTAINER_CHILD = {0x1054: 0x1052}
 # 40 sampled REAL sessions, indexed like the others, carrying a 0x2619 identity and a 0x4701
 # playlist subtree. Walking only the first three made those tracks invisible to both editors on the
 # majority of real sessions.
-_TRACK_RECORD_TYPES = frozenset({0x261C, 0x2620, 0x261E, 0x263B})
+_TRACK_RECORD_TYPES = frozenset({
+    0x261C,   # audio (mono/stereo)
+    0x2620,   # MIDI
+    0x261E,   # click / aux
+    0x263B,   # folder / VCA-style grouping  ("BGVS", "RT MIX TRACKS", "COMS")
+    0x2621,   # instrument                    ("Inst 1", "Inst 2", ...)
+    0x261D,   # master / bus                  ("DRUMS MSTR", "MUSIC MSTR", ...)
+})
+# Enumerated by taking the DIRECT children of the 0x2624 track list across real sessions, rather
+# than by collecting the kinds the control corpus happened to contain. The 282-session corpus has
+# only three of these; a 22-session sample of real studio work has all six, with 0x2621 in 18
+# sessions and 0x261D in 16. All six are master-index targets.
 
 _TRACK_COUNT_CONTAINER = 0x1015
 
