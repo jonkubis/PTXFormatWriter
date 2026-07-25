@@ -1514,3 +1514,27 @@ implementation against it -- the reverse of the usual direction.
 
 TALLY of the 21 flagged types: 14 monomorphic, 3 with signal remaining (0x2056 x9, 0x201f x5,
 and 0x1017 now closed), 4 closed (0x1041, 0x103d, 0x258e, 0x1017), 1 corrected (0x207b).
+
+## 0x2056 field-mapped — "9 variants" is ONE struct with 8 fields
+Measured on all 1170 real instances (phantom-filtered): a FIXED 41-byte payload, **33 bytes
+constant**, with variation confined to eight small-enum fields:
+    +0 {0,1}   +9 {0,1,4}   +13 {2,4,8}   +17 {1,3}
+    +29 {0,1}  +30 {0,1}    +35 {1,8}     +39 {80,96,100}
+By parent: 0x2588's instance is MONOMORPHIC across all 282 sessions; 0x2581 carries 8 of the 9
+payloads. Sessions hold 4 of these (263), sometimes 6-7.
+
+The shapes are suggestive (+13 ∈ {2,4,8} looks like a power-of-two zoom, +39 ∈ {80,96,100} like a
+percentage/height) and I did NOT write those guesses into the spec as findings -- the corpus has no
+session that varies one view setting while holding the rest fixed, so they are unfalsifiable here.
+
+### THE SINGLE EXPERIMENT THAT UNBLOCKS THE DOCUMENTATION GAPS
+Every remaining open entry needs the same cheap thing: **one session saved twice, changing exactly
+one setting**, then diff. Concretely, the highest-value captures would be:
+  * zoom level changed (pins 0x2056 +13, maybe +39)
+  * track height changed (pins another 0x2056 field)
+  * a window opened/closed  (pins 0x201f payload+24 -- currently 2-valued, MIDI and MIDI-editor
+    readings already REFUTED)
+  * any of the 14 monomorphic types' settings changed at all -- they are byte-identical in all 282
+    sessions, so ANY session that differs gives the first signal those entries have ever had.
+That is a ~10-minute exercise in Pro Tools and would likely close more of the spec than another
+full session of corpus analysis, which has now reached its measured limit.
