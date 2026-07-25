@@ -4820,6 +4820,79 @@ def _recompute_free_fields(data: bytes, kinds: "list[int]", base_n: int,
     return bytes(body)
 
 
+def _rekey_offsynth_positional(data: bytes) -> bytes:
+    """Re-key the per-track POSITIONAL ordinal fields that must stay unique after an off-synth
+    track add/remove. Size-neutral and idempotent.
+
+    Pro Tools resolves a track's identity through these ordinals, NOT through the name bytes: an
+    off-synth `duplicate_track` produced structurally perfect, distinct names everywhere and PT
+    still displayed the copy under the SOURCE's name, then crashed on close (PT-tested
+    2026-07-23, 8/8 duplicates rejected). The cause is that `_rekey_positional_by_slot` -- which
+    renumbers exactly these fields -- is gated behind `_do_renumber`, so on a real session NOTHING
+    was re-keyed and the copy inherited the source's ordinal verbatim.
+
+    Renumbered here (each measured dense in PT-authored sessions, and violated by every duplicate):
+      * `0x2519` inline name entries -- `u16` at name_end+18, dense 1..N in TABLE order.
+      * `0x251A` lane entries -- `u16` at ne+18 (nlen at z+11, ne = z+15+nlen), lane-major so the
+        value is `(i mod N) + 1`; N is read as `len(0x251A)//2` (self-describing: two lanes per
+        track, click included) rather than from `track_types`, which omits the click.
+      * `0x200A` / `0x200B` / `0x2015` -- `u32` at the `_ORD2015_ANCHOR` + 18, dense 1..N in FILE
+        order, each type numbered within its own domain (`0x200B` is audio-only, so it runs
+        1..n_audio while `0x200A`/`0x2015` run 1..n_entries).
+
+    Deliberately NOT touched: `0x2589` (attributed by DISPLAY ROW, not file order -- see
+    `duplicate_track`), and the `0x261C`/`0x2104` fields, which `_rekey_positional_by_slot`
+    rewrites from synth-layout assumptions (`kinds`/`base_n`/`donor_free`) that do not hold on a
+    real session."""
+    body = bytearray(data)
+    by = _blocks_by_type(data)
+
+    def su16(o: int, v: int) -> None:
+        body[o : o + 2] = v.to_bytes(2, "little")
+
+    def su32(o: int, v: int) -> None:
+        body[o : o + 4] = v.to_bytes(4, "little")
+
+    # 0x200A / 0x200B / 0x2015 are OVERLAPPING VIEWS of ONE per-track ordinal, not three fields:
+    # in `multiple track types no click` the 0x200A[1], 0x200B[0] and 0x2015[1] anchors are all the
+    # same physical offset (61000). So collect the DISTINCT anchor offsets and number them 1..N in
+    # address order. Enumerating each type separately (what `_rekey_positional_by_slot` does) makes
+    # the result depend on which loop writes last: 0x200B exists only for AUDIO tracks, so on a
+    # mixed session its `s+1` is off by the number of preceding MIDI tracks -- it happens to be
+    # overwritten by the 0x2015 pass today, which is luck, not design.
+    anchors = set()
+    for ct in (0x200A, 0x200B, 0x2015):
+        for z, e in by.get(ct, []):
+            a = body.find(_ORD2015_ANCHOR, z, e)
+            if a >= 0:
+                anchors.add(a)
+    for s, a in enumerate(sorted(anchors)):
+        su32(a + 18, s + 1)
+
+    if by.get(0x2519):
+        z, e = by[0x2519][0]
+        inside = [cz for cs in by.values() for cz, _ce in cs if z < cz < e]
+        region_end = min(inside) if inside else e
+        p, idx = z + 4, 0
+        while p < region_end:
+            nlen = int.from_bytes(body[p - 4 : p], "little")
+            if 1 <= nlen <= 32 and all(0x20 <= c < 0x7F for c in body[p : p + nlen]):
+                ne = p + nlen
+                if ne + 20 <= region_end:
+                    su16(ne + 18, idx + 1)
+                    idx += 1
+                p = ne + 1
+            else:
+                p += 1
+
+    lanes = by.get(0x251A, [])
+    n = len(lanes) // 2 or 1                    # two lane entries per track, click included
+    for i, (z, e) in enumerate(lanes):
+        nlen = int.from_bytes(body[z + 11 : z + 15], "little")
+        su16(z + 15 + nlen + 18, (i % n) + 1)
+    return bytes(body)
+
+
 def _renumber_body_after_duplicate(data: bytes, copy_slot: int, kinds: "list[int]",
                                    base_n: int, donor_free: "list[tuple[int, bytes]]") -> bytes:
     """BODY renumber run at the END of `duplicate_track`. `copy_slot` is the copy's 0-based
@@ -5103,6 +5176,8 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     out = _adjust_track_count(out, -1 if audio_edit else 0)    # 0x1015 = audio count
     if midi_edit:
         out = _adjust_midi_list_count(out, -1)                 # 0x1058 = MIDI count
+    if not _do_renumber:
+        out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
     return out
 
 
@@ -5457,6 +5532,8 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     out = _adjust_track_count(out, 1 if audio_edit else 0)     # 0x1015 = audio count
     if midi_edit:
         out = _adjust_midi_list_count(out, 1)                  # 0x1058 = MIDI count
+    if not _do_renumber:
+        out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
     return out
 
 

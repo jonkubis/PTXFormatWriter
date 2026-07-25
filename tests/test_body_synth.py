@@ -1570,8 +1570,17 @@ class NameTablePreambleTests(unittest.TestCase):
         while new in names:
             new = "Y" + new[1:]
         back = BS.remove_track(BS.duplicate_track(data, src, new), new)
-        self.assertEqual(back, data,
-                         msg="duplicate->remove must round-trip byte-exact on a click session")
+        # The inverse is now `identity . repair`: this fixture is OUR OWN mixed-MIDI synth output,
+        # whose per-track positional ordinals were already malformed before any edit (duplicate
+        # 0x2519/0x251A/0x2015 values -- the synth-writer bug). Both editors now re-key those to
+        # the PT convention (`_rekey_offsynth_positional`), because Pro Tools resolves a track's
+        # identity through them and REJECTED every duplicate that left them stale. So the pair
+        # returns the session REPAIRED, not bit-for-bit. On a session whose ordinals are already
+        # PT-valid -- every PT-authored one, 253 of 263 in the corpus -- the two are identical.
+        self.assertEqual(back, BS._rekey_offsynth_positional(data),
+                         msg="duplicate->remove must invert exactly, modulo the ordinal repair")
+        self.assertEqual(BS.remove_track(BS.duplicate_track(back, src, new), new), back,
+                         msg="...and once repaired, the pair is byte-exact (idempotent)")
 
     @unittest.skipUnless((CONTROL_DIR / "robust_audio_mixed12.ptx").exists(),
                          "robust_audio_mixed12 control not present")

@@ -347,7 +347,12 @@ def _container_child_type(record: IndexRecord) -> "int | None":
     (0x1015→0x1014, 0x1054→0x1052, 0x2519→0x251a, 0x2624→0x261c), else None."""
     if record.count != 1 or record.child_refs:
         return None
-    return {0x1015: 0x1014, 0x1054: 0x1052, 0x2519: 0x251A, 0x2624: 0x261C}.get(record.content_type)
+    # 0x1058 -> 0x1057 is the MIDI analog of 0x1015 -> 0x1014. Omitting it meant a duplicated MIDI
+    # track's 0x1057 offset stayed PACKED in a two-offset element instead of being split into its
+    # own `(tag1=4, 1 offset)` element, so the record was one element short of the N+1 that every
+    # PT-authored session has -- which is what CRASHED Pro Tools ON LOAD (PT-tested 2026-07-23).
+    return {0x1015: 0x1014, 0x1054: 0x1052, 0x1058: 0x1057,
+            0x2519: 0x251A, 0x2624: 0x261C}.get(record.content_type)
 
 
 def canonicalize_after_track_add(
@@ -930,7 +935,8 @@ def index_target_type_sequence(data: bytes) -> list[tuple[int, str]]:
 # type collision with a real content_type doesn't pollute occurrences.
 
 _NAME_RE = re.compile(rb"(?:Audio|Click|MIDI) (\d+)")
-_CONTAINER_CHILD = {0x1015: 0x1014, 0x1054: 0x1052, 0x2519: 0x251A, 0x2624: 0x261C}
+_CONTAINER_CHILD = {0x1015: 0x1014, 0x1054: 0x1052, 0x1058: 0x1057,
+                    0x2519: 0x251A, 0x2624: 0x261C}
 _COUNTER_LABEL = (-1, None)
 
 
