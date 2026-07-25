@@ -4210,7 +4210,13 @@ def duplicate_audio_file(data: bytes, file_index: int, new_filename: str) -> byt
 
 def region_list(data: bytes) -> "list[tuple[int, str]]":
     """Every audio region in the session as `(zmark_of_0x2629, name)`, in file order -- the same
-    order the `0x104F` placement `+11` region INDEX refers to."""
+    order the `0x104F` placement `+11` region INDEX refers to.
+
+    HANDLES ARE PER-BODY. The zmarks (and the lane zmarks from `clip_lanes`) are byte offsets into
+    THIS body, so any edit that splices earlier in the file invalidates them. Re-derive them from
+    the returned body after every edit; chaining `duplicate_audio_file` -> ... -> `add_clip` with a
+    lane zmark captured before the chain fails with "no 0x1052 lane at zmark N". The region INDEX
+    is stable (entries are appended), so prefer indices for anything you carry across edits."""
     ref = _FI.final_index_ref(data)
     bl = sorted(_raw_block_bounds(data, ref.start))
     lists = [(z, e) for z, e, c in bl if c == 0x262A]
