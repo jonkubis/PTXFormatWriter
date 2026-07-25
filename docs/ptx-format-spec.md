@@ -1480,7 +1480,30 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** The flat de-duplicated list of every plug-in instantiated anywhere in the session. Top-level singleton, present exactly once in all 19 loadable non-huge sessions; child count/size scales with distinct plug-in instances. Child 0x1017 payload layout (MEDIUM, partially decoded): [byte0 = category flag, distribution {0:176, 3:411, 4:23, 8:45}] then [u32-length-prefixed ASCII plug-in name] (655/655 parsed cleanly: 'EQ3 7-Band','FabFilter Pro-Q 2','CLA-76','Click II', etc). The bytes after the name are NOT a name scramble — they are a FIXED 12-byte region = three reversed FourCC codes (AAX manufacturer + type + sub-type IDs), e.g. reversed manufacturer 'ksWV'=Waves(303×), 'Digi'=Digidesign(149×), 'FabF'=FabFilter(24×), 'NiIn'=Native Instruments, 'Antr'=Antares, 'iZtp'=iZotope. After the 12-byte FourCC region is a 7-byte flag trailer (dominant 01000100000000 / 02010201000000). Some children additionally carry a length-prefixed 'com.*' AAX bundle-ID string and/or a nested 0x5A sub-block (only 33/655), so the tail beyond the FourCC field is variable and not fully schematized.
 - **Confidence:** high (container structure); medium (child 0x1017 payload).
 
-### 0x1017 — Plug-in descriptor entry (parent 0x1018) / placeholder record (parent 0x204a)
+### 0x1017 — Plug-in descriptor entry (parent 0x1018) / placeholder record (parent 0x204a) — RESOLVED
+
+> **RESOLVED (measured on all 282 corpus sessions, phantom-filtered).** The two parent contexts
+> hold genuinely different things, and the `0x1018` form is a self-describing plug-in descriptor:
+>
+> | parent | instances | payload |
+> |---|---|---|
+> | `0x204a` | 564 | 40 bytes, `ff 00 00 …` — a fixed PLACEHOLDER, one payload only |
+> | `0x1018` | 282 | 73 B — `04` + `u32 len=10` + `"Polyphonic"` + `igiD` |
+> | `0x1018` | 35 | 74 B — `03` + `u32 len=8` + `"Click II"` + `igiD` |
+>
+> Layout of the `0x1018` form: `<u8 kind><u32 namelen><ASCII name><manufacturer FourCC>`, where the
+> FourCC is stored REVERSED — `igiD` reads back as `Digi` (Digidesign), the same reversal the
+> `0x4807` plug-in registry uses.
+>
+> **PRESENCE IS PROVEN, not inferred:** the `"Click II"` descriptor appears in a session **iff the
+> session has a click track** — 35 sessions have both, 247 have neither, **0 exceptions across all
+> 282**. Click II is Pro Tools' click plug-in, so the descriptor is the session's record of the
+> plug-in the click track instantiates. `"Polyphonic"` is present in every session (the default
+> instrument entry).
+>
+> A writer adding a click track must therefore also add the `Click II` descriptor; one that copies
+> a click track without it produces a session whose click references a plug-in the session never
+> declares.
 
 - **Kind:** LEAF (no real children; any apparent child is a false positive from the raw 0x5A scan hitting a 0x5A='Z' byte inside the 12-byte code). Two parent contexts: parent 0x1018 (655 instances, the plug-in catalog) and parent 0x204a (38 instances, a different placeholder record). Both 0x1018 and 0x204a are top-level ROOT singletons, 1 per session.
 - **Size:** Variable. Parent-0x1018 entries: block_type 0x04 (older sessions) or 0x06 (newer), payload ~21..90 B sized to name length (+ optional reverse-domain ID). Parent-0x204a entries: mostly 26/32 B, payloads dominated by 0xFF/00.
