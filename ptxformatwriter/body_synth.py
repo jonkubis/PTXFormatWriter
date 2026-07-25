@@ -4899,6 +4899,32 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     # four audio tracks), giving two tracks the same identity.
     for s, (z, e) in enumerate(by.get(0x261C, [])):
         su32(e - _B261C_C4_FROM_END, s)
+
+    # 0x104F clip-slot id (u16 at +11) -- carried only by MIDI tracks that HAVE clip content.
+    # The invariant is UNIQUENESS. It is NOT density and NOT zero-based: PT's own re-saves include
+    # a lone id of 1 (`one midi clip bar2 half-note clean`), so the value is an allocation slot PT
+    # may leave gapped, not a position. What no PT re-save ever contains is a REPEAT -- and a
+    # duplicated clip-bearing MIDI track cloned the id ([0, 0]).
+    #
+    # Reserve every pre-existing id first, then move only the second and later occurrences of a
+    # repeated id to the lowest globally-free value. A first attempt searched for the lowest value
+    # free among the ids seen SO FAR, which could steal an id a later block already owned and
+    # rename a SURVIVING track -- `[2, 0]` duplicated to `[2, 2, 0]` became `[2, 0, 1]`, so
+    # dropping the copy left `[2, 1]`. That cost 45 corpus round-trips; reserving up front confines
+    # the edit to the copy so remove inverts it exactly.
+    slots = by.get(0x104F, [])
+    if slots:
+        vals = [int.from_bytes(body[z + 11 : z + 13], "little") for z, _e in slots]
+        used, seen_once = set(vals), set()
+        for (z, _e), v in zip(slots, vals):
+            if v in seen_once:
+                nv = 0
+                while nv in used:
+                    nv += 1
+                used.add(nv)
+                su16(z + 11, nv)
+            else:
+                seen_once.add(v)
     return bytes(body)
 
 
