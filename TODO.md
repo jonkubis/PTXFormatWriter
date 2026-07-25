@@ -1817,3 +1817,23 @@ properties of the FORMAT: the type inventory (256 vs 326+), the 14 "monomorphic"
 signal), the gate's "0 false positives" (29/30 real sessions error), "three track kinds" (six), the
 editors' completeness (they ignored 17 of 383 tracks), and "documentation is capture-bound" (the
 captures existed). The corpus was mounted the whole time and named in my own memory file.
+
+## RISK FOUND (documented, NOT fixed): the editors renumber real sessions
+`_rekey_offsynth_positional` DENSELY renumbers four ordinal families at the end of every off-synth
+track edit. On the control corpus: a no-op (already dense) -- which is why it has looked safe all
+session. On a REAL 383-track session: it rewrites **2,447 bytes** (992 0x251A, 595 0x261C, 494
+0x2519, 366 0x2015), overwriting PT's own values with a dense model. The round-trip still closes
+(`remove(dup(x)) == rekey(x)`), so NO test catches it -- the session just comes back renumbered.
+
+This contradicts "leave everything outside the edit byte-intact", and it is bug #17's
+recompute-vs-preserve mistake one level up.
+
+TRIED AND REVERTED: a minimal collision-only repair (reserve existing values, move only duplicates
+-- the 0x104F/0x2589 shape). It makes real sessions byte-stable but BREAKS the PT-CONFIRMED synth
+oracles (`test_duplicate_body_matches_valid` and friends assert dup == fresh synth of N+1, which
+REQUIRES dense values). Reverted rather than trade verified behaviour for unverified.
+
+THE REAL FIX is to split the two cases: dense on the synth path (where it is PT-confirmed), minimal
+on real sessions (where preserving PT's values is the goal). `_is_synth_shaped` already
+distinguishes them, so this is tractable -- but it must be done deliberately, with the synth
+oracles green and a real-session byte-stability check added alongside.
