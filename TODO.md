@@ -1165,3 +1165,27 @@ errors and 0 notes.
   3. Synth-path writer bugs (mixed-MIDI 0x2589 ordinals). Deliberately untouched: that path is
      PT-confirmed, and a speculative fix there risks breaking something that works.
   4. PT re-test of the 12 staged files -- still the only thing that can confirm #20-#23.
+
+## The gate falsified TWO of its own rules (this is the point of having it)
+Stress-testing `validate_pt_invariants` across the whole corpus flagged
+`mixedmidi_click_{bottom,top,middle}` and `mixedmidi_reorder_*` as ERRORS -- files PT CONFIRMED
+opening on 2026-06-20. Repeated 0x2589 display rows and repeated per-track subtree ordinals are
+therefore TOLERATED by Pro Tools; treating them as rules was the normalisation-vs-constraint
+confusion again (4th instance this session).
+
+Before removing them I checked they were not load-bearing: with both dropped, the gate STILL
+catches 8/8 known PT rejections -- every one is independently caught by containment, 0x2519 entry
+ordinals, 0x251A lane ordinals, 0x261C C4, or duplicate names. Zero detection value, pure false
+positives -> downgraded to "nonconforming". The 0x2589 COUNT check stays an error (that is #19).
+
+FINAL CALIBRATION, consistent with every piece of PT evidence in existence:
+    12 PT-tested files          8/8 rejections flagged, 4/4 acceptances clean, 0 FP, 0 misses
+    PT-confirmed synth outputs  0 errors  (previously false positives)
+    all 282 corpus sessions     0 errors  (162 of them PT-authored)
+Locked in by two negative-control tests. 189 tests.
+
+WHAT THIS CHANGES GOING FORWARD: the ERROR set is now exactly the rules with PT evidence behind
+them -- containment, and uniqueness of the 0x2519/0x251A/0x261C ordinals + track names. Everything
+else PT-authored files share is recorded as "nonconforming", i.e. style, not law. That distinction
+is the single most useful thing this session produced, because I got it wrong four separate times
+by eyeballing PT-authored files and generalising.
