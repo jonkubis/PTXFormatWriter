@@ -1538,3 +1538,21 @@ one setting**, then diff. Concretely, the highest-value captures would be:
     sessions, so ANY session that differs gives the first signal those entries have ever had.
 That is a ~10-minute exercise in Pro Tools and would likely close more of the spec than another
 full session of corpus analysis, which has now reached its measured limit.
+
+## 0x201f: systematic sweep instead of hand-picked hypotheses
+Previously I had tested two readings by hand. Ran a proper sweep instead — the flag against twelve
+computed session properties across all 282 sessions:
+
+  * NO PERFECT PREDICTOR exists among any of them.
+  * REFUTED (new): tempo/meter. The flag=256 group is dominated by names like `120 to 140bpm`,
+    `3-4 meter`, `SYNTH_meter_*`, which looked decisive — but the tempo/meter block counts are
+    FIXED regardless of flag (0x2028/0x2029 = 2, 0x2718/0x2719 = 1) and their payload spans
+    OVERLAP between groups. The filename pattern is an artifact of how those captures were made.
+    (Third hypothesis refuted for this field, after MIDI content and the MIDI editor.)
+  * SOLID, one-way: flag=256 ⟹ no audio tracks, no click, no regions, no markers — 32/32, no
+    exceptions. The converse FAILS: 27 flag=0 sessions are also audio-free, and nothing measured
+    separates those 27 from the 32.
+
+Recorded in the spec so the next attempt does not re-test the same three readings. This is the
+limit of what correlation over this corpus can say about the field; separating those 27 from the 32
+needs a capture that varies one thing.
