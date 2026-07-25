@@ -1148,7 +1148,17 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** Geometry is (x, y, width, height), NOT LTRB (decisively: 195/483 nonzero have width<x, 231/483 have height<y; 32 records are 1×1 collapsed windows). Appears exactly once inside each of 24 distinct single-instance view-container parents (0x2016, 0x2017, 0x2019, 0x201a…0x259c) PLUS 2–5×/session inside 0x2552 (browser/list windows) = 25 distinct parent content-types. Per-parent geometry is a stable role (0x2019 height always 102; 0x2016/0x2017 the ~1377×856 main windows). These are LIVE window geometries, not static constants.
 - **confidence:** high.
 
-### 0x258e — per-track/per-clip display-state flags record
+### 0x258e — display-state flags record (a FIXED SET OF 11 PER SESSION — not per-track)
+
+> **CORRECTION (measured across all 282 corpus sessions).** This entry previously called `0x258e`
+> a "per-track/per-clip" record. It is not. Every session contains **exactly 11** of them —
+> 282/282 sessions, with track counts ranging from 0 to 512 — so the count is completely
+> independent of the number of tracks or clips. They also never sit inside a track record: all
+> 3102 instances are OUTSIDE every `0x261C`/`0x2620`/`0x261E`. The 11 divide by parent as
+> **7 under `0x2510`, 2 under `0x204a`, 2 under `0x202a`**, which makes them a fixed
+> session-level set (view/window state), not per-object state. The field table below is unchanged
+> and still accurate; only the *scope* was wrong — and a writer that scaled these with track count
+> would be corrupting a session-level structure.
 
 - **kind:** LEAF (469/469 zero children).
 - **size:** fixed per session. bt==2: size field 61, payload 59, span 68. bt==3: size field 62, payload 60, span 69 (payload = size−2, span = 7+size). block_type is a SESSION-WIDE format-version tag (never mixed within a session). bt=3's extra byte (offset 59) is always zero, but head-flag coupling changes.
