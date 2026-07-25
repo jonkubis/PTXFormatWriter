@@ -359,10 +359,16 @@ than the earlier note below, which framed it as "final field == source-file leng
 that as refuted: it is the FIRST declared field, read at the width the nibbles give.
 `body_synth.region_length()` / `set_region_length()` read and write it.
 
-The field's WIDTH is the practical limit on writing it: 2 bytes in ~94% of records, so a count
-above 65535 does not fit. Widening means rewriting the descriptor nibble AND resizing the block
-(which moves every enclosing size and index offset) — that remains unimplemented, and
-`set_region_length` raises rather than truncating.
+The field's WIDTH is nibble-declared — 2 bytes in ~94% of records — so a larger count needs the
+field WIDENED: rewrite the slot's nibble and resize the block, which moves every enclosing size and
+every master-index offset. `set_region_length` does this (`body_synth`), and the proven layout
+formula `span == 57 + namelen + varlen` survives it. The only hard stop left is a nibble's own
+ceiling: one slot cannot declare more than 15 bytes.
+
+One observable side effect is worth knowing: growing the body by a byte shifts the final-index
+start, so the file-header index-pointer record at offset 20 reports a different phantom
+"content type" (e.g. `0x1640` → `0x1641`). That is the documented phantom moving, not a structural
+change — the total block count is unchanged.
 
 **Remaining field SEMANTICS are partly open** (which slot is length vs offset vs source position) — see
 the original note below. That affects creating a region for NEW audio, not copying an existing one.

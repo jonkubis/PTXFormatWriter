@@ -1773,9 +1773,52 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual(BS.set_region_length(out, 0, before[0]), data,
                          msg="setting it back must be byte-exact")
 
-        # the width limit is REPORTED, never silently truncated
+        # A value too wide for the declared field is WIDENED (see
+        # test_set_region_length_widens_the_descriptor_field), never silently truncated. The only
+        # hard stop left is a nibble's own ceiling: a slot cannot declare more than 15 bytes.
+        self.assertEqual(BS.region_length(BS.set_region_length(data, 0, 10_000_000), 0),
+                         10_000_000)
         with self.assertRaises(ValueError):
-            BS.set_region_length(data, 0, 10_000_000)
+            BS.set_region_length(data, 0, 1 << 130)
+        with self.assertRaises(ValueError):
+            BS.set_region_length(data, 0, -1)
+
+    @unittest.skipUnless(list(ROOT.glob("control_files/**/one clip bar 1.ptx")),
+                         "clip control not present")
+    def test_set_region_length_widens_the_descriptor_field(self):
+        """The 0x2628 length field is nibble-width-declared (2 bytes in ~94% of records), so a
+        count above 65535 does not fit. Widening rewrites the descriptor nibble AND resizes the
+        block, moving every enclosing size and index offset -- the last structural piece of the
+        0x2628 model.
+
+        Note the block-type multiset DOES change by one at body offset 20: that is the file-header
+        index-pointer phantom, whose apparent content type is the low half of the final-index
+        offset, so it shifts when the body grows. Total block count is unchanged."""
+        data = _load_path(next(iter(ROOT.glob("control_files/**/one clip bar 1.ptx"))))
+        n = len(BS.region_list(data))
+        others = [BS.region_length(data, i) for i in range(1, n)]
+
+        for target, grew in ((4321, 0), (70_000, 1), (5_000_000, 1)):
+            out = BS.set_region_length(data, 0, target)
+            self.assertEqual(BS.region_length(out, 0), target)
+            self.assertEqual([BS.region_length(out, i) for i in range(1, n)], others,
+                             msg="other regions must be untouched")
+            self.assertEqual(len(out) - len(data), grew,
+                             msg=f"{target} should grow the body by {grew}")
+            self.assertEqual(BS.validate(out), [])
+            self.assertEqual([v for v in BS.validate_pt_invariants(out)
+                              if v["severity"] == "error"], [])
+            self.assertEqual(len(BS._size_driven_blocks(out)),
+                             len(BS._size_driven_blocks(data)),
+                             msg="widening must not add or lose blocks")
+            # the proven layout formula must still hold for the widened record
+            z, nl = BS._region_2628(out, 0)
+            end = [e for zz, e, _c in BS._size_driven_blocks(out) if zz == z][0]
+            tail = b"\xfe\xff\x00\x00\x00\x00\xff\xff\x04\x00\x04\x00"
+            k = out.find(tail, z + 13 + nl, end)
+            self.assertGreater(k, 0)
+            self.assertEqual(end - z, 57 + nl + (k - (z + 13 + nl + 5)),
+                             msg="span == 57 + namelen + varlen must survive widening")
 
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length

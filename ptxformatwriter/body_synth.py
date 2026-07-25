@@ -4058,14 +4058,29 @@ def set_region_length(data: bytes, region_index: int, sample_count: int) -> byte
     w = next((x for x in widths if x), 0)
     if not w:
         raise ValueError(f"region {region_index} declares no length field (descriptor {desc.hex()})")
-    if sample_count < 0 or sample_count >= (1 << (8 * w)):
-        raise ValueError(
-            f"sample_count {sample_count} does not fit the region's {w}-byte length field; "
-            f"widening requires rewriting the descriptor nibble and resizing the block "
-            f"(unimplemented -- see the 0x2628 notes in docs/ptx-format-spec.md)")
-    out = bytearray(data)
+    if sample_count < 0:
+        raise ValueError(f"sample_count must be non-negative, got {sample_count}")
+    need = max(1, (sample_count.bit_length() + 7) // 8)
     at = z + 13 + nl + 5
-    out[at : at + w] = int(sample_count).to_bytes(w, "little")
+    if need <= w:
+        out = bytearray(data)                       # fits: size-neutral in-place write
+        out[at : at + w] = int(sample_count).to_bytes(w, "little")
+        return bytes(out)
+
+    # WIDEN: the value needs more bytes than the descriptor declares. Grow the field in place by
+    # splicing the extra bytes in and bumping the descriptor nibble that declares this slot. The
+    # slot is the first NON-ZERO width, and zero-width slots consume no bytes, so the field always
+    # starts at the variable section's origin. `_splice_in` handles every enclosing block size and
+    # every master-index offset (0x2628/0x2629/0x262A are not index targets, so no new entries).
+    if need > 15:
+        raise ValueError(f"sample_count {sample_count} needs {need} bytes; a nibble caps a slot at 15")
+    slot = next(i for i, x in enumerate(widths) if x)
+    out = bytearray(_splice_in(data, at + w, b"\x00" * (need - w)))
+    dz = z + 13 + nl                                # descriptor start (before `at`, so unmoved)
+    bi, hi = dz + 1 + slot // 2, (slot % 2 == 0)
+    cur = out[bi]
+    out[bi] = ((need << 4) | (cur & 0x0F)) if hi else ((cur & 0xF0) | need)
+    out[at : at + need] = int(sample_count).to_bytes(need, "little")
     return bytes(out)
 
 
