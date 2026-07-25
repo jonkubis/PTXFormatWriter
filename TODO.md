@@ -1079,3 +1079,31 @@ derived from something remove can recompute, rather than "lowest free").
 All 12 are orphan-free (the proven crash discriminator), have unique names, distinct dense 0x261C
 C4 counters, satisfy every pinned ordinal invariant, and reload rc=0. Known remaining defect in the
 set: file 04 carries repeating 0x104F clip-slot ids (see above).
+
+## Bug #24 FIXED — the 0x104F clip-slot de-dup, done properly this time
+Last turn I reverted this (it collapsed the round-trip 252 -> 207). Diagnosing WHY produced both the
+right algorithm and a CORRECTION to the invariant I had asserted:
+
+  * THE ASYMMETRY: "lowest id free among those seen SO FAR" can steal an id a LATER block owns,
+    renaming a SURVIVING track -- `[2,0]` -> dup `[2,2,0]` -> `[2,0,1]` -> remove leaves `[2,1]`.
+    Reserving every pre-existing id BEFORE choosing confines the edit to the copy.
+  * THE INVARIANT, CORRECTED: I claimed "uniqueness, not density -- PT shows gaps [0,2]". That gap
+    came from OUR file, not PT's re-save of it. Diffing each file against its PT re-save shows PT
+    CLOSES gaps ([0,2] -> [0,1]) and removes repeats ([0,0,1,1] -> [0,1]). But dense-from-zero is
+    ALSO wrong: PT's own re-saves include a LONE id of 1. So the id is an allocation slot PT may
+    leave gapped, and the only property no PT re-save violates is UNIQUENESS. The fix therefore
+    de-duplicates and never renumbers what is already unique.
+
+Verified: no-op on all 13 PT re-saves carrying a 0x104F; unique after a dup; and on all 80 corpus
+sessions whose ids are ALREADY unique (every real PT session) duplicate->remove is still exact.
+187 tests. Accepted cost: 5 sessions lose clean identity-repair composability (252 -> 247), ALL of
+which already carried the defect before any edit.
+
+METHOD NOTE worth keeping: "X.ptx vs X clean.ptx" pairs are PT RE-SAVES of our own output, which
+makes them a ground-truth oracle for normalisation rules WITHOUT needing a new PT session. That is
+how both the density claim and the uniqueness claim got settled.
+
+## SHIPPED FOR PT RE-TEST — /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-24/ (12 files)
+Zero known defects remain in the set: orphan-free (the proven crash discriminator), unique track
+names, distinct 0x261C C4 counters, unique 0x104F clip-slot ids, every ordinal invariant satisfied,
+validate() clean, reload rc=0.
