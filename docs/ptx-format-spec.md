@@ -3046,10 +3046,10 @@ different situations. For each type, every instance's payload was compared acros
 | `0x2435` | 282 | 282 | **1** | monomorphic |
 | `0x2715` | 282 | 282 | **1** | monomorphic |
 | `0x4827` | 7 | 2 | **1** | monomorphic |
-| `0x103d` | 953 | 282 | 2 | has signal |
-| `0x1041` | 564 | 282 | 2 | has signal |
-| `0x258e` | 3102 | 282 | 4 | has signal |
-| `0x201f` | 282 | 282 | 5 | has signal |
+| `0x103d` | 953 | 282 | 2 | **explained**: the two payloads are fixed per PARENT (`0x1040` → `05 00…`, `0x2502` → `45 00…`), not a session variable |
+| `0x1041` | 564 | 282 | 2 | **RESOLVED**: the variation is a length-prefixed groove-template NAME — see its entry |
+| `0x258e` | 3102 | 282 | 4 | **scope corrected**: a fixed set of 11 per session, not per-track — see its entry |
+| `0x201f` | 282 | 282 | 5 | reduced to ONE 2-valued field (payload+24); two readings refuted, still open |
 
 **The eight monomorphic types are provably unresolvable from this corpus.** Every instance is
 byte-identical, so there is no variation to correlate with any session property. Their layouts are
@@ -3057,7 +3057,10 @@ documented; only the *meaning* of constants is open, and no amount of further an
 282 sessions can distinguish "version marker" from "flag" from "id" when the value never changes.
 Closing them requires a NEW capture in which the suspected property differs — not more inference.
 
-**The four with signal are the tractable ones.** As a worked example, `0x201f` (saved window
+**Of the four with signal, three are now closed and one remains.** `0x1041` is fully resolved (a
+length-prefixed name), `0x103d`'s two payloads are fixed per parent rather than varying with the
+session, and `0x258e`'s scope was simply wrong (a fixed set of 11 per session, never per-track).
+Only `0x201f` still has genuinely unexplained variation. As a worked example, `0x201f` (saved window
 geometry) reduces to a single discriminating field: the `u32` at **payload+24**, which takes only
 two values, `0x0000` and `0x0100`.
 
