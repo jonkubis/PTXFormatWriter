@@ -9,6 +9,7 @@ from this pipeline is confirmed to open in Pro Tools.
 from collections import Counter
 from pathlib import Path
 import tempfile
+import collections
 import pathlib
 import unittest
 
@@ -1586,6 +1587,57 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(errs, [], msg=f"{name}: PT-authored — must not error")
             checked += 1
         self.assertGreater(checked, 100, msg="expected a substantial PT-authored corpus")
+
+    def test_every_editing_primitive_produces_pt_clean_output(self):
+        """REGRESSION HARNESS. Every track/clip edit must leave the session free of
+        error-severity PT-invariant violations. This is the check that bugs #20-#23 all evaded:
+        each of them passed `validate()`, a clean reload and a byte-exact round-trip, and Pro Tools
+        rejected the file anyway. Running the calibrated gate over the editors' OUTPUT is what
+        would have caught them automatically.
+
+        Sampled across the corpus rather than exhaustive, so it stays fast enough to keep."""
+        def err(d):
+            return [v for v in BS.validate_pt_invariants(d) if v["severity"] == "error"]
+
+        checked = collections.Counter()
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if ".bak." in path.name:
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            if err(data):
+                continue                      # only start from sessions PT would accept
+            tracks = BS.track_types(data)
+            if tracks and checked["track"] < 12:
+                src = tracks[0].name
+                new = "Z" * len(src)
+                while new in [t.name for t in tracks]:
+                    new = "Y" + new[1:]
+                try:
+                    dup = BS.duplicate_track(data, src, new)
+                except ValueError:
+                    dup = None
+                if dup is not None:
+                    self.assertEqual(err(dup), [], msg=f"duplicate_track({src}) on {path.name}")
+                    self.assertEqual(err(BS.remove_track(dup, new)), [],
+                                     msg=f"remove_track on {path.name}")
+                    checked["track"] += 1
+            lanes = [l for l in BS.clip_lanes(data) if l[2] > 0]
+            if lanes and checked["clip"] < 12:
+                z = lanes[0][0]
+                self.assertEqual(err(BS.add_clip(data, z, position=1_000_000)), [],
+                                 msg=f"add_clip on {path.name}")
+                self.assertEqual(err(BS.remove_clip(data, z, 0)), [],
+                                 msg=f"remove_clip on {path.name}")
+                self.assertEqual(err(BS.move_clip(data, z, 0, 2_000_000)), [],
+                                 msg=f"move_clip on {path.name}")
+                checked["clip"] += 1
+            if checked["track"] >= 12 and checked["clip"] >= 12:
+                break
+        self.assertGreaterEqual(checked["track"], 5, msg="expected several track-edit samples")
+        self.assertGreaterEqual(checked["clip"], 5, msg="expected several clip-edit samples")
 
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
