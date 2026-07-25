@@ -3296,15 +3296,25 @@ The failing rules are:
 
 | rule | what real sessions do |
 |---|---|
-| `0x2519-entry-ordinals` | repeated values in large tables |
-| `0x251A-lane-ordinals` | repeated values |
-| `0x261C-C4` | e.g. `512` for a session's single `0x261C` — the "audio-only index" reading (proven 43/43 on small sessions) does not hold |
-| `0x2589-view-chains` | chain count ≠ name-entry count |
+| `0x2519-entry-ordinals` | **SOLVED 2026-07-25.** Not "repeated values" but a sentinel: `0` means *not numbered* (40.6% of entries), and the NONZERO ordinals in table order are exactly `1..k` — **300/300 random corpus sessions, no exceptions**. `[1,2,3,4,0,0,5,0,6,…]` is the normal shape. |
+| `0x251A-lane-ordinals` | same sentinel; the nonzeros are **ascending runs restarting at 1** (`[1,2,3,4,1,2,3,4]`) — 25/25, 148/149 on a wider sample. The synth rule `(i%N)+1` matches only 7/25. What triggers a restart is UNKNOWN. |
+| `0x261C-C4` | the "audio-only index" reading (proven 43/43 on small sessions) does not hold: **`c4 == 0..k-1` holds in 0 of 149 real sessions**, and the tail bytes of a real `0x261C` are zeros or unrelated data. Whether anything at all lives at `end-19` in a real session is UNPROVEN — the READER may be as wrong as the rule. |
+| `0x2015`/`0x200A`/`0x200B` | dense `1..n` holds in only **33 of 149** real sessions |
+| `0x2589-view-chains` | chain count ≠ name-entry count. Low-word UNIQUENESS is the one universal invariant found (68/68). |
 
 The reader is NOT at fault: spot-checking a real session parses 10 name entries with sane names,
 dense unique ordinals and no anomalies. The INVARIANTS are the problem — they were derived from
 small sessions (mostly ≤16 tracks, many synthetic-adjacent) and do not generalise to sessions with
 hundreds of tracks and richer track kinds.
+
+**THE SHARPER CONSEQUENCE (2026-07-25): these are not just over-strict GATE rules, the WRITER
+writes them.** `_rekey_offsynth_positional` applies every one of these conventions to whatever it
+edits, so a bare re-key of an UNTOUCHED real session — an edit that should be a no-op — rewrites
+**10,624 bytes across 25 sessions**: `0x251A` 4630, `0x261C` 2682, `0x2015` 2218, `0x200B` 1094.
+The C4 slot alone is overwritten in **2,432 of 2,448 records (99%)**. Fixing the `0x2519` rule to
+respect the zero sentinel took that field from 1,608 rewritten ordinals to **0**; the other three
+are still wrong. A rule derived from synth files is not merely an inaccurate description here —
+it is an active corruption of every real session the editor touches.
 
 **Consequence:** every "PT-invariant" claim in this spec should be read as *"holds on the 282-session
 control corpus"*, not *"holds for Pro Tools"*. The rules remain useful — they DID catch all 8
