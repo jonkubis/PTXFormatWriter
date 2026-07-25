@@ -1289,7 +1289,33 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** Role is a display/view-state cache of pre-rendered ASCII position labels, each timeline value rendered in all 5 PT timebases (Bars|Beats|Ticks, Min:Sec, Timecode, Feet+Frames, Samples). PT recomputes it from the current edit/ruler view + session tempo/format — NOT authoritative session data (string values vary session-to-session). The 5 slots in a group demonstrably diverge (e.g. Samples='960000' = 20s@48k but Min:Sec='0:05.000'), so each slot is an independent per-timebase value; the 3 groups read like small/default/large grid increments. PARSING NOTE: `_raw_block_bounds` returns e = z+7+size, overshooting by one — true last content byte is z+6+size; ignore the single artifact byte the bounds sweep appends when reading the tail. Full schema validated 69/69 (incl. 14 Hipsters instances), byte-exact in ≥2 sessions per claim (DWTS, Quality Time, Reverse Rewire, DOPE).
 - **Confidence:** high.
 
-### 0x2056 — Per-view display/zoom-state record
+### 0x2056 — Per-view display/zoom-state record (FIELD MAP measured; semantics still open)
+
+> **MEASURED (1170 real instances across all 282 sessions, phantom-filtered).** The record is a
+> FIXED 41-byte payload of which **33 bytes are constant**; all variation lives in eight
+> small-enum fields:
+>
+> | payload offset | observed values |
+> |---|---|
+> | +0 | 0, 1 |
+> | +9 | 0, 1, 4 |
+> | +13 | 2, 4, 8 |
+> | +17 | 1, 3 |
+> | +29 | 0, 1 |
+> | +30 | 0, 1 |
+> | +35 | 1, 8 |
+> | +39 | 80, 96, 100 |
+>
+> Sessions carry 4 of these (263 sessions), sometimes 6 or 7. By parent:
+> **`0x2588` holds a single payload in all 282 sessions** (monomorphic in that context), while
+> `0x2581` accounts for 8 of the 9 distinct payloads and the top-level instance for 5.
+>
+> So nine "variants" is really one struct with eight independent small fields. The value shapes are
+> suggestive — `+13` ∈ {2,4,8} reads like a power-of-two zoom factor and `+39` ∈ {80,96,100} like a
+> percentage or row height — but the corpus cannot separate them: nothing here varies ONE view
+> setting while holding the rest fixed. **The settling experiment is the same one-variable capture
+> the other open entries need:** save a session twice changing only the zoom level (then only the
+> track height, etc.) and diff these eight offsets.
 
 - **Kind:** LEAF (0 children, all 55). block_type = 6. Parent distribution: top-level/ROOT 19×, 0x2588 19×, 0x2581 17×. Every non-root parent (36/36) also contains a 0x2066 sibling; 0x2552 and 0x258c also co-occur under those parents (19× each).
 - **Size:** Fixed. size field = 43 (0x2B) → 41-byte payload, 50-byte total block span (9-byte header `5A 06 00 2B 00 00 00 56 20` + 41 payload). 55 instances / 19 sessions.
