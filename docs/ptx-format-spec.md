@@ -2967,33 +2967,35 @@ multiplying with the number of note/clip objects.
 Same shape as the zero-valued reserved-marker family above — nothing in the corpus gives it a
 non-zero value, so its purpose is UNPROVEN.
 
-### `0x104F` — clip-slot id, scoped to its container (NOT session-unique)
+### `0x104F` — the two placement parent chains, and why `+11` values repeat
 
-Sessions that contain clips carry `0x104F` records holding a small `u16` at `+11`. The record
-appears under **two different parent chains**, depending on the track kind:
+`+11` is the **region index** into the `0x2629` list — see the consolidated `0x104F` entry in §8,
+which is the authoritative field map. This section only records two things that entry does not, both
+learned the hard way while editing tracks.
+
+**Two parent chains, by track kind.** The placement record hangs off a different container
+depending on the kind of track it belongs to:
 
 | track kind | chain |
 |---|---|
 | audio | `0x1054` → `0x1052` (one per **lane**) → `0x1050` → `0x104F` |
 | MIDI | `0x1058` → `0x1057` (one per **track**) → `0x1056` → `0x104F` |
 
-**The id is scoped to that container, so the same value legitimately repeats across containers.**
-`two clips same track.ptx` — a genuinely PT-authored session (it satisfies every invariant our own
-writer is known to get wrong: dense `0x2519` ordinals, correct `next_kind`, lane-major `0x251A`,
-audio-indexed `0x261C` C4) — stores `[0, 0, 1, 1]` for **one stereo audio track**: two lanes, each
-holding clip ids `{0, 1}`.
+An editor that walks only one chain silently misses every placement on the other kind.
 
-Do **not** treat these as session-unique. An editor that "de-duplicates" them is renumbering
-PT-conforming data: attempting exactly that renamed slots PT had deliberately reused, and had to be
-reverted.
+**Repeated `+11` values are CORRECT and must not be "fixed".** Because the field is a region
+*reference*, the same value recurs whenever the same region is placed more than once — and a stereo
+track's two lanes reference the same regions. `two clips same track.ptx`, a genuinely PT-authored
+session (it satisfies every invariant our own writer is known to get wrong: dense `0x2519` ordinals,
+correct `next_kind`, lane-major `0x251A`, audio-indexed `0x261C` C4), stores `[0, 0, 1, 1]` for ONE
+stereo audio track: two lanes, each placing regions 0 and 1.
 
-Values are also not dense and not zero-based across a session — `two midi tracks one note each`
-stores `[0, 2]`, and a PT session elsewhere in the corpus carries a lone `1`. Within one container
-the observed values are small and start at 0, but the corpus does not pin the allocation rule
-further, so a writer should preserve whatever a session already has.
+Duplicating a track therefore SHOULD reproduce its region indices exactly. Treating them as
+per-object ids that must be unique, and renumbering the "duplicates", corrupts PT-conforming data —
+that mistake was made here and reverted.
 
-**Caveat on `* clean.ptx` files:** these are NOT Pro Tools re-saves of the adjacent file. Comparing
+**Caveat on `* clean.ptx` files:** they are NOT Pro Tools re-saves of the adjacent file. Comparing
 `two clips same track.ptx` with `two clips same track clean.ptx` shows the track kind itself
 changing (`0x261C` audio → `0x2620` MIDI, name `Audio 1` → `MIDI 1`); `clean` denotes a separate,
 clip-free or otherwise different capture of a similar scenario. Treating such a pair as a
-before/after of the same session yields false "normalisation rules".
+before/after of one session manufactures false "normalisation rules" — it briefly produced two here.
