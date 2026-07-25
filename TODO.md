@@ -1432,3 +1432,25 @@ REMAINING, and both are external-input-bound rather than analysis-bound:
      "structurally clean" has a measured false-positive rate. This is the bottleneck.
   2. Docs: 0x201f's single 2-valued field, and the 8 monomorphic constants -- measured to carry
      ZERO signal in this corpus, so they need a capture where the value differs.
+
+## IMPORT CHAIN STAGED FOR PT — /Users/jonkubis/Desktop/PTX_VERIFY_2026-07-25_IMPORT/ (6 files)
+The import chain was "structurally clean but unverified", which is the weakest possible state given
+that bugs #20-#23 all passed every structural check. It is now TESTABLE: a LADDER where each file
+adds exactly one primitive, so a Pro Tools failure localises to a specific call rather than to
+"somewhere in the chain".
+
+    13_register_audio_file      duplicate_audio_file  -- 2nd filename entry + its 0x1003 record
+    14_retarget_to_other_wav    + retarget_audio_file -- that record points at a DIFFERENT wav
+    15_add_region               + duplicate_region    -- a new region 'IMPORTED'
+    16_set_region_length        + set_region_length   -- region length -> the wav's 11540 samples
+    17_place_clip_full_chain    + add_clip            -- THE PAYOFF: a new clip on the timeline
+    18_widen_region_length      set_region_length(70000) on the ORIGINAL -- exercises WIDENING
+
+All six: validate() clean, PT gate 0 errors, rc=0. `Audio Files/` copied alongside so the session
+can find its media. The 12 track-edit files in PTX_VERIFY_2026-07-24 were re-checked this turn and
+still match the committed code exactly.
+
+FOUND WHILE BUILDING IT (real API trap, now documented): lane/region zmarks are byte offsets into
+ONE body, so every splice invalidates them. Chaining edits with a lane zmark captured before the
+chain fails with "no 0x1052 lane at zmark N". `region_list`/`clip_lanes` now say so, and recommend
+carrying region INDICES (stable under append) rather than zmarks.
