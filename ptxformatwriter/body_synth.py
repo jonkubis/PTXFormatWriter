@@ -4572,6 +4572,13 @@ _COUNT_CONTAINER_CHILD = {0x1054: 0x1052}
 # corpus sessions disagree with BOTH models -- so no recompute is provably safe. A track edit
 # instead ADJUSTS the existing value by its own delta (`_adjust_track_count`), which preserves
 # whatever the file means and cannot corrupt it. `validate()` likewise does not assert on 0x1015.
+# Every per-track record kind that hangs directly off the 0x2624 track list. 0x263B is the
+# folder/VCA-style kind: absent from the 282-session control corpus entirely, but present in 27 of
+# 40 sampled REAL sessions, indexed like the others, carrying a 0x2619 identity and a 0x4701
+# playlist subtree. Walking only the first three made those tracks invisible to both editors on the
+# majority of real sessions.
+_TRACK_RECORD_TYPES = frozenset({0x261C, 0x2620, 0x261E, 0x263B})
+
 _TRACK_COUNT_CONTAINER = 0x1015
 
 
@@ -5451,7 +5458,7 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     # also appear as small empty duplicates, and a session legitimately stores 0 for a kind it
     # has none of.
     for cont, kids in ((0x1015, (0x1014,)), (0x1058, (0x1057,)), (0x262A, (0x2629,)),
-                       (0x1054, (0x1052,)), (0x2624, (0x261C, 0x2620, 0x261E))):
+                       (0x1054, (0x1052,)), (0x2624, tuple(sorted(_TRACK_RECORD_TYPES)))):
         for z, e, c in bl:
             if c != cont or z < 31:
                 continue
@@ -5487,7 +5494,7 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             eg.append(g)
     rg = []
     for z, e, c in sorted(bl):
-        if c not in (0x261C, 0x2620, 0x261E):
+        if c not in _TRACK_RECORD_TYPES:
             continue
         for zz, ee, cc in bl:
             if cc == 0x2619 and z < zz < ee <= e:
@@ -5621,9 +5628,12 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # under the 0x2624 track-list, each nesting one 0x102D (whose 0x2619 holds the identity GUID).
     pl_ranges: "list[tuple[int, int]]" = []
     for z, e, c in bl:
-        if c == 0x102D and any(g in data[z:e] for g in seed_guids):
+        # 0x102D for audio/MIDI/click; 0x2619 for the folder kind (0x263B), whose identity is a
+        # bare 0x2619 with no 0x102D wrapper -- keying only on 0x102D made those tracks
+        # unlocatable even once 0x263B was in the container set.
+        if c in (0x102D, 0x2619) and any(g in data[z:e] for g in seed_guids):
             cs = [(cz, ce) for cz, ce, cc in bl
-                  if cc in (0x261C, 0x2620, 0x261E) and cz < z < ce]
+                  if cc in _TRACK_RECORD_TYPES and cz < z < ce]
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
@@ -5929,9 +5939,9 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
         pos = j + 1
     pl_ranges: "list[tuple[int, int]]" = []
     for z, e, c in bl:
-        if c == 0x102D and any(g in data[z:e] for g in seed):
+        if c in (0x102D, 0x2619) and any(g in data[z:e] for g in seed):
             cs = [(cz, ce) for cz, ce, cc in bl
-                  if cc in (0x261C, 0x2620, 0x261E) and cz < z < ce]
+                  if cc in _TRACK_RECORD_TYPES and cz < z < ce]
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
