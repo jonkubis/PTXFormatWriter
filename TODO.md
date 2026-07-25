@@ -1663,3 +1663,24 @@ transferable result here, more than any individual fix.
 
 No further blind-spot class is currently identified. The gate now checks: containment, uniqueness,
 counts, references, cross-container agreement and order.
+
+## Bugs #27/#28 FIXED — every LIVE writer path is now fully gate-clean
+Found by asking which notes fire on LIVE output rather than on stored files -- the same route that
+found #26. That isolated exactly two remaining divergences, and both are now fixed:
+
+  #27  0x2589 view-chain ordinals collided in the mixed-MIDI synth (`[1,0,1]` for 3 entries,
+       `[1,0,1,2,3,4]` for 6) because grow_one_midi_track appends a COPY without restamping.
+       `_repair_view_chain_ordinals` reserves existing ordinals and moves only repeats to the
+       lowest missing value -- the 0x104F shape, so correct assignments are untouched.
+  #28  0x261C C4 left gaps ([0,1,3,4,5]); it is the AUDIO-ONLY index (43/43 PT sessions, bug #23).
+
+STATE: every live synthesis path is free of BOTH errors and notes; every editor on a PT-authored
+session likewise, with ONE exception documented below. The synthesis test now asserts both
+severities. 199 tests, corpus 282/282 error-clean.
+
+### The single remaining live divergence in our own code
+`remove_track(<click>)` leaves the stale `Click II` plug-in descriptor (proven rule: present iff a
+click track exists). Deliberately NOT fixed: PT ACCEPTED exactly that file (09_click_remove opens
+and closes cleanly), and removing the descriptor means deleting a block from the 0x1018 registry --
+a real edit whose PT-correctness is unverified. Fixing an accepted behaviour on a hunch is how #24
+happened. The gate names it, so it will not be forgotten.
