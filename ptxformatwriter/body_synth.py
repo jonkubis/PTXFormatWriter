@@ -3658,6 +3658,10 @@ def synthesize_mixed_midi(
     for _s, (_z, _e) in enumerate(_blocks_by_type(out).get(0x261C, [])):
         _b[_e - _B261C_C4_FROM_END : _e - _B261C_C4_FROM_END + 4] = _s.to_bytes(4, "little")
     out = bytes(_b)
+    # Every GROWN MIDI track left its predecessor's 0x2519 `next_kind` still tagged audio, so a
+    # spec like [1,0,2,0] emitted `Audio 2 -> MIDI 2` as 0x0000. Repaired here, in the builder both
+    # the inline and control-file donor paths share, so all three routes stay byte-identical.
+    out = _repair_next_kind_chain(out)
     return set_waveform_view(out)
 
 
@@ -3669,6 +3673,51 @@ def synthesize_mixed_midi_inline(spec: "list[int]", *, unique: bool = True) -> b
     must sit at internal position <= 9 (single-digit gate). Display order is cosmetic."""
     from . import _mixed_midi_data as _MM
     return synthesize_mixed_midi(spec, _MM.mixed_midi_donor(), _MM.midi_template(), unique=unique)
+
+
+_NAME_ENTRY_KIND = {0x261C: 0, 0x2620: 1, 0x261E: 2, 0x263B: 5, 0x2621: 7, 0x261D: 11}
+
+
+def _repair_next_kind_chain(data: bytes) -> bytes:
+    """Rewrite every `0x2519` entry's `next_kind` from the ACTUAL kind of the entry after it.
+
+    `next_kind` names the NEXT entry's kind `<< 8` (verified 3379/3379 consecutive pairs over 40
+    real sessions). The synthesizer got this right only for tracks it took from the donor template:
+    each GROWN MIDI track left its predecessor still tagged `0x0000` (audio), so `[1,0,2,0]` emitted
+    `Audio 2 -> MIDI 2` as audio. The defect count equalled the number of MIDI tracks beyond the
+    first, which is exactly what the ten broken control files show (1, 2 and 3 violations for the
+    sessions with 2, 3 and 4 MIDI tracks).
+
+    Kinds are read from each entry's GUID -> owning track record, so this is derived from the
+    session that was actually built rather than from the spec, and it is a no-op on a session that
+    is already correct -- including every genuine Pro Tools file.
+
+    The last entry has the SHORT 21-byte trailer and simply has no `next_kind`; so does the odd
+    non-final short entry seen in at least one PT session. Both are detected by measuring the stride
+    to the next entry and skipped, because writing at +20 there would land on the following entry's
+    length prefix.
+    """
+    bl = _size_driven_blocks(data)
+    nt = [(z, e) for z, e, c in bl if c == 0x2519]
+    if not nt:
+        return data
+    z, e = nt[0]
+    end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+    ents = _inline_name_entries(data, z, e, bl)
+    slots = _name_entry_ordinal_slots(data, z, end)
+    if len(slots) < 2 or len(ents) != len(slots):
+        return data
+    recs = [(zz, ee, _NAME_ENTRY_KIND[cc]) for zz, ee, cc in bl if cc in _NAME_ENTRY_KIND]
+    out = bytearray(data)
+    for i in range(len(slots) - 1):
+        if (ents[i + 1][1] - 4) - slots[i] != _NAME_ENTRY_SUFFIX:   # short trailer: no next_kind
+            continue
+        g = data[slots[i + 1] + 10 : slots[i + 1] + 18]     # the NEXT entry's identity GUID
+        kind = next((k for zz, ee, k in recs if g in data[zz:ee]), None)
+        if kind is None:
+            continue
+        out[slots[i] + 20 : slots[i] + 22] = (kind << 8).to_bytes(2, "little")
+    return bytes(out)
 
 
 def synthesize(spec: "list[int]", *, click: "str | None" = None,
@@ -3711,7 +3760,7 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
         cur = _container_display_offsets(body)               # playlist offsets in build/spec order
         tpo = {o: i for i, (o, _t) in enumerate(track_playlist_order(body))}
         body = reorder_tracks(body, [tpo[cur[d]] for d in display_order])
-    return body
+    return _repair_next_kind_chain(body)      # grown MIDI left its predecessor mis-tagged
 
 
 # --- index-offset pointer ----------------------------------------------------

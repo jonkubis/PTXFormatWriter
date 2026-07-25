@@ -842,6 +842,36 @@ class MixedMidiTests(unittest.TestCase):
                 self.assertEqual(inline, ctrl, msg="inline == control-file path")
                 self.assertEqual(BS.synthesize(spec), inline, msg="synthesize() routes MIDI to inline")
 
+    def test_synth_next_kind_chain_is_clean(self) -> None:
+        """A SYNTHESIS bug, not an editing one: each GROWN MIDI track left its predecessor's
+        `next_kind` still tagged audio, so `[1, 0, 2, 0]` emitted `Audio 2 -> MIDI 2` as 0x0000
+        instead of 0x0100. Only the donor template's own tracks were correct.
+
+        This is why 10 of the 282 control files fail a chain check and the other 272 pass — the 10
+        are exactly our own synth output, and the violation count equals the number of MIDI tracks
+        beyond the first (1, 2 and 3 for the sessions with 2, 3 and 4 MIDI tracks). Every file
+        previously sent for Pro Tools verification was built from that broken set, so the duplicate
+        results could not distinguish a bad edit from a bad source.
+        """
+        KIND = {0x261C: 0, 0x2620: 1, 0x261E: 2, 0x263B: 5, 0x2621: 7, 0x261D: 11}
+
+        def violations(d):
+            bl = BS._size_driven_blocks(d)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+            slots = BS._name_entry_ordinal_slots(d, z, end)
+            kinds = [next((KIND[cc] for zz, ee, cc in bl
+                           if cc in KIND and d[b + 10 : b + 18] in d[zz:ee]), None) for b in slots]
+            return [i for i in range(len(slots) - 1)
+                    if kinds[i + 1] is not None
+                    and int.from_bytes(d[slots[i] + 20 : slots[i] + 22], "little") != (kinds[i + 1] << 8)]
+
+        for spec in ([1, 0, 2], [1, 0, 2, 0], [1, 0, 2, 0, 0], [1, 0, 2, 1, 0]):
+            for click in (None, "top", "bottom"):
+                with self.subTest(spec=spec, click=click):
+                    self.assertEqual(violations(BS.synthesize(spec, click=click)), [],
+                                     msg="every entry must name the NEXT entry's real kind")
+
     def test_click_plus_midi(self) -> None:
         """A click coexists with MIDI — top, bottom, and (via display_order over the N+1 tracks)
         anywhere in between. Every index offset resolves (the click's lane refs AND the MIDI
