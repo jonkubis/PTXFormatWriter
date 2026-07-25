@@ -1312,3 +1312,32 @@ NEXT CONCRETE STEP: dissect the audio-FILE record chain (0x1003/0x103a and whate
 filename + the region->file link, the "findex" mentioned in the 0x2629 spec row) and add an
 `add_audio_file()` primitive. That is a bounded structural task of the same shape as this one --
 and the same shape as the 0x2628 work that turned out to be a measurement, not a wall.
+
+## CLIP-IMPORT CHAIN NOW RUNS END TO END (commit d053970)
+The item that sat on the frontier as "add-clip with NEW audio (0x2628 geometry, PT-gated)" is now
+mostly built, and what remains is one specific thing rather than a vague blocker.
+
+    duplicate_audio_file(d, i, "IMPORTED.wav")   0x103A filename entry + its 1:1 0x1003 record
+    duplicate_region(d, i, "IMPORTED")           0x2629 entry (0x2628 name rewritten)
+    add_clip(d, lane, pos, region_index=...)     placement referencing the new region
+
+Verified on a real session: files 1->2, regions 2->3, the placed clip reports the new region,
+validate() clean + PT gate 0 errors + rc=0 at EVERY stage. 192 tests.
+
+WHY IT WAS CHEAP once measured: none of 0x103A / 0x1003 / 0x2629 / 0x2628 is a master-index target,
+so every step is a splice + offset slide with no index entries. The 0x103A entry stride is
+`13 + namelen` (`02 00 00 00 00 <u32 len> <name> EVAW`), and 0x1003 records are 1:1 with filenames
+(4 wavs -> 4; 1300 -> 1300).
+
+Factored `_splice_in(data, at, blob)` out of the three call sites that had each grown their own
+copy (duplicate_region / add_clip / remove_clip).
+
+## WHAT IS ACTUALLY LEFT (precise, no longer a category)
+  1. The 0x1003 body is copied VERBATIM, so a registration describes the SAME audio as its source.
+     Pointing it at genuinely DIFFERENT audio needs the identity fields inside 0x1003 rewritten
+     (length / rate / GUID). `wav_clip_identity()` already COMPUTES these for the synthesis path,
+     so the next step is mapping its outputs onto 0x1003's offsets -- a bounded field-mapping task.
+  2. PRO TOOLS HAS NOT SEEN ANY OF THIS. Structural cleanliness is necessary, not sufficient --
+     that is the lesson of bugs #20-#23, all of which passed every structural check.
+  3. Documentation: 0x201f's one 2-valued field, and the 8 monomorphic constants (no signal in
+     this corpus by measurement, not by assumption).
