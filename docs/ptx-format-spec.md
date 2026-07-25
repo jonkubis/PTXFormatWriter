@@ -1313,6 +1313,12 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 > So nine "variants" is really one struct with eight independent small fields. The value shapes are
 > suggestive — `+13` ∈ {2,4,8} reads like a power-of-two zoom factor and `+39` ∈ {80,96,100} like a
 > percentage or row height — but the corpus cannot separate them: nothing here varies ONE view
+> **Its fields do not track session CONTENT.** Sweeping all eight varying offsets against seven
+> computed session properties (track count, entry count, has click / MIDI / audio / clips /
+> markers) — 56 combinations over 282 sessions — yields **zero** perfect matches. That is the
+> expected result for genuine UI state, and is worth recording as a negative: do not look for a
+> content correlation here.
+>
 > setting while holding the rest fixed. **The settling experiment is the same one-variable capture
 > the other open entries need:** save a session twice changing only the zoom level (then only the
 > track height, etc.) and diff these eight offsets.
