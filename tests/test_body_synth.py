@@ -1871,6 +1871,40 @@ class ViewChainAttributionTests(unittest.TestCase):
         self.assertEqual([v for v in BS.validate_pt_invariants(out)
                           if v["severity"] == "error"], [])
 
+    def test_gate_checks_referential_integrity(self):
+        """The gate verified ordinals and containment but never that a REFERENCE RESOLVES, which
+        is why bug #25 escaped it entirely and was only caught by a corpus-wide sweep. Two checks
+        close that hole, both holding on 162/162 PT-authored sessions:
+
+          * every AUDIO placement's 0x104F `+11` region index resolves into `region_list()`
+            (audio chain only -- the MIDI chain 0x1058>0x1057>0x1056>0x104F indexes another list);
+          * a session that has regions must have a parseable 0x103A audio-file list.
+
+        Verified to actually catch #25: reintroducing the hardcoded "Audio Files" lookup makes the
+        relinked sessions report an `audio-file-list` error."""
+        sessions = list(ROOT.glob("control_files/**/one clip bar 1.ptx"))
+        if not sessions:
+            self.skipTest("clip control not present")
+        data = _load_path(sessions[0])
+        self.assertEqual([v for v in BS.validate_pt_invariants(data)
+                          if v["severity"] == "error"], [])
+
+        # a dangling region reference must be reported
+        bl = BS._size_driven_blocks(data)
+        lanes = [(z, e) for z, e, c in bl if c == 0x1052]
+        target = None
+        for z, e, c in bl:
+            if c == 0x104F and z >= 31 and any(lz < z and e <= le for lz, le in lanes):
+                target = z
+                break
+        self.assertIsNotNone(target, msg="expected an audio placement to corrupt")
+        broken = bytearray(data)
+        broken[target + 11 : target + 15] = (9999).to_bytes(4, "little")
+        kinds = [v["invariant"] for v in BS.validate_pt_invariants(bytes(broken))
+                 if v["severity"] == "error"]
+        self.assertIn("region-reference", kinds,
+                      msg="a placement pointing at a non-existent region must be an error")
+
     def test_same_length_duplicate_is_unchanged(self):
         """The same-length path must be byte-for-byte what it was before the variable-length
         branch existed (the PT-confirmed synth oracles depend on it)."""

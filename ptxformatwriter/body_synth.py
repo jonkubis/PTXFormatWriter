@@ -5343,6 +5343,32 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     if has_desc != has_click:
         note("click-plugin-descriptor",
              f"'Click II' descriptor present={has_desc} but click track present={has_click}")
+
+    # REFERENTIAL INTEGRITY. Added after bug #25 escaped every structural check: the gate verified
+    # ordinals and containment but never that a reference RESOLVES. Both hold on 162/162
+    # PT-authored sessions.
+    try:
+        regions = region_list(data)
+    except Exception:
+        regions = []
+    lanes = [(z, e) for z, e, c in bl if c == 0x1052]
+    for z, e, c in bl:
+        if c != 0x104F or z < 31:
+            continue
+        # AUDIO placements only (0x1054 > 0x1052 > 0x1050 > 0x104F); the MIDI chain
+        # (0x1058 > 0x1057 > 0x1056 > 0x104F) indexes a different list.
+        if not any(lz < z and e <= le for lz, le in lanes):
+            continue
+        ridx = int.from_bytes(data[z + 11 : z + 15], "little")
+        if not 0 <= ridx < len(regions):
+            err("region-reference",
+                f"placement at {z} references region {ridx}, but the session has "
+                f"{len(regions)} regions")
+    if regions:
+        try:
+            _audio_file_list(data)
+        except Exception as exc:
+            err("audio-file-list", f"session has regions but no parseable 0x103A list ({exc})")
     return out
 
 
