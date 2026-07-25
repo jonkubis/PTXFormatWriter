@@ -1370,3 +1370,30 @@ Three things I had been quoting as blockers were unfinished MEASUREMENTS, not wa
 geometry, most of the UNKNOWN list, and the "add-clip needs new audio" item. Each dissolved when
 measured. The one real external dependency is Pro Tools itself, and that has now been the
 bottleneck for the whole session -- every one of bugs #20-#24 traces back to a PT verdict.
+
+## 0x2628 LENGTH FIELD proven + writable (commit 0b20724) — the import chain is field-complete
+The gap named one commit earlier is closed. The FIRST field the 0x2628 descriptor declares is the
+region's LENGTH IN SAMPLES: for every corpus region whose WAV is on disk it equals
+`wav_clip_identity(wav)[0]` EXACTLY (40/40, across 2/3/4-byte widths). That is sharper than the
+spec's old "final field == source-file length", which it had itself recorded as REFUTED.
+
+    region_length(d, i)                 read
+    set_region_length(d, i, samples)    write, size-neutral, byte-exact when set back
+
+Full chain, field-complete:
+    duplicate_audio_file -> retarget_audio_file -> duplicate_region -> set_region_length -> add_clip
+194 tests; every stage validate()-clean, PT gate 0 errors, rc=0.
+
+### THE remaining structural limit, stated exactly
+The length field's WIDTH is nibble-declared and is 2 bytes in ~94% of records -> counts above
+65535 do not fit. Widening requires rewriting the descriptor nibble AND resizing the block, which
+moves every enclosing size and index offset. `set_region_length` RAISES rather than truncating.
+That resize is the one genuinely unfinished piece of the 0x2628 model. It is tractable -- the
+layout is fully pinned (span == 57 + namelen + varlen) and `_splice_in` already does the
+grow-and-slide -- but it is real work, not a measurement.
+
+### Everything else outstanding
+  1. PRO TOOLS HAS NOT SEEN ANY OF THE IMPORT CHAIN. Bugs #20-#23 each passed validate(), rc=0 AND
+     the byte-exact round-trip while PT rejected the file. Unverified is not done.
+  2. Docs: 0x201f's single 2-valued field; the 8 monomorphic constants (measured: no signal in this
+     corpus, so capture-bound rather than inference-bound).
