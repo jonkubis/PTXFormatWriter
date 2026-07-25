@@ -326,7 +326,36 @@ All are byte-stable under clip/region edits → copy verbatim. **Do not** assume
 prefix when relocating a plugin blob: the churn boundary is plugin-specific and can begin
 near the head. (The literal `0x4403/0x4420/0x4301` codes do *not* exist as standalone blocks.)
 
-**Region geometry (`0x2628`) — descriptor model (PARTIAL — not add/replace-ready).** After
+**Region geometry (`0x2628`) — FULL RECORD LAYOUT (structurally add/replace-ready).**
+*(measured on all 2774 corpus records, 2774/2774 exact)*
+
+```
+[9 block hdr][u32 namelen][name][5-byte descriptor][variable][12-byte const tail][27-byte trailer]
+```
+
+- The **12-byte tail is a constant**: `fe ff 00 00 00 00 ff ff 04 00 04 00`, byte-identical in
+  every record, and it is **found in 2774/2774** — so the variable section can be located by
+  SEARCHING for it rather than by trusting the nibble arithmetic.
+- Exactly **27 bytes** follow that tail in every record.
+- Therefore **`span == 57 + namelen + varlen`**, and the block's own size field `== span − 7`.
+  Both hold on 2774/2774 records.
+- Observed `varlen`: 2 (94%), then 4, 5, 6, 16, and rarely 3/8/10.
+
+This is what the entry below was missing. A writer can now build or resize a `0x2628` exactly:
+take the name and the variable section, and the size follows from the formula. **Duplicating an
+existing region — the common case — needs no field semantics at all**, because the variable
+section is copied verbatim.
+
+The nibble model still describes the variable section's internal fields (below), and it is
+**not** needed for parsing: computing the end from `sum(nibble widths)` lands on the terminator in
+2714/2774 records, and the 60 exceptions (all one descriptor signature, `00 10 20 11 08`, in the
+`legacy_audio_*` sessions) overshoot by exactly one byte. Searching for the terminator is
+therefore the reliable strategy; the nibbles remain useful only for interpreting the fields.
+
+**Field SEMANTICS remain partly open** (which slot is length vs offset vs source position) — see
+the original note below. That affects creating a region for NEW audio, not copying an existing one.
+
+**Original descriptor note (retained).** After
 the name (`noff = z+13+namelen`) a 5-byte descriptor `[b0..b4]` precedes variable-width LE
 sample fields whose byte-widths are the **nibbles of `b1,b2,b3`** (slot order
 `[b1.hi,b1.lo,b2.hi,b2.lo,b3.hi,b3.lo]`, 0 = absent); `b4` is a form marker (`0x08` trimmed /
