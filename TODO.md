@@ -1637,3 +1637,29 @@ Verified: both mixed-MIDI specs lose the note, counts equal framed children, 199
 Both were named BEFORE being checked, and both found a real defect within a turn of being added.
 Remaining unexamined class: ORDERING constraints (does any structure require a specific sibling
 order?). That is the next corpus-supported avenue.
+
+## Gate: record ORDER check added — 3rd and last named blind-spot class closed
+The gate checked VALUES, then REFERENCES, then CROSS-CONTAINER agreement, and could never see
+ORDER. Invariant: per-track records under 0x2624 appear in NAME-TABLE order -- 153/153 PT-authored
+sessions with records, zero exceptions.
+
+METHOD NOTE that mattered: matched by IDENTITY GUID (the 0x2619 in each record), never by name. My
+first attempt used a `(?:Audio|MIDI|Click) \d+` regex and reported 38 violations -- ALL artifacts of
+custom track names (`A.ptx`, `AB.ptx`) and `.dupN` suffixes. Checking the failures before believing
+them turned a 38-violation "finding" into a measurement bug in my own probe.
+
+Severity NONCONFORMING, and this time chosen correctly on the first attempt: 22 files trip it, all
+ours, including `mixedmidi_click_*` and `mixedmidi_reorder_*` which are PT-CONFIRMED to open. PT
+tolerates records out of name-table order.
+
+### All three named blind-spot classes are now closed, and each paid off
+    references       -> region-reference / audio-file-list   caught bug #25 (proven retroactively)
+    cross-container  -> container-count                      caught bug #26 (live synth defect)
+    ordering         -> record-order                         22 notes, all localising our own
+                                                             mixed-MIDI/reorder output
+Naming what a validator CANNOT see, then checking those classes, produced two real defects in three
+attempts -- both invisible to ~199 passing tests and every prior sweep. That technique is the
+transferable result here, more than any individual fix.
+
+No further blind-spot class is currently identified. The gate now checks: containment, uniqueness,
+counts, references, cross-container agreement and order.
