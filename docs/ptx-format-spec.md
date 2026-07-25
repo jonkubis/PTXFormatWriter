@@ -3205,3 +3205,25 @@ two values, `0x0000` and `0x0100`.
 **The experiment that would settle `0x201f`:** save one session twice, changing only whether a
 given window is open, and diff `payload+24`. That single pair also disambiguates which window.
 The same recipe — one variable, two saves — is what each remaining type needs.
+
+### Why the last two open entries resist this corpus (a synthesis, not a shrug)
+
+`0x201f` and `0x2056` are the only flagged types left with real variation, and both have now been
+swept systematically rather than probed with hand-picked guesses:
+
+| entry | sweep | result |
+|---|---|---|
+| `0x201f` | 1 field × 12 session properties | no perfect predictor; MIDI content, the MIDI editor, and tempo/meter all REFUTED |
+| `0x2056` | 8 fields × 7 session properties (56 combinations) | no perfect predictor |
+
+The common finding is the useful one: **neither correlates with any property of the session's
+CONTENT.** That is exactly what one expects of window geometry and per-view zoom state — they
+record what the USER last did to the interface, which is independent of how many tracks or clips a
+session holds. No amount of further correlation over these 282 sessions can pin them, because the
+discriminating variable was never captured.
+
+What would settle them is small and specific: **one session saved twice, changing exactly one UI
+setting** (zoom level; track height; a window opened or closed), then diff `0x201f` payload+24 and
+the eight `0x2056` offsets. The same capture also gives the 14 monomorphic types their first
+variation — they are byte-identical across all 282 sessions today, so any file in which one of
+those settings differs is strictly more informative than the entire existing corpus for them.
