@@ -3235,3 +3235,51 @@ setting** (zoom level; track height; a window opened or closed), then diff `0x20
 the eight `0x2056` offsets. The same capture also gives the 14 monomorphic types their first
 variation — they are byte-identical across all 282 sessions today, so any file in which one of
 those settings differs is strictly more informative than the entire existing corpus for them.
+
+### CORRECTION: "monomorphic" was a property of the 282-session corpus, not of the format
+
+An earlier section of this spec reported 14 types as **monomorphic — provably no signal**, measured
+across the 282-session `control_files` corpus, and concluded they could only be resolved by
+capturing new sessions. **That conclusion was wrong.** Re-measuring against the external corpus at
+`/Volumes/Backups/AI/__PTX corpus` (**43,454 sessions**), a 350-session sample shows **10 of the 14
+carry real variation**:
+
+| type | distinct payloads (350-session sample) | previously |
+|---|---|---|
+| `0x2508` | 252 | "no signal" |
+| `0x2502` | 144 | "no signal" |
+| `0x2025` | 48 | "no signal" |
+| `0x201e` | 45 | "no signal" |
+| `0x2020` | 33 | "no signal" |
+| `0x207b` | 26 | "no signal" |
+| `0x258f` | 9 | "no signal" |
+| `0x2049` | 9 | "no signal" |
+| `0x206f` | 2 | "no signal" |
+| `0x2509` | 2 | "no signal" |
+
+Only **`0x2103`, `0x2435`, `0x2715`, `0x4827`** are still invariant at this sample size.
+
+**The methodological lesson:** "no variation in the corpus I looked at" is a statement about the
+sample, and it silently became "no variation exists" — the same over-generalisation that produced
+the `0x207b` phantom "two forms" and the `clean`/`.bak` false oracles. Before declaring a field
+unresolvable, check whether a larger sample is available.
+
+#### Field maps from the external corpus (200-session sample)
+
+Each is a fixed-length record whose variation is confined to a few offsets:
+
+| type | payload len | constant bytes | varying offsets |
+|---|---|---|---|
+| `0x2508` | 53 | 32/53 | 16, 18–25, 37–40, 42–44, … (a `"Default"` string sits at +26) |
+| `0x2025` | 18 | 10/18 | 0–3, 9–12 |
+| `0x201e` | 27 | 19/27 | 9, 10, 13, 14, 17, 18, 21, 25 (`+9` ∈ {9,18,32,64,128,134,135,144}) |
+| `0x2049` | 20 | 13/20 | 5, 6, 8, 9, 12, 16, 17 (`+5` ∈ {0,128}) |
+| `0x258f` | 27 | 18/27 | 9–16, 26 |
+| `0x207b` | 9 | 5/9 | 0, 1, 2, 7 |
+
+`0x2020` is 8 bytes and constant within the dominant length, but has 3 length variants — its
+variation is structural rather than per-byte.
+
+These are measured shapes, not semantics. The external corpus is large enough that correlating
+these offsets against session properties is now a tractable exercise, where against 282 sessions
+it was not.
