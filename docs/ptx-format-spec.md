@@ -3328,3 +3328,27 @@ Absent from the 282-session corpus entirely; present in **27 of 40** sampled ext
 container set `{0x261C, 0x2620, 0x261E}`. `0x263B` is not in it, so these tracks are invisible to
 both editors on the majority of real sessions. Adding it is not a one-line change: the `0x4701`
 subtree and the indexed status both need handling.
+
+### WARNING: the editors renumber real sessions more than they should
+
+`duplicate_track`/`remove_track` finish by calling `_rekey_offsynth_positional`, which DENSELY
+renumbers four per-track ordinal families (`0x2519` entries, `0x251A` lanes, the
+`0x200A`/`0x200B`/`0x2015` subtree field, and `0x261C` C4).
+
+On the 282-session control corpus this is a no-op — those sessions are already dense, which is why
+it looked safe. On a REAL 383-track session it rewrites **2,447 bytes**: 992 in `0x251A`, 595 in
+`0x261C`, 494 in `0x2519`, 366 in `0x2015`, replacing Pro Tools' own values (which include zeros
+and non-sequential runs) with a dense model. The round-trip still closes — `remove(duplicate(x))`
+equals `rekey(x)` exactly — so no test catches it; the session is simply returned *renumbered*.
+
+That contradicts the project's stated aim of leaving everything outside the edit byte-intact, and it
+is the same recompute-vs-preserve mistake as bug #17, one level up.
+
+**Attempted fix and why it was reverted:** replacing the dense renumber with a minimal
+collision-only repair (reserve every existing value, move only duplicates) makes real sessions
+byte-stable — but it breaks the PT-CONFIRMED synth oracles, which assert that a duplicate is
+byte-identical to a fresh synth of N+1 tracks. Dense renumbering is *correct* on the synth path and
+*wrong* on real sessions, so the two need different treatment rather than one replacing the other.
+
+Until that is resolved, treat the editors as safe for synth-shaped sessions and as
+**renumbering** for real ones.
