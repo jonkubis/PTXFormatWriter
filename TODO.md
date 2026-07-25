@@ -1263,3 +1263,29 @@ THE EXPERIMENT THAT SETTLES IT (cheap, and the same recipe for all four signal-b
 save one session twice changing ONLY whether a given window is open, then diff payload+24.
 
 Remaining as before: 0x2628 new-audio geometry, and PT re-test of the 12 staged files.
+
+## 0x2628 UNBLOCKED STRUCTURALLY — the reimplementation gap is smaller than stated
+The spec called this "PARTIAL — not add/replace-ready", and I had twice deferred new-audio import
+on that basis. Measuring instead of deferring, the record's LAYOUT is now fully pinned
+(2774/2774 corpus records, both checks exact):
+
+    [9 hdr][u32 namelen][name][5-byte descriptor][variable][12-byte CONST tail][27-byte trailer]
+    span == 57 + namelen + varlen        size field == span - 7
+
+  * the 12-byte tail `fe ff 00 00 00 00 ff ff 04 00 04 00` is byte-IDENTICAL in every record and
+    is found in 2774/2774 -> the variable section can be located by SEARCH, not by arithmetic;
+  * exactly 27 bytes follow it, always;
+  * so a writer can build or resize a 0x2628 exactly, and DUPLICATING an existing region needs no
+    field semantics at all (copy the variable section verbatim).
+
+The nibble-width model is NOT needed for parsing: it lands on the terminator in 2714/2774, and the
+60 exceptions are one signature (`00 10 20 11 08`, the `legacy_audio_*` sessions) overshooting by
+exactly one byte. Terminator-search is the reliable strategy; nibbles only interpret the fields.
+
+STILL OPEN (correctly): the field SEMANTICS inside the variable section (which slot is length vs
+offset vs source position). That blocks creating a region for genuinely NEW audio -- but it does
+NOT block region duplication, which is the larger half of what "add clip" means.
+
+LESSON: "PARTIAL — not add/replace-ready" had been sitting in the spec as a stop sign, and I
+treated it as one for several turns. It marked an UNFINISHED MEASUREMENT, not an impossible one.
+Worth re-testing the other stop signs rather than inheriting them.
