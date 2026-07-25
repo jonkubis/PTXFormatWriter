@@ -1289,3 +1289,26 @@ NOT block region duplication, which is the larger half of what "add clip" means.
 LESSON: "PARTIAL — not add/replace-ready" had been sitting in the spec as a stop sign, and I
 treated it as one for several turns. It marked an UNFINISHED MEASUREMENT, not an impossible one.
 Worth re-testing the other stop signs rather than inheriting them.
+
+## NEW CAPABILITY SHIPPED — duplicate_region() (commit ffa6971)
+The first genuinely new editing capability this session, not another fix. Appends a copy of an
+audio region under a new name; `add_clip(region_index=...)` then places a clip REFERENCING it.
+End-to-end verified: the clip reports the new region name, validate() clean, PT gate 0 errors,
+reload rc=0. 191 tests.
+
+Why it was cheap once 0x2628 was measured: a region is a self-contained 0x2629 in the 0x262A list
+(u32 count at payload+0); NEITHER 0x2629 NOR 0x2628 is a master-index target -- only 0x262A is --
+so an insert adds no index entries, just an offset slide. And because the 0x2628 variable section
+is delimited by the constant tail, duplicating needs only a NAME rewrite with
+`span == 57 + namelen + varlen`.
+
+## THE NEW-AUDIO BOUNDARY IS NOW EXACT (was vague for many turns)
+"add-clip with NEW audio" was listed as one blocked item. It is really two, and only one is left:
+  DONE  — create a new REGION and place a clip on it (duplicate_region + add_clip).
+  OPEN  — point a region at a DIFFERENT wav. `_repoint_clip` fails with
+          `ValueError: list.index(x): x not in list` at `_audio_filenames(data).index(old_filename)`
+          because a duplicated region has no entry in the audio-FILENAME list (0x1003 / 0x103a).
+NEXT CONCRETE STEP: dissect the audio-FILE record chain (0x1003/0x103a and whatever holds the
+filename + the region->file link, the "findex" mentioned in the 0x2629 spec row) and add an
+`add_audio_file()` primitive. That is a bounded structural task of the same shape as this one --
+and the same shape as the 0x2628 work that turned out to be a measurement, not a wall.
