@@ -1341,3 +1341,32 @@ copy (duplicate_region / add_clip / remove_clip).
      that is the lesson of bugs #20-#23, all of which passed every structural check.
   3. Documentation: 0x201f's one 2-valued field, and the 8 monomorphic constants (no signal in
      this corpus by measurement, not by assumption).
+
+## NEW-AUDIO IMPORT: the chain is now BUILT END TO END (commit 62558ee)
+    duplicate_audio_file(d, i, "NEW.wav")     0x103A entry + its 1:1 0x1003 record
+    retarget_audio_file(d, idx, wav_path)     point that record at a DIFFERENT wav
+    duplicate_region(d, i, "NEW")             0x2629 entry (0x2628 name rewritten)
+    add_clip(d, lane, pos, region_index=...)  placement referencing the new region
+
+The identity mapping needed no discovery: `set_clip_wav` had established it for the SYNTHESIS path
+(+15 sample count, +44 umid, +292 umid-with-00-prefix, +301 id2). `retarget_audio_file` applies the
+same fields to ONE record. All fixed-width -> size-neutral.
+Verified: sample count moves 8448 -> 11540 == wav_clip_identity(target), the original registration
+stays byte-identical, validate() clean, PT gate 0 errors, rc=0 at every stage. 193 tests.
+
+### The honest remainder
+  1. **PRO TOOLS HAS NOT SEEN ANY OF IT.** Not boilerplate: bugs #20-#23 each passed validate(),
+     rc=0 AND the byte-exact round-trip while PT rejected the file. Structural cleanliness is
+     necessary, never sufficient. These primitives are UNVERIFIED, not done.
+  2. The region's 0x2628 LENGTH field is not updated by `retarget_audio_file`. If the new audio
+     differs in length from the source region's, the clip geometry will be wrong.
+     `set_clip_wav` writes that field (at `0x2628` +13+namelen+5) as part of a whole-clip
+     retarget -- wiring it into the region path is the next bounded step.
+  3. Documentation: 0x201f's single 2-valued field; the 8 monomorphic constants (measured to carry
+     no signal in this corpus -- a NEW capture is required, this is not an inference gap).
+
+### What this session actually established about method
+Three things I had been quoting as blockers were unfinished MEASUREMENTS, not walls: the 0x2628
+geometry, most of the UNKNOWN list, and the "add-clip needs new audio" item. Each dissolved when
+measured. The one real external dependency is Pro Tools itself, and that has now been the
+bottleneck for the whole session -- every one of bugs #20-#24 traces back to a PT verdict.
