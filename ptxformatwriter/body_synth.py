@@ -5369,6 +5369,33 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             _audio_file_list(data)
         except Exception as exc:
             err("audio-file-list", f"session has regions but no parseable 0x103A list ({exc})")
+
+    # CROSS-CONTAINER AGREEMENT: a container's stored count must equal the children it frames.
+    # The second defect class the gate was blind to (after references) -- every earlier check
+    # looked at one value in isolation. All five hold with ZERO mismatches on 162/162 PT-authored
+    # sessions. Only the instance that actually frames children is judged: several of these types
+    # also appear as small empty duplicates, and a session legitimately stores 0 for a kind it
+    # has none of.
+    for cont, kids in ((0x1015, (0x1014,)), (0x1058, (0x1057,)), (0x262A, (0x2629,)),
+                       (0x1054, (0x1052,)), (0x2624, (0x261C, 0x2620, 0x261E))):
+        for z, e, c in bl:
+            if c != cont or z < 31:
+                continue
+            n = sum(1 for zz, ee, cc in bl if z < zz < e and cc in kids)
+            if n == 0:
+                continue
+            stored = int.from_bytes(data[z + 9 : z + 13], "little")
+            if stored != n:
+                # NONCONFORMING, not an error. PT-authored sessions agree with ZERO mismatches
+                # (162/162), but Pro Tools TOLERATES a disagreement: `mixedmidi_click_*` store
+                # 0x1058=1 while framing 2 0x1057 children and were PT-confirmed to open
+                # (2026-06-20). Reporting this as an error made the negative-control test fail --
+                # the third time an "all PT files do X" observation turned out to be a
+                # normalisation rather than a rule PT enforces.
+                note("container-count",
+                     f"0x{cont:04x} at {z} stores {stored} but frames {n} "
+                     f"{'/'.join('0x%04x' % k for k in kids)} children")
+            break
     return out
 
 
