@@ -1594,3 +1594,22 @@ report `audio-file-list`. Calibration re-verified: 8/8, 4/4, 0 FP, corpus 282/28
 WHAT THIS SAYS ABOUT THE GATE'S DESIGN: every check it had was value-shaped, so a whole CLASS of
 defect (dangling references) was invisible to it. Worth asking what other classes are missing --
 ordering constraints and cross-container agreement are the obvious next candidates.
+
+## Gate: cross-container COUNT agreement added (nonconforming) — 2nd blind-spot class closed
+Named last turn as an unexamined class; now checked. A container's stored count vs the children it
+frames: 0x1015->0x1014, 0x1058->0x1057, 0x262A->0x2629, 0x1054->0x1052, 0x2624->per-track records.
+All five agree with ZERO mismatches on 162/162 PT-authored sessions.
+
+**My negative controls stopped me shipping it as an ERROR.** I added it at error severity; the
+suite failed two tests immediately -- `mixedmidi_click_*` store 0x1058=1 while framing 2 0x1057
+children and are PT-CONFIRMED to open (2026-06-20), and the live mixed-MIDI synth trips it too. PT
+tolerates the disagreement. Downgraded to nonconforming; suite green, corpus 282/282 error-clean.
+
+THIRD instance this session of "every PT file does X" being a normalisation, not a rule (after
+ordinal density and the 0x2589/subtree ordinals). The pattern is now cheap to detect because the
+severity split + negative controls exist -- this cost one test run rather than a shipped defect.
+
+WHAT THE 13 NOTES REVEAL: all our own older mixed-MIDI output, writing 0x1015 as the TOTAL track
+count instead of the audio count (the SYNTH-path twin of editor bug #17) and 0x1058 off by one.
+The live editors are clean; the live mixed-MIDI SYNTH still writes them. That is a real, bounded
+follow-up with a known-correct target -- and unlike the documentation gaps it needs no new capture.
