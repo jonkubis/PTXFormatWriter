@@ -1556,3 +1556,23 @@ computed session properties across all 282 sessions:
 Recorded in the spec so the next attempt does not re-test the same three readings. This is the
 limit of what correlation over this corpus can say about the field; separating those 27 from the 32
 needs a capture that varies one thing.
+
+## Bug #25 — audio-file list assumed a folder literally named "Audio Files" (commit above)
+Found by sweeping the NEW import primitives corpus-wide (they had only been exercised on 2-3
+sessions). 49/52 region-bearing sessions worked; 3 raised "no 0x103A audio-file list".
+
+PRE-EXISTING root cause: the 0x103A list opens with the MEDIA-FOLDER NAME, length-prefixed at block
+offset +18 -- "Audio Files" by default, but whatever the folder is really called. `_audio_filenames`
+searched for the literal, so RELINKED sessions (3 in the corpus, folder "8192 wavs") parsed as
+having ZERO audio files; my `_audio_file_list` inherited the same bug. Both now read the length
+prefix: 52/52 parse, agreeing with the old search on all 49 "Audio Files" sessions.
+
+GOTCHA worth remembering: the two readers use different bases for the same field -- `_audio_file_list`
+is zmark-relative (+18/+22) but `_audio_filenames` slices from `b.offset` == zmark+7, so it needs
++11/+15. My first fix used the wrong base and the relinked sessions still returned []; caught by
+re-running the check instead of trusting the edit.
+
+SWEEP RESULT for the new primitives (this is what makes them trustworthy now):
+    duplicate_region     52/52 gate-clean
+    duplicate_audio_file 52/52 gate-clean (was 49 + 3 raises)
+    set_region_length    52/52 byte-exact no-op, 52/52 widening gate-clean
