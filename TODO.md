@@ -1576,3 +1576,21 @@ SWEEP RESULT for the new primitives (this is what makes them trustworthy now):
     duplicate_region     52/52 gate-clean
     duplicate_audio_file 52/52 gate-clean (was 49 + 3 raises)
     set_region_length    52/52 byte-exact no-op, 52/52 widening gate-clean
+
+## Gate gained REFERENTIAL INTEGRITY checks — closing the hole bug #25 used
+The gate checked ordinals, containment and counts -- all properties of VALUES -- but never that a
+REFERENCE RESOLVES, which is exactly why #25 escaped it and needed a corpus sweep to find. Added,
+both holding 162/162 on PT-authored sessions:
+  * every AUDIO placement's 0x104F +11 region index resolves into region_list()
+  * a session with regions must have a parseable 0x103A audio-file list
+
+Scoping mattered: checking BOTH 0x104F chains together fails on 31 PT-authored sessions, because
+the MIDI chain (0x1058>0x1057>0x1056) indexes a different list than the audio chain
+(0x1054>0x1052>0x1050). The two-chain finding from the bug-#24 investigation earned its keep again.
+
+PROVEN to catch #25: reintroducing the hardcoded "Audio Files" lookup makes both relinked sessions
+report `audio-file-list`. Calibration re-verified: 8/8, 4/4, 0 FP, corpus 282/282 clean. 198 tests.
+
+WHAT THIS SAYS ABOUT THE GATE'S DESIGN: every check it had was value-shaped, so a whole CLASS of
+defect (dangling references) was invisible to it. Worth asking what other classes are missing --
+ordering constraints and cross-container agreement are the obvious next candidates.
