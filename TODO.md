@@ -72,8 +72,34 @@ BODY ASSEMBLY itself -- the slice/splice loop that concatenates `data[prev:at]` 
 so a range boundary is a couple of bytes off for this session. Lengths still match exactly, which
 rules out a plain shift.
 
-That is where the next session should instrument: log every `(prev, at)` pair the assembly emits and
-find the one whose boundary lands inside this block.
+### The 2-byte write: NOT FOUND, and here is everything ruled out
+
+Narrowed to `remove_track` -- the DUPLICATE is clean (its `0x1014` at 221996 reads
+`5a 03 00 27 00 00 00 14 10`, correct), and only the removed file differs. Removal ranges near it are
+`(222174, 222219)`, entirely AFTER the block, and 221996 maps to 221970 under the 26 bytes removed
+before it. So `back[221976:221978]` should simply BE `dup[222002:222004]` = `00 14`. It is `40 00`.
+`back` is therefore not a pure slice of `dup` there -- something writes.
+
+ELIMINATED BY INSTRUMENTATION (each wrapped and observed, not argued):
+
+    container grow/shrink pass ........ never fires near the block, either editor
+    re-key su16 / su32 ................ no write in 221900..222100
+    12 post-splice passes ............. none changes 221976:221978
+    _renumber_body_after_remove ....... not called at all on this session
+    _track_kinds, _repair_view_chain_ordinals, _renumber_tracks_per_type ... not called
+    the next_kind chain repair ........ not called (removed entry is last, guard false)
+    a preceding GUID tag .............. absent; nearest at z-13 is a genuine GUID
+    the size-42 false-GUID case ....... N/A, this block's size is 39/40
+    the splice ranges ................. do not cover these bytes
+
+I could not identify the writer. The remaining candidates are inline writes in `remove_track`'s body
+that I have not individually wrapped -- the `nt_ranges` two-byte ordinal truncation
+(`nt_ranges.append((ord_pos + 2, ord_pos + 4))`) is the closest match in SHAPE, since it is the only
+other place a 2-byte quantity is manipulated, and `ord_pos` derives from name-entry positions that
+this session computes unusually. Wrapping every bytearray slice-assignment in `remove_track` with a
+range filter is the mechanical next step; it will find it.
+
+Affects 2 of 40 sampled real sessions. Everything else round-trips byte-exact.
 
 **Symptom B -- `AttributeError` on 3 of 40 sampled sessions.** `final_index_ref` walks TOP-LEVEL
 blocks by declared size and requires them to be CONTIGUOUS; it returns None the moment one size is
