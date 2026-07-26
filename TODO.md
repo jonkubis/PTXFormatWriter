@@ -97,8 +97,27 @@ Two candidate explanations were TESTED AND REJECTED:
   * "the lane table is nested inside the 0x2519 block" -- true here, but ALSO true of six other real
     sessions whose last-entry duplicate works (16-64 lanes, all nested, all OK).
 
-So: the `_last_entry_dup` branch fails to register this track's two `0x251A` lane blocks in `ident`,
-for a reason not yet isolated, and only on this file. Everything above is the reproduction.
+LOCATED, by instrumenting the identification walk. The lane blocks ARE found and ARE selected as
+copy units -- the guess that they were missing from `ident` was WRONG:
+
+    IDENT after the name walk : [5070, 7733, 227851, 235756]
+    0x251A in ident           : [5070, 7733]
+    UNITS                     : [(5070,5119), (7733,7782), (227851,227931), (235756,235804), ...]
+
+Yet the emitted body does not contain them:
+
+    0x251A count       orig=116   dup=116      (unchanged)
+    lane names in dup  'XTRA LF GTR' x2,  'ZZ Probe' x0
+
+So the two lane copies are computed as units and then DROPPED somewhere between `units` and the
+emitted body, and only when the source is the LAST name-table entry (#56 in the same file copies its
+lanes fine). Both insertion points, 5119 and 7782, fall INSIDE the `0x2519` block (410..7800) -- one
+of them 18 bytes from its end -- while the `_last_entry_dup` branch is separately splicing at 2460.
+That interaction, between an insert landing inside the name-table block and the last-entry promotion,
+is where to look next. The container itself does grow correctly (size 7383 -> 7516).
+
+NOT a phantom problem, NOT an `ident` problem, NOT specific to clipless tracks or nested lane tables
+-- all four were tested and eliminated.
 
 Neither is guarded: an output-side structural assertion was tried earlier today and reverted because
 it fired on `duplicate_track`'s own placeholder-then-rename intermediate on ordinary sessions.
