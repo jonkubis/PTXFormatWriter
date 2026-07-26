@@ -189,21 +189,33 @@ def _name_table_region_end(data: bytes, z: int, e: int, bl) -> int:
     if end == e:
         return end
 
-    def _n(limit):
-        q = z + 9 + 0x14 + _name_table_shift(data, z)
-        if _name_entry_head(data, q, limit) is None:
-            for c in range(q, min(q + 64, max(q, limit - 8)), 2):
-                if _name_entry_head(data, c, limit) is not None:
-                    q = c
-                    break
-        k = 0
-        while True:
-            h = _name_entry_head(data, q, limit)
-            if h is None:
-                return k
-            k += 1
-            q = _next_name_entry(data, h[1], limit)
-    return e if _n(e) > _n(end) else end
+    # Classify each "child" rather than guess a bound. Walk the entries permissively (to the block's
+    # own end) and measure every entry by its MINIMUM possible span -- the SHORT 21-byte trailer. A
+    # PHANTOM starts strictly inside that span; a REAL child cannot, because the entry before it has
+    # to end at or before where it begins. That breaks the circularity, since the short-form span
+    # needs no bound to compute.
+    #
+    # The bound matters twice over: `_name_entry_span` CLAMPS the final entry to it, and that clamp
+    # is what gives that entry its short trailer. Returning the block end (or the walk terminus)
+    # loses the clamp, so the last entry claims a 23-byte trailer overrunning the first real child
+    # by two bytes -- which is what corrupted a last-entry duplicate.
+    q = z + 9 + 0x14 + _name_table_shift(data, z)
+    if _name_entry_head(data, q, e) is None:
+        for c in range(q, min(q + 64, max(q, e - 8)), 2):
+            if _name_entry_head(data, c, e) is not None:
+                q = c
+                break
+    spans = []
+    while True:
+        h = _name_entry_head(data, q, e)
+        if h is None:
+            break
+        _nm, ne = h
+        spans.append((q, ne + _NAME_ENTRY_SUFFIX_SHORT))
+        q = _next_name_entry(data, ne, e)
+    real = [cz for cz, _ce, _cc in bl
+            if z < cz < e and not any(a < cz < b for a, b in spans)]
+    return min(real) if real else e
 
 
 def _name_entry_span(data: bytes, name_off: int, bl) -> "tuple[int, int] | None":

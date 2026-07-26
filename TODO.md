@@ -69,30 +69,24 @@ short and the splice copied a malformed one -- which is why the output walked 18
 share `_name_table_region_end()`, which resolves the bound by comparing the two walks. On the phantom
 session the spliced output now walks **55/55** for interior sources where it walked 18.
 
-**STILL OPEN on that one session:** `duplicate->remove` does not invert there, and duplicating its
-LAST entry raises the truncation guard (54 parsed for 55 records).
+**PHANTOM CLASSIFICATION IMPLEMENTED — the bound is no longer guessed.** Four bound criteria were
+tried and rejected (`min(child)` truncates to 18 entries; the block end and the walk terminus both
+read 54 but lose the clamp that gives the last entry its short trailer; "first child the entries fill
+exactly" matched nothing). The mistake in all four was choosing a bound at all.
 
-THE MECHANISM IS NOW PINNED DOWN, which is worth more than another failed patch. The last entry
-`Audio 8` starts at 2296 and the first REAL child (`0x251A`) starts at 2328, so its trailer must take
-the SHORT 21-byte form to end exactly at 2328. `_name_entry_span` gets that right only by CLAMPING
-to `region_end` -- and once the phantom forces a permissive bound, the clamp stops firing,
-`_next_name_entry` picks the 23-byte stride, and the entry claims 2330: two bytes into the real
-child. Duplicating it then splices from a span that overruns.
+The working approach CLASSIFIES each child instead. Walk the entries permissively to the block's own
+end and measure every entry by its MINIMUM possible span -- the SHORT 21-byte trailer. A phantom
+starts strictly inside that span; a real child cannot, because the entry before it must end at or
+before where it begins. The short-form span needs no bound to compute, which is what breaks the
+circularity. `region_end` is then simply the first child that survives classification.
 
-THREE BOUND CRITERIA TRIED, none correct:
-    min(child start)          -> 1076, the phantom: truncates the table to 18 entries
-    block end `e`             -> 7316: table reads 54, but the last entry loses its clamp
-    walk terminus             -> 2330: same, because the unclamped walk overruns by 2
-    first child the entries fill EXACTLY -> no candidate matched; reverted (added a loop over every
-                                            child and fixed nothing)
+On the phantom session this returns **2328** -- exactly the real `0x251A` child, with the phantom at
+1076 discarded -- and duplicating ANY entry, including the LAST one that previously raised, now
+yields 55 entries for 55 tracks.
 
-What is actually needed is to tell a PHANTOM child from a REAL one, not to pick a bound by walking.
-A phantom starts strictly inside a parsed entry's span; a real child does not. That test needs the
-entry spans, which need the bound -- so it has to be done as a single pass that parses entries and
-discards any "child" landing inside one, rather than choosing a bound up front.
-
-No regression from the work that IS committed: 207 tests green, 0 of 600 sessions truncated,
-real-session duplicate->remove byte-exact in 29/30 sampled.
+STILL OPEN there: `duplicate->remove` does not invert on that one session. No regression anywhere
+else: 207 tests green, 0 of 600 sessions truncated, and the identical 30-session sample is byte-exact
+29/30, exactly as before the change.
 
 ## VALIDATOR CALIBRATED AGAINST REAL SESSIONS: 119 -> 2 FALSE POSITIVES (2026-07-25)
 
