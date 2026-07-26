@@ -269,6 +269,33 @@ symptom A. Symptom B (a broken top-level chain) may still be a size problem, but
 unproven too, and the two should not be assumed to share a cause. 35/40 sampled real sessions
 round-trip byte-exact; the 5 failures are 2 of symptom A and 3 of symptom B.
 
+## A THIRD REAL-SESSION CORPUS, AND A NEW DEFECT FAMILY (2026-07-26)
+
+`/Volumes/Samples` holds **250 more real sessions** -- found only by widening the volume search that
+had previously stopped at four volumes and `maxdepth 6`. They contain NO `0x263B`/`0x2621`/`0x261D`
+and no MIDI or click at all (250/250 are pure audio), so they do not close the documentation gap --
+but they are an INDEPENDENT validation set the editors had never seen.
+
+Sweeping them: **214/250 byte-exact, 36 failures**, all one family (`* Multi-Drums.ptx`,
+`* Full Stereo.ptx`).
+
+    ValueError: cannot locate track 'Kick In' (or an unsupported track type)
+
+NOT a regression and not the master-track guard. The session is 12 tracks, ALL audio (`0x261C` x12),
+with a complete-looking block set: `0x1014` x12, `0x102D` x12, `0x2619` x12, `0x251A` x24,
+`0x1052` x15, `0x2624` x1. The track name is present with a valid length prefix in `0x2519`, in two
+`0x251A` lanes, AND in a `0x1014` (z=41657, namelen 7). Yet `pl_ranges` comes out EMPTY for every
+track, so `duplicate_track` refuses at the "cannot locate" guard.
+
+`pl_ranges` is built from `0x102D`/`0x2619` blocks containing a GUID seeded from the
+`0x1014`/`0x1057`/`0x251A`/`0x210B` hits. So the seeded GUIDs do not match this session's
+`0x102D`/`0x2619` contents -- the same class as the note already in the code that "a MIDI 0x1057's
+GUID differs from its identity GUID". Note this family has **`0x210B` x0**, where every previously
+swept session had one per track; that is the obvious structural difference to start from.
+
+The failure is SAFE (a refusal, not corruption) but it means `duplicate_track` cannot edit this
+session family at all.
+
 ## SOLVED — set_track_channels wrote PAST the block; real sessions now 40/40 (2026-07-25)
 
 `set_track_channels` writes the post-ID channel indices at `marker + 19` / `marker + 23`, offsets
