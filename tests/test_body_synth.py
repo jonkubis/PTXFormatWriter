@@ -1338,6 +1338,53 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_no_edit_path_ever_shares_a_track_id_range(self):
+        """The confirmed crash-on-close cause, guarded across EVERY path that clones a track.
+
+        Pro Tools gives each track a contiguous block of 10 session-unique ids in its `0x261B` and
+        resolves track IDENTITY through them. A byte-copied subtree inherits the source's range, and
+        PT then treats the two tracks as ONE object: it showed the copy under the SOURCE's name
+        whatever name we wrote, selected both together, and crashed on close (4/4 duplicates tested
+        2026-07-25, against 3/3 clean removals).
+
+        Chained duplicates are the sharp case -- each successive copy must get a range of its own,
+        not the one the previous copy just took. `add_click_anyN` is included because it splices the
+        click's subtree from a DONOR pair and so carried the donor's ranges, some of them twice; it
+        had the identical defect and was only found by auditing for it.
+        """
+        def coll(d):
+            r = [f for _z, f, _l in BS.track_id_ranges(d)]
+            return len(r) - len(set(r))
+
+        base = _load_path(ROOT / "control_files" / "lots of mono tracks" / "4 mono tracks.ptx")
+        names = [t.name for t in BS.track_types(base)]
+        self.assertEqual(coll(base), 0, msg="the PT-authored source must start clean")
+
+        cases = {
+            "duplicate last": BS.duplicate_track(base, names[-1], "Audio 5"),
+            "duplicate middle": BS.duplicate_track(base, names[1], "Audio 9"),
+            "remove last": BS.remove_track(base, names[-1]),
+            "remove middle": BS.remove_track(base, names[1]),
+        }
+        chained = base
+        for i, nm in enumerate(("X1", "X2", "X3")):
+            chained = BS.duplicate_track(chained, names[0] if i == 0 else f"X{i}", nm)
+        cases["three chained duplicates"] = chained
+        try:
+            from ptxformatwriter import _click_data as _CD
+            clean, clk = _CD.click_pair()
+            cases["add_click_anyN bottom"] = BS.add_click_anyN(base, clean, clk, at_top=False)
+            cases["add_click_anyN top"] = BS.add_click_anyN(base, clean, clk, at_top=True)
+        except Exception:                      # click donor not present in this checkout
+            pass
+
+        for label, out in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(coll(out), 0, msg=f"{label}: two tracks share a 0x261B id range")
+                errs = [v for v in BS.validate_pt_invariants(out)
+                        if v["severity"] == "error"]
+                self.assertEqual(errs, [], msg=f"{label}: {errs}")
+
     def test_next_kind_chain_survives_duplicate_and_remove(self):
         """`next_kind` is a CHAIN field: entry i's u16 names the KIND of entry i+1, shifted << 8
         (0 audio / 1 MIDI / 2 click / 5 folder-VCA / 7 instrument / 11 master-bus). Verified
