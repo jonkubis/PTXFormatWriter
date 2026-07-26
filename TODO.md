@@ -80,9 +80,25 @@ seeds its GUID search from. The source `XTRA LF GTR` does have both lane entries
 `0x251A` x2, `0x2519`, `0x1052`, `0x1014`), so they exist to be copied -- the identification walk
 simply does not pick them up FOR THIS TRACK while it does for `01 KICK IN` in the same file.
 
-Note this source also has NO `0x2628`/`0x103A` occurrences, unlike `01 KICK IN` (7 and 3): it is a
-track with no clips/audio-file references. That is the obvious structural difference between the
-track that works and the one that does not, and where the next attempt should look.
+NARROWED FURTHER -- it is the LAST ENTRY, and only in this file:
+
+    #0  '01 KICK IN'    0x251A delta +2   remove OK
+    #20 'FX MONO 1'     0x251A delta +2   remove OK
+    #56 'MIDI 2.02'     0x251A delta +2   remove OK
+    #57 'XTRA LF GTR'   0x251A delta  0   remove ValueError     <- the last entry
+
+The last-entry path is entered CORRECTLY: `region_end` is 2460 (a real child, no phantom involved),
+and the last entry's span is 36 bytes = the SHORT form, exactly as intended. So the defect is inside
+that path, not in the bound.
+
+Two candidate explanations were TESTED AND REJECTED:
+  * "the source has no clips" (it has no `0x2628`/`0x103A` at all, unlike `01 KICK IN`) -- but #56
+    `MIDI 2.02` also lacks them and works;
+  * "the lane table is nested inside the 0x2519 block" -- true here, but ALSO true of six other real
+    sessions whose last-entry duplicate works (16-64 lanes, all nested, all OK).
+
+So: the `_last_entry_dup` branch fails to register this track's two `0x251A` lane blocks in `ident`,
+for a reason not yet isolated, and only on this file. Everything above is the reproduction.
 
 Neither is guarded: an output-side structural assertion was tried earlier today and reverted because
 it fired on `duplicate_track`'s own placeholder-then-rename intermediate on ordinary sessions.
