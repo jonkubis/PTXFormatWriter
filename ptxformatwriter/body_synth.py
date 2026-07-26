@@ -6275,6 +6275,58 @@ def _reallocate_duplicate_track_ids(data: bytes, only_first: "int | None" = None
     return bytes(out)
 
 
+def _uuid_list_offset(blk: bytes) -> "int | None":
+    """Offset of a `0x261B`'s per-track UUID list: a `u16` count of 10 followed by ten DISTINCT
+    16-byte ids. Located by signature, not a fixed offset (+1100 in the control ladder, but nothing
+    guarantees that elsewhere).
+
+    These are identities Pro Tools resolves a track through, alongside the integer id range. They
+    are stable per track -- tracks 1..3 carry the same ten in both the 4-track and 5-track control
+    sessions -- and DISTINCT across tracks: 50/50 and 40/40 in those files.
+    """
+    n = len(blk)
+    for off in range(0, max(0, n - 162)):
+        if int.from_bytes(blk[off : off + 2], "little") != 10:
+            continue
+        u = [blk[off + 2 + 16 * k : off + 18 + 16 * k] for k in range(10)]
+        if len(set(u)) == 10 and all(any(x) for x in u):
+            return off
+    return None
+
+
+def _reuuid_copied_track(data: bytes, zb: int, eb: int) -> bytes:
+    """Give the copied track's `0x261B` ten FRESH UUIDs, unique within the session.
+
+    duplicate_track byte-copies the source subtree, so the copy inherited all ten of the source's
+    UUIDs. Pro Tools STILL treated the two tracks as one object even after the integer id range was
+    made unique -- reported from Pro Tools on a file whose ranges were already disjoint: the copy
+    displayed under the SOURCE's name, both selected together, crash on close.
+
+    New values are derived deterministically (increment the leading u32 until unused) so runs stay
+    reproducible; only uniqueness matters, and PT's own tracks carry unrelated ids.
+    """
+    blk = data[zb:eb]
+    off = _uuid_list_offset(blk)
+    if off is None:
+        return data
+    seen = set()
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x261B:
+            continue
+        o2 = _uuid_list_offset(data[z:e])
+        if o2 is not None:
+            seen.update(bytes(data[z + o2 + 2 + 16 * k : z + o2 + 18 + 16 * k]) for k in range(10))
+    out = bytearray(data)
+    for k in range(10):
+        a = zb + off + 2 + 16 * k
+        new = bytes(out[a : a + 16])
+        while new in seen:
+            new = ((int.from_bytes(new[:4], "little") + 1) & 0xFFFFFFFF).to_bytes(4, "little") + new[4:]
+        seen.add(new)
+        out[a : a + 16] = new
+    return bytes(out)
+
+
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
     `remove_track`, validated by round-trip byte-identity (`duplicate_track` then
@@ -6755,6 +6807,17 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                     _o[_p : _p + 4] = (_new_id_first + (_v - _src_id_first)).to_bytes(4, "little")
             break
         out = bytes(_o)
+
+    # ...and FRESH UUIDs for the copy. The integer id range alone was not enough: Pro Tools still
+    # showed the copy under the source's name, selected both together, and crashed on close.
+    # Off-synth only, like the id remap: the synth path renumbers positionally so a grown session
+    # equals a fresh synthesize(N+1), and rewriting UUIDs there breaks that equivalence.
+    if not _do_renumber:
+        _newg3 = set(gmap.values())
+        for _z3, _e3, _c3 in _size_driven_blocks(out):
+            if _c3 == 0x261B and any(_g in out[_z3:_e3] for _g in _newg3):
+                out = _reuuid_copied_track(out, _z3, _e3)
+                break
 
     # OPEN: the copy still inherits the source's 0x200A/0x200B/0x2015 anchor id, which is distinct
     # across tracks in 200/200 real sessions. Allocating a fresh one POST-HOC was tried and reverted
