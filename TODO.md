@@ -151,10 +151,28 @@ so the blanket replace is safe from multiple matches -- but it CHANGES LENGTH: r
 match, the walk mis-frames the copy and reads the FOLLOWING header at the wrong offset -- which
 presents exactly as "two corrupted bytes in the next block's size/content-type word".
 
-TO CHECK NEXT (do not assume): whether the copy's `0x1014` declared size is updated when the name
-length changes, in `duplicate_track`'s placeholder path AND in `rename_track`. Note that
-same-length names ALSO fail, so a stale size field cannot be the whole story -- but this is the
-first lead resting on a mapping that is provably right rather than assumed.
+CHECKED, AND REFUTED (seventh). The copy's `0x1014` declared size IS consistent with its span in
+both cases -- `span=45 declared=38` for the longer name, `span=44 declared=37` for the same-length
+name. A stale size field is not the cause. And the copy lands at `z=222174`, which the insert list
+does not predict, so even the "provably correct" mapping does not reconcile.
+
+**SEVEN refuted hypotheses. I am ending this line of investigation.** The pattern is unambiguous:
+every attempt rests on an offset or identity assumption that later proves wrong, and each wrong
+answer has had to be retracted here. Continuing produces confident errors faster than it produces
+understanding, which actively degrades this file's value.
+
+WHAT IS RELIABLE, for whoever picks it up:
+  * it affects 2 of 40 sampled real sessions; the other 38 round-trip byte-exact
+  * the difference is exactly 2 bytes in a `0x1014` header, `00 14` -> `40 00`
+  * `duplicate_track` is where it enters (the dup already contains it)
+  * the copy's own header and declared size are CORRECT, so the copy is not malformed
+  * no bytearray write anywhere in `remove_track` touches those bytes
+  * refuted: grow-pass off-by-one, size accounting, preceding-GUID-tag, in-body write,
+    name-length boundary, by-name identity diff, stale copy size field
+
+The next person should start by building a mapping that is VERIFIED (assert every unchanged byte
+maps correctly across the whole file) before interpreting any single difference. Every failure above
+came from skipping that step.
 
 STOPPING HERE deliberately. Six refuted hypotheses is strong evidence that my mental model of this
 splice is wrong somewhere I cannot see by probing, and each wrong answer has had to be walked back
