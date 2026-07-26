@@ -714,7 +714,14 @@ def add_click_anyN(data: bytes, clean_ref: bytes, click_ref: bytes, at_top: bool
         now = track_types(out)          # click is not an audio track; audio order is preserved
         anow = [i for i, t in enumerate(now) if t.kind in ("mono", "stereo")]
         out = set_track_names(out, {i: tt[aidx[k]].name for k, i in enumerate(anow)})
-    return out
+    # This splices the click's per-track subtree from a DONOR pair, so the result carries the
+    # DONOR's 0x261B identity ranges -- and, applied to a session of a different size, carries some
+    # of them TWICE. Two tracks sharing a range are one object to Pro Tools (see 0x261B in the
+    # spec): it crashes on close. Measured on PT's own `4 mono tracks.ptx`, this produced
+    # [13681, 13691, 13681, 13681, 13701] -- two collisions -- and validate() flagged it
+    # `track-id-uniqueness`. The ids are session-scoped identities, so making them unique is enough;
+    # they do not have to be the session's original numbers.
+    return _reallocate_duplicate_track_ids(out)
 
 
 # --- content transplant (clip / tempo / meter) from a matched control pair -----
