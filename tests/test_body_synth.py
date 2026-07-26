@@ -1338,6 +1338,54 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_clip_and_region_primitives_across_real_sessions(self):
+        """`remove_clip` and the region/audio-file primitives, swept over real PT sessions.
+
+        The track editors had three defects that only a breadth sweep exposed (a shared 0x261B id
+        range, a click-only session being uneditable, and a phantom-block write into the file
+        header). These primitives had never been swept the same way. Bounded to a sample so the
+        suite stays usable -- the full sweep is 46 sessions per operation, all clean.
+
+        `out[:27]` is asserted because the header write found in the track editors was
+        data-dependent: it could have hit any caller that patches blocks by type.
+        """
+        import re as _re
+        ours = _re.compile(r"(mixedmidi_|synth_|test_|robust_|midi9)")
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if ours.search(path.name) or checked >= 8:
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            if len(data) > 600_000:
+                continue
+            try:
+                regions = BS.region_list(data)
+                lanes = [(z, n, k) for z, n, k in BS.clip_lanes(data) if k > 0]
+            except Exception:
+                continue
+            if not regions or not lanes:
+                continue
+            with self.subTest(session=path.name):
+                z, _n, k = lanes[0]
+                for out, what in (
+                    (BS.remove_clip(data, z, 0), "remove_clip"),
+                    (BS.duplicate_region(data, 0, "ZZ Region"), "duplicate_region"),
+                    (BS.set_region_length(data, 0, max(1, BS.region_length(data, 0)) + 4800),
+                     "set_region_length"),
+                ):
+                    self.assertEqual([v for v in BS.validate_pt_invariants(out)
+                                      if v["severity"] == "error"], [], msg=what)
+                    self.assertEqual(out[:27], data[:27],
+                                     msg=f"{what} must never write the file header")
+                self.assertEqual(sum(kk for _z, _n2, kk in BS.clip_lanes(BS.remove_clip(data, z, 0))),
+                                 sum(kk for _z, _n2, kk in BS.clip_lanes(data)) - 1,
+                                 msg="remove_clip must drop exactly one clip")
+            checked += 1
+        self.assertGreaterEqual(checked, 4, msg=f"expected a sample, got {checked}")
+
     def test_every_pt_authored_control_survives_duplicate_then_remove(self):
         """The whole PT-authored corpus, swept: duplicate a track and remove it again.
 
