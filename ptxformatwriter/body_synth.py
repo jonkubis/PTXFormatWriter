@@ -3661,7 +3661,7 @@ def synthesize_mixed_midi(
     # Every GROWN MIDI track left its predecessor's 0x2519 `next_kind` still tagged audio, so a
     # spec like [1,0,2,0] emitted `Audio 2 -> MIDI 2` as 0x0000. Repaired here, in the builder both
     # the inline and control-file donor paths share, so all three routes stay byte-identical.
-    out = _repair_next_kind_chain(out)
+    out = _reallocate_duplicate_track_ids(_repair_next_kind_chain(out))
     return set_waveform_view(out)
 
 
@@ -3760,7 +3760,11 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
         cur = _container_display_offsets(body)               # playlist offsets in build/spec order
         tpo = {o: i for i, (o, _t) in enumerate(track_playlist_order(body))}
         body = reorder_tracks(body, [tpo[cur[d]] for d in display_order])
-    return _repair_next_kind_chain(body)      # grown MIDI left its predecessor mis-tagged
+    # Two identity repairs, both of which the donor-cloning synthesis violates:
+    #   * grown MIDI left its predecessor's next_kind mis-tagged;
+    #   * a cloned track (notably the CLICK, cloned from a donor) inherited the donor's 10
+    #     session-unique ids, which is what made Pro Tools treat two tracks as one object.
+    return _reallocate_duplicate_track_ids(_repair_next_kind_chain(body))
 
 
 # --- index-offset pointer ----------------------------------------------------
@@ -5433,6 +5437,25 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     names = [n for n, _p in entries]
     n_ents = len(entries)
 
+    # TRACK IDENTITY -- the confirmed crash-on-close cause. Pro Tools gives each track a contiguous
+    # block of 10 session-unique ids in its 0x261B. A byte-copied track subtree inherits the
+    # SOURCE'S range, and PT then treats the two tracks as ONE object: it shows the copy under the
+    # source's name whatever name we wrote, selects both together, and CRASHES ON CLOSE. Measured
+    # 2026-07-25: 4 of 4 duplicates carrying a collision crashed on close; 3 of 3 removals, which
+    # allocate nothing, closed cleanly.
+    _idr = []
+    for _z, _e, _c in bl:
+        if _c != 0x261B:
+            continue
+        _r = _track_id_run(data[_z:_e])
+        if _r is not None:
+            _idr.append(_r[1])
+    _dupids = sorted({v for v in _idr if _idr.count(v) > 1})
+    if _dupids:
+        err("track-id-uniqueness",
+            f"{len(_dupids)} track id range(s) used by more than one 0x261B: {_dupids[:6]} "
+            f"-- PT treats those tracks as one object and crashes on close")
+
     for child, parent in ((0x2589, 0x258A), (0x1057, 0x1058), (0x210B, 0x2107),
                           (0x2620, 0x2624), (0x261C, 0x2624)):
         spans = [(z, e) for z, e, c in bl if c == parent]
@@ -5934,6 +5957,98 @@ def _unique_same_length_name(length: int, taken: "set[str]") -> str:
     raise ValueError("could not find a unique same-length placeholder name")
 
 
+_TRACK_ID_RUN = 10          # every 0x261B carries exactly one run of 10 consecutive u32 ids
+
+
+def _track_id_run(blk: bytes, minlen: int = 4) -> "tuple[int, int, int] | None":
+    """`(offset, first_id, length)` of a 0x261B's consecutive-u32 id run, or None.
+
+    Located by SIGNATURE rather than a fixed offset: the longest sequence at 4-byte stride whose
+    values ascend by exactly one. Measured over 3962 `0x261B` blocks in 67 control sessions, every
+    block has such a run and its length is ALWAYS 10.
+    """
+    best = None
+    i, n = 0, len(blk)
+    while i + 4 <= n:
+        v = int.from_bytes(blk[i : i + 4], "little")
+        k = 1
+        while i + 4 * (k + 1) <= n and int.from_bytes(blk[i + 4 * k : i + 4 * k + 4], "little") == v + k:
+            k += 1
+        if k >= minlen and (best is None or k > best[2]):
+            best = (i, v, k)
+        i += 4 * k if k > 1 else 1
+    return best
+
+
+def track_id_ranges(data: bytes) -> "list[tuple[int, int, int]]":
+    """`(zmark, first_id, length)` per 0x261B — the per-track identity ranges Pro Tools allocates."""
+    out = []
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x261B:
+            continue
+        r = _track_id_run(data[z:e])
+        if r is not None:
+            out.append((z, r[1], r[2]))
+    return out
+
+
+def _reallocate_duplicate_track_ids(data: bytes, only_first: "int | None" = None,
+                                    keep: int = 1) -> bytes:
+    """Give any 0x261B that SHARES another's id range a fresh one past the session high-water mark.
+
+    Pro Tools allocates each track a contiguous block of 10 session-unique ids (`13221..13230`,
+    `13231..13240`, ...) stored in its `0x261B`. `duplicate_track` byte-copies the source subtree,
+    so the copy inherited the SOURCE'S ENTIRE RANGE. Pro Tools then treats the two tracks as ONE
+    object: it displayed the copy under the source's name no matter what name we wrote (a session
+    whose name table read [Audio 1..5] showed `Audio 1,2,3,4,4`), selecting either selected BOTH,
+    and it CRASHED ON CLOSE. Confirmed on 4 of 4 duplicates tested in Pro Tools 2026-07-25, while
+    all 3 removals -- which allocate nothing -- were clean.
+
+    Renaming could never have fixed this: the display name is resolved through the id, not the
+    string, and every name string was already correct in all six places PT writes it.
+
+    `only_first` restricts the repair to ONE range -- the one the current edit duplicated. An edit
+    must not silently renumber a collision that was already in the source: doing so broke the
+    duplicate->remove byte-exact inverse (remove cannot undo a renumber of a range it never
+    touched), and that inverse is one of this project's few real oracles. Synthesis passes None,
+    because there the collision IS ours to fix at creation time.
+
+    Idempotent, and a no-op on any session whose ranges are already disjoint (215/225 controls; the
+    10 exceptions are our own click/synth output plus two PT re-saves that inherited it). Same-length
+    u32 rewrites only, so no offsets move.
+    """
+    bl = _size_driven_blocks(data)
+    ranges = []
+    for z, e, c in bl:
+        if c != 0x261B:
+            continue
+        r = _track_id_run(data[z:e])
+        if r is not None:
+            ranges.append((z, e, r[1], r[2]))
+    if not ranges:
+        return data
+    hi = max(first + length - 1 for _z, _e, first, length in ranges)
+    seen: "set[int]" = set()
+    out = bytearray(data)
+    kept: "dict[int, int]" = {}
+    for z, e, first, length in ranges:
+        allowed = keep if (only_first is not None and first == only_first) else 1
+        kept[first] = kept.get(first, 0) + 1
+        if kept[first] <= allowed:
+            seen.add(first)
+            continue
+        if only_first is not None and first != only_first:
+            continue                            # a pre-existing collision: not this edit's to fix
+        new_first = hi + 1                      # past every id the session has handed out
+        hi += length
+        for p in range(z, e - 3):
+            v = int.from_bytes(out[p : p + 4], "little")
+            if first <= v < first + length:
+                out[p : p + 4] = (new_first + (v - first)).to_bytes(4, "little")
+        seen.add(new_first)
+    return bytes(out)
+
+
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
     `remove_track`, validated by round-trip byte-identity (`duplicate_track` then
@@ -6055,6 +6170,37 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
     if not pl_ranges:
         raise ValueError(f"cannot locate track {source_track!r} (or an unsupported track type)")
+
+    # The source's track-id range, read BEFORE the splice: the copy will inherit it verbatim and
+    # must be moved off it, but any OTHER collision already in the session is left alone.
+    _src_id_first = None
+    for _z, _e, _c in bl:
+        if _c == 0x261B and any(pz < _z < pe for pz, pe in pl_ranges):
+            _r = _track_id_run(data[_z:_e])
+            if _r is not None:
+                _src_id_first = _r[1]
+                break
+    # How many blocks ALREADY share that range. The source itself may be half of a pre-existing
+    # collision (our own click sessions are), and only the one the copy adds is ours to move.
+    _src_id_len, _new_id_first, _all_id = 0, None, []
+    if _src_id_first is not None:
+        for _z, _e, _c in bl:
+            if _c == 0x261B:
+                _r = _track_id_run(data[_z:_e])
+                if _r is not None:
+                    _all_id.append((_r[1], _r[2]))
+                    if _r[1] == _src_id_first:
+                        _src_id_len = _r[2]
+        # The LOWEST FREE slot at or after the source's own range, stepping a whole range at a time.
+        # Not the session-wide maximum + 1: a synthesized session carries TWO id sequences -- the
+        # donor's (20661...) and a separate low run for grown tracks (81, 91, ... 191) -- and
+        # `synthesize(N+1)` continues the LOW one with 201, so a high-water rule allocated 20741 and
+        # made a grown duplicate differ from the equivalent fresh synth. This rule reproduces both
+        # oracles: 201 for the synth ladder, 13261 for Pro Tools' own mono ladder.
+        _cand = _src_id_first + (_src_id_len or 1)
+        while _src_id_len and any(_cand < _f + _l and _f < _cand + _src_id_len for _f, _l in _all_id):
+            _cand += _src_id_len
+        _new_id_first = _cand
 
     # The source track's SECOND view-chain subtree (0x2589), attributed by the block's OWN
     # display-row ordinal (u16 @ zmark+9) -- the SAME rule remove_track uses, so the two agree on
@@ -6293,6 +6439,33 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
         out = _adjust_midi_list_count(out, 1)                  # 0x1058 = MIDI count
     if not _do_renumber:
         out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
+
+    # THE COPY MUST NOT INHERIT THE SOURCE'S TRACK IDS. Pro Tools gives each track a contiguous
+    # block of 10 session-unique ids in its 0x261B and resolves a track's IDENTITY through them, so
+    # a shared range made PT treat the two tracks as ONE object: it displayed the copy under the
+    # SOURCE's name no matter what name we wrote (a name table reading [Audio 1..5] showed
+    # `Audio 1,2,3,4,4`), selecting either selected BOTH, and it CRASHED ON CLOSE -- 4 of 4
+    # duplicates tested in PT on 2026-07-25, against 3 of 3 clean removals, which allocate nothing.
+    #
+    # The copy's 0x261B is found by its NEW identity GUIDs, not by block order: the copy is spliced
+    # next to its source, so "the later of the two" can be an ORIGINAL track, and renumbering that
+    # one broke the duplicate->remove inverse. Only values inside the source's own range are moved,
+    # which is why this cannot disturb an unrelated field that merely holds the same number.
+    # Off-synth only, like the re-key above. The synth path renumbers ids POSITIONALLY so that a
+    # grown session equals a fresh `synthesize(N+1)`, and `synthesize()` applies its own
+    # collision sweep to whatever it returns, so its delivered output is disjoint anyway.
+    if not _do_renumber and _src_id_first is not None and _new_id_first is not None and _src_id_len:
+        _newg = set(gmap.values())
+        _o = bytearray(out)
+        for _z, _e, _c in _size_driven_blocks(out):
+            if _c != 0x261B or not any(_g in out[_z:_e] for _g in _newg):
+                continue
+            for _p in range(_z, _e - 3):
+                _v = int.from_bytes(_o[_p : _p + 4], "little")
+                if _src_id_first <= _v < _src_id_first + _src_id_len:
+                    _o[_p : _p + 4] = (_new_id_first + (_v - _src_id_first)).to_bytes(4, "little")
+            break
+        out = bytes(_o)
     return out
 
 

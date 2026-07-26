@@ -1644,7 +1644,16 @@ class ViewChainAttributionTests(unittest.TestCase):
                 continue
             errs = [v for v in BS.validate_pt_invariants(_load_path(hits[0]))
                     if v["severity"] == "error"]
-            self.assertEqual(errs, [], msg=f"{frag}: PT-confirmed to open — must not error")
+            # `track-id-uniqueness` is deliberately NOT exempted away here. These fixtures were
+            # confirmed to OPEN (2026-06-20) — they were never confirmed to CLOSE, and a shared
+            # track-id range is a close-time defect: on 2026-07-25 all 4 duplicates carrying one
+            # crashed Pro Tools on close while all 3 collision-free removals were clean. Several of
+            # these click sessions do carry a collision, because our click path clones a donor
+            # track and inherited its ids. So the rule firing on them is a TRUE positive about a
+            # real defect, not the over-strictness this test exists to catch; what the test still
+            # guards is that NOTHING ELSE fires.
+            other = [v for v in errs if v["invariant"] != "track-id-uniqueness"]
+            self.assertEqual(other, [], msg=f"{frag}: PT-confirmed to open — must not error")
 
     def test_pt_invariant_validator_is_clean_on_the_whole_corpus(self):
         """Every PT-AUTHORED session in the corpus must be error-free -- they ARE the ground truth
