@@ -3,6 +3,38 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## SOLVED — the duplicate-track crash was a shared TRACK-ID RANGE (2026-07-25)
+
+PT results on the six files built from GENUINE sources: **all 3 removals clean; all 3 duplicates
+crashed on close**, and every duplicate displayed the copy under the SOURCE's name -- asking for
+`Audio 5` produced `Audio 1,2,3,4,4`; asking for `ZZ Copy` produced `Audio 2, Audio 2`. Selecting
+either selected both. So the new name never reached PT at all.
+
+**ROOT CAUSE:** each track owns a contiguous block of 10 session-unique u32 ids in its `0x261B`, and
+PT resolves track IDENTITY through them. The copy inherited the source's entire range, so PT saw one
+object twice. Renaming could never have fixed it -- our name profile was already byte-identical to
+PT's own session (7 occurrences across the same 6 block types).
+
+Fixed in `f2cde54`; full field write-up in the spec under `0x261B`. Allocation rule: lowest free
+range at or after the source's, stepping a whole range -- reproduces BOTH oracles (`201` for the
+synth ladder, `13261` for PT's mono ladder, which is exactly what PT's own 5-track session uses).
+
+**Guard so it cannot recur:** `validate_pt_invariants` gains `track-id-uniqueness` at ERROR
+severity. The synth path also sweeps at creation, so the CLICK track -- cloned from a donor -- stops
+inheriting the donor's ids (a defect present in 10 checked-in control files).
+
+TWO WRONG FIXES THE TESTS CAUGHT, worth remembering:
+  1. De-duplicating POST-HOC renumbered an ORIGINAL track: the copy is spliced NEXT TO its source,
+     so "the later of the two blocks" is not reliably the copy. It broke the duplicate->remove
+     inverse. The copy must be identified by its NEW identity GUIDs.
+  2. A blanket 4-byte replace over the whole copied unit corrupted unrelated fields that merely held
+     the same number. Only values inside the source's own range may move.
+
+RE-TEST: `/Users/jonkubis/Desktop/PTX_VERIFY_2026-07-25_GENUINE/` (all 6 regenerated, 0 collisions,
+0 errors, rc=0). The 5 guarded files in the 2026-07-24 set were also regenerated -- notably 05 and
+10, which previously crashed on close / raised "unexpected stream type" -- giving a clean A/B where
+the ONLY change is the id fix. A README marks that older directory superseded.
+
 ## THE 8/8 DUPLICATE FAILURES MAY BE THE SOURCES, NOT THE EDIT (2026-07-25)
 
 With the external drive gone I went looking locally and found the corpus was never the only ground

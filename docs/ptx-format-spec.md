@@ -2991,6 +2991,46 @@ Consequences for editing:
   *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
   kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
 
+### `0x261B` — the per-track IDENTITY range (the duplicate-track crash)
+
+Every `0x261B` carries **one run of 10 consecutive `u32` ids** at a 4-byte stride. Located by
+signature rather than a fixed offset (the longest ascending-by-one run); measured over **3962
+`0x261B` blocks in 67 sessions, the run length is ALWAYS 10**.
+
+Pro Tools allocates these per track, contiguously and session-uniquely, and **resolves a track's
+identity through them**:
+
+```
+4 mono tracks.ptx    track1 13221..13230   track2 13231..13240   track3 13241..13250   track4 13251..13260
+5 mono tracks.ptx    13261..13270  13271..13280  13281..13290  13291..13300  13301..13310
+```
+
+**Two tracks sharing a range are ONE object to Pro Tools.** A byte-copied track subtree inherits the
+source's range, and PT then:
+
+- displays the copy under the **source's** name regardless of what name is written — a session whose
+  `0x2519` table read `[Audio 1..5]` displayed `Audio 1, 2, 3, 4, 4`;
+- selects both tracks when either is clicked;
+- and **crashes on close**. Measured 2026-07-25: 4 of 4 duplicates carrying a collision crashed on
+  close; 3 of 3 removals, which allocate nothing, closed cleanly.
+
+This is why renaming never helped: the display name is resolved through the id, not the string. Our
+output's name-occurrence profile was already **byte-for-byte identical to PT's own session** — the
+name appears exactly 7 times across `0x1014`, `0x1052`, `0x210B`, `0x2519`, `0x251A` (×2) and
+`0x2619` in both.
+
+**Allocation rule for a new track:** the lowest free range at or after the source's own, stepping a
+whole range at a time. NOT session-max + 1 — a synthesized session carries two sequences (the
+donor's `20661…` and a low run for grown tracks `81, 91, … 191`), and `synthesize(N+1)` continues
+the low one with `201`. The stated rule reproduces both oracles: `201` for the synth ladder and
+`13261` for Pro Tools' own mono ladder.
+
+MIDI tracks do not carry a `0x261B` run; a mixed session has fewer ranges than tracks.
+
+Checked by `validate_pt_invariants` as `track-id-uniqueness` at **error** severity — 215 of 225
+control sessions satisfy it, and the 10 that do not are our own click/synth output plus two PT
+re-saves that inherited the defect from ours.
+
 ### Ubiquitous session-scaffold types (previously undocumented)
 
 These occur in **every one of the 282 corpus sessions** with a **fixed instance count that does not
