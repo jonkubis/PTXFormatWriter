@@ -2709,5 +2709,55 @@ class NameTablePreambleTests(unittest.TestCase):
                             "equal the renamed-PT-session cases are being misclassified as ours")
 
 
+    def test_playlists_are_attributed_to_tracks_by_the_0x2015_ordinal(self):
+        """The per-track `0x2015` ordinal is the 1-based index of that track's FIRST playlist in the
+        flat `0x2107` > `0x210B` list, so track `i` owns the slice `[ord[i], ord[i+1])`.
+
+        Verified BY NAME, which is what makes it more than arithmetic: on a 36-track / 126-playlist
+        session every group's members carry their track's base name, `36/36`, including the
+        systematic `gutterN` extra that each multi-playlist track carries.
+
+        On a single-playlist session -- every session in `control_files` and `/Volumes/Samples` --
+        this degenerates to one playlist per track, which is exactly why the field read as a plain
+        positional counter for so long and was twice documented wrongly.
+        """
+        import re
+        base = lambda s: re.sub(r"\.\d{2}$", "", s)
+
+        ref = list(pathlib.Path("/Volumes/Hack 2TB SSD Old").rglob(
+            "SANTA CLAUS IS COMIN.bak.011.ptx")) if pathlib.Path("/Volumes/Hack 2TB SSD Old").exists() else []
+        if ref:
+            data = _load_path(ref[0])
+            groups = BS.track_playlists(data)
+            bl = BS._size_driven_blocks(data)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            names = [n for n, _p in BS._inline_name_entries(data, z, e, bl)]
+            self.assertEqual(len(groups), len(names), msg="one playlist group per track")
+            self.assertEqual(sum(len(g) for g in groups), len(BS.playlist_names(data)),
+                             msg="the groups must partition the playlist list exactly")
+            for track, group in zip(names, groups):
+                self.assertTrue(group, msg=f"{track!r} owns no playlist")
+                shared = sum(1 for x in group if base(x) == base(track))
+                self.assertGreaterEqual(shared, max(1, len(group) - 1),
+                                        msg=f"{track!r} -> {group}: members do not share its name")
+
+        # and the degenerate case, on the local controls
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/lots of mono tracks/*.ptx")):
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            groups = BS.track_playlists(data)
+            if not groups:
+                continue
+            checked += 1
+            with self.subTest(session=path.name):
+                self.assertTrue(all(len(g) == 1 for g in groups),
+                                msg=f"{path.name}: expected one playlist per track, got "
+                                    f"{[len(g) for g in groups]}")
+        self.assertGreater(checked, 3, "mono ladder not found -- the degenerate case proved nothing")
+
+
 if __name__ == "__main__":
     unittest.main()

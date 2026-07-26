@@ -3886,6 +3886,71 @@ def _index_offset_holes(data: bytes) -> "tuple[list[tuple[int, int]], set[int]]"
     return holes, zmarks
 
 
+def playlist_names(data: bytes) -> "list[str]":
+    """Every playlist in the session, in `0x210B` file order -- the order the per-track `0x2015`
+    ordinal indexes into.
+
+    The playlists live in ONE flat `0x2107` container (126/126 on the reference session), NOT nested
+    per track, so a playlist's owner is established by POSITION, not containment. Each `0x210B`
+    holds its name as the first length-prefixed ASCII string in the block; the name is located by
+    scanning for that shape rather than at an offset, because `0x210B` spans vary (54-68 bytes on
+    the same session, with the length driven by the name).
+    """
+    out: "list[str]" = []
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x210B:
+            continue
+        blk = data[z:e]
+        name = ""
+        for k in range(len(blk) - 4):
+            n = int.from_bytes(blk[k : k + 4], "little")
+            if 1 <= n <= 64 and k + 4 + n <= len(blk):
+                s = blk[k + 4 : k + 4 + n]
+                if all(32 <= b < 127 for b in s):
+                    name = s.decode("latin1")
+                    break
+        out.append(name)
+    return out
+
+
+def track_playlists(data: bytes) -> "list[list[str]]":
+    """The playlists owned by each track, in track order -- `[[name, ...], ...]`.
+
+    HOW IT IS DERIVED. Each track's `0x2015` carries a `u32` (at the `_ORD2015_ANCHOR` + 18) that is
+    the 1-BASED INDEX OF THAT TRACK'S FIRST PLAYLIST in the flat `0x210B` list, so track `i` owns
+    the half-open slice `[ord[i], ord[i+1])` and the last track owns the rest.
+
+    PROVEN BY NAME, not just by arithmetic. On `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126
+    playlists) the ordinals are `[1, 2, 12, 22, ...]`, so track 1 -- displayed as `BD in.04`, Pro
+    Tools' `trackname.NN` convention for "playlist NN is selected" -- claims indices 2..11, and those
+    ten `0x210B` entries read:
+
+        BD in.04, BD in.07, BD in.06, BD in.05, BD in.08, BD in.01, BD in, BD in.02, BD in.03,
+        gutter1
+
+    i.e. every playlist of `BD in` and nothing else. The arithmetic check agrees independently:
+    `sum(gaps) + 1 == 126 ==` the `0x210B` count exactly.
+
+    On a session where every track owns one playlist -- which is EVERY session in `control_files`
+    and `/Volumes/Samples` -- this degenerates to one name per track, which is why the field read as
+    a plain positional counter for so long.
+    """
+    names = playlist_names(data)
+    if not names:
+        return []
+    ords: "list[int]" = []
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x2015:
+            continue
+        a = data.find(_ORD2015_ANCHOR, z, e)
+        if a >= 0 and a + 22 <= e:
+            ords.append(int.from_bytes(data[a + 18 : a + 22], "little"))
+    if not ords or ords[0] != 1 or any(b <= a for a, b in zip(ords, ords[1:])):
+        return []                       # not the convention -- say nothing rather than guess
+    bounds = ords + [len(names) + 1]
+    return [names[bounds[i] - 1 : bounds[i + 1] - 1] for i in range(len(ords))]
+
+
 def session_self_name(data: bytes) -> "str | None":
     """The `.ptx` filename the session records for ITSELF, from its `0x2067` save-lineage block.
 

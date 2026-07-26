@@ -789,6 +789,16 @@ Pro Tools' own mono ladder names the field outright:
 | … | … |
 | `8 mono tracks` | `[0,0,0,0,0,0,0,1]` |
 
+> **The other `0x2015` field — playlists.** The `u32` after that block's `0x2434` child is a
+> different thing entirely from the two selection flags: it is the **1-based index of the track's
+> first playlist** in the flat `0x2107` → `0x210B` list, so track `i` owns the half-open slice
+> `[ord[i], ord[i+1])`. Proven by name on `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126
+> playlists): track `BD in.04` claims indices 2..11, and those ten entries are `BD in.04`,
+> `BD in.07`, `BD in.06`, `BD in.05`, `BD in.08`, `BD in.01`, `BD in`, `BD in.02`, `BD in.03`,
+> `gutter1` — every playlist of `BD in` and nothing else. All 36 groups agree with their track's
+> name, and `sum(gaps) + 1 == 126`, the playlist count exactly. Read it with
+> `body_synth.track_playlists()`.
+
 — the just-created track, in **both** columns. Neither is a structural "is last" bit: `1..4 stereo
 tracks` have none set and `5 stereo tracks` has all five, which is what user-visible selection looks
 like after clicking away or Select All, and not what a derived field would ever do. The two columns

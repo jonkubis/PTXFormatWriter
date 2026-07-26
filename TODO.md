@@ -149,6 +149,21 @@ path for an unverifiable fidelity gain is a bad trade; it waits for a PT run.
       every track after the copy  +=  pc(src)
       GATE on the pre-edit column satisfying the invariant; leave non-conforming sessions alone.
 
+**PROVEN BY NAME, not just arithmetic (2026-07-26, later).** `body_synth.track_playlists(data)` now
+attributes playlists to tracks via this rule and the result is checkable against Pro Tools' own
+`trackname.NN` convention. On the reference session, track `BD in.04` claims playlist indices 2..11:
+
+    BD in.04, BD in.07, BD in.06, BD in.05, BD in.08, BD in.01, BD in, BD in.02, BD in.03, gutter1
+
+Every playlist of `BD in` and nothing else. **36/36 groups** share their track's base name, and the
+`gutterN` extra is systematic (one per multi-playlist track, numbered in track order). So `pc(src)`
+above is no longer a bare subtraction on a column of unknown meaning -- it is a count of NAMED
+objects that can be verified before it is written. That removes the main reason the writer change
+felt unsafe; what remains is that it rewrites SURVIVING tracks, which still wants a PT run.
+
+Playlists live in ONE flat `0x2107` container (126/126), NOT nested per track -- checked, because
+per-track nesting would have made the count structural. It is positional instead.
+
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
 Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:
