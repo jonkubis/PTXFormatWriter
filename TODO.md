@@ -125,10 +125,21 @@ boundary. I am recording that and stopping rather than proposing a sixth.
 
 What is solid: it affects 2 of 40 sampled real sessions, the difference is exactly 2 bytes in a
 `0x1014` header (`00 14` -> `40 00`, the size field's top byte and the content-type's low byte), the
-duplicate step is where it enters, and no probe placed so far observes anything writing them. A
-fresh approach is needed -- most likely diffing `dup` against `orig` block-by-block BY GUID
-IDENTITY rather than by offset, which is the mistake that produced two of the five wrong answers
-above.
+duplicate step is where it enters, and no probe placed so far observes anything writing them.
+
+**THE BY-IDENTITY DIFF WAS TRIED AND IS ALSO INVALID.** Keying `0x1014` blocks by their NAME
+reported "`ZZ Probe` only in dup, `2nd takes` only in orig", which looked like the copy had
+overwritten another track's entry. It had not: **`2nd takes` occurs 36 times in BOTH files** -- names
+are NOT unique among `0x1014` blocks, so a dict keyed by name collapses 36 entries to one and the
+survivor differs arbitrarily between the two files. `Audio 8` (the source) is present in both.
+
+That is the SIXTH wrong answer on this defect, and the third caused by a bad identity/mapping
+assumption (offset twice, name once). Any further attempt must first establish a key that is
+provably unique -- name is not, offset is not -- before drawing any conclusion from a diff.
+
+STOPPING HERE deliberately. Six refuted hypotheses is strong evidence that my mental model of this
+splice is wrong somewhere I cannot see by probing, and each wrong answer has had to be walked back
+in this file. It affects 2 of 40 sampled sessions; 38 round-trip byte-exact.
 
 Two further leads, untested:
   * whether the difference is a WRITE at all -- confirm empirically where dup's block at 221996
