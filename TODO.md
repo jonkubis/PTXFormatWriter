@@ -63,10 +63,17 @@ complete`). Asserting the same on the OUTPUT was tried and REVERTED -- it fires 
 sessions that round-trip byte-exactly. Rejecting files that are fine is the trap this project keeps
 hitting.
 
-**KNOWN GAP:** on the phantom session the input now walks 54/54 but the spliced OUTPUT walks 18/55,
-so `duplicate_track` returns a file later passes cannot re-walk; `remove_track`'s input guard catches
-it downstream. Fixing it properly means making the SPLICE phantom-aware, not adding another
-assertion. Real-session duplicate->remove is byte-exact in 29/30 (that session is the 1).
+**SPLICE NOW PHANTOM-AWARE (partly).** `_name_entry_span` computed its OWN `region_end =
+min(children)` and then CLAMPED each entry to it, so every entry at or past the phantom was chopped
+short and the splice copied a malformed one -- which is why the output walked 18/55. Both readers now
+share `_name_table_region_end()`, which resolves the bound by comparing the two walks. On the phantom
+session the spliced output now walks **55/55** for interior sources where it walked 18.
+
+**STILL OPEN on that one session:** `duplicate->remove` does not invert there, and duplicating its
+LAST entry raises the truncation guard (54 parsed for 55 records). No regression elsewhere: 207 tests
+green and real-session duplicate->remove is byte-exact in 29/30 sampled, unchanged. The residue is
+specific to a table whose entry region contains a phantom, and it is now a splice/last-entry problem
+rather than a reader one.
 
 ## VALIDATOR CALIBRATED AGAINST REAL SESSIONS: 119 -> 2 FALSE POSITIVES (2026-07-25)
 

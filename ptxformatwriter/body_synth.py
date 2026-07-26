@@ -172,6 +172,40 @@ def _name_table_entries(table: bytes) -> list[bytes]:
     return entries
 
 
+def _name_table_region_end(data: bytes, z: int, e: int, bl) -> int:
+    """Where the `0x2519` inline-entry region really ends.
+
+    Normally the first framed child of the name-table block. But a child can be a PHANTOM: an
+    entry's 8-byte GUID may contain 0x5A, which the size-driven walk frames as a block sitting
+    INSIDE the entry region (see `_inline_name_entries`). Taking that as the bound truncates the
+    table, and -- because `_name_entry_span` CLAMPS an entry to this value -- it also silently
+    chops entries at or past the phantom, so a splice copied a malformed entry and corrupted
+    everything after it.
+
+    Resolved the same way in both readers: if walking to the block's own end yields MORE entries
+    than walking to the first child, the child was a phantom and `e` is the real bound.
+    """
+    end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+    if end == e:
+        return end
+
+    def _n(limit):
+        q = z + 9 + 0x14 + _name_table_shift(data, z)
+        if _name_entry_head(data, q, limit) is None:
+            for c in range(q, min(q + 64, max(q, limit - 8)), 2):
+                if _name_entry_head(data, c, limit) is not None:
+                    q = c
+                    break
+        k = 0
+        while True:
+            h = _name_entry_head(data, q, limit)
+            if h is None:
+                return k
+            k += 1
+            q = _next_name_entry(data, h[1], limit)
+    return e if _n(e) > _n(end) else end
+
+
 def _name_entry_span(data: bytes, name_off: int, bl) -> "tuple[int, int] | None":
     """The exact byte-span `[start, end)` of the `0x2519` inline name entry whose name
     begins at `name_off`. A normal entry is `<len:u32><name><23-byte trailer>`, but the
@@ -187,8 +221,7 @@ def _name_entry_span(data: bytes, name_off: int, bl) -> "tuple[int, int] | None"
     if host is None:
         return None
     z, e, _c = host
-    children = [zz for zz, _ee, _cc in bl if z < zz < e]
-    region_end = min(children) if children else e
+    region_end = _name_table_region_end(data, z, e, bl)
     start = name_off - 4
     nlen = int.from_bytes(data[start : start + 4], "little")
     full_end = start + 4 + nlen + _NAME_ENTRY_SUFFIX
@@ -4781,38 +4814,7 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
     """
     if bl is None:
         bl = _size_driven_blocks(data)
-    end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
-    # A "child" can be a PHANTOM. An entry's 8-byte GUID may contain the byte 0x5A, which the
-    # size-driven walk frames as a block -- in `20230209 GENE GOO GOO DOLLS.ptx` the GUID
-    # `56 bc 4b e0 b7 5a c9 00` manufactures a 25-byte 'type 0x0700' block mid-trailer, dropping
-    # `end` into the middle of the table so the walk stopped at 18 of 54 entries. Same class as the
-    # file-header index-pointer record.
-    #
-    # The entries are self-describing, so when the phantom bound truncates the table, fall back to
-    # the block's own end and let PARSE FAILURE stop the walk instead: the real children here
-    # (`0x251A`, starting `5a 02 00 ...`) yield an absurd name length and terminate it naturally.
-    # Applied only when the bounded walk is demonstrably short, so nothing else changes.
-    def _walk(limit):
-        q0 = z + 9 + 0x14 + _name_table_shift(data, z)
-        if _name_entry_head(data, q0, limit) is None:
-            for _c in range(q0, min(q0 + 64, max(q0, limit - 8)), 2):
-                if _name_entry_head(data, _c, limit) is not None:
-                    q0 = _c
-                    break
-        acc = []
-        while True:
-            h = _name_entry_head(data, q0, limit)
-            if h is None:
-                break
-            nm, ne = h
-            acc.append((nm, q0 + 4))
-            q0 = _next_name_entry(data, ne, limit)
-        return acc
-    if end != e:
-        _short = _walk(end)
-        _full = _walk(e)
-        if len(_full) > len(_short):
-            end = e
+    end = _name_table_region_end(data, z, e, bl)
     q = z + 9 + 0x14 + _name_table_shift(data, z)
     # `_name_table_shift` models the preamble as a binary flag (base or +2), verified on 436 LOCAL
     # sessions with no exceptions. Real sessions have at least a third form: 105 of 600 start their
