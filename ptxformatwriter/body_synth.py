@@ -5742,6 +5742,33 @@ def _renumber_body_after_remove(data: bytes, kinds: "list[int]", base_n: int,
     return _rekey_positional_by_slot(out, kinds, base_n)
 
 
+def _assert_name_table_complete(data: bytes, bl=None) -> None:
+    """Refuse to edit a session whose 0x2519 walk is demonstrably INCOMPLETE.
+
+    `_inline_name_entries` stops at the first framed child of the name-table block. On 249 of 250
+    real sessions that is the whole table, but one (`20230209 GENE GOO GOO DOLLS.ptx`) continues
+    PAST that child: its last visible entry's 23-byte trailer runs beyond the child's start and
+    another length-prefixed name (`Audio 6`) follows immediately, so the walk sees 18 names for 54
+    track records.
+
+    Editing such a session would renumber and splice against a third of its tracks. Until the walk
+    handles a table interleaved with child blocks, refuse loudly rather than corrupt quietly --
+    every editor here identifies tracks through this table.
+    """
+    if bl is None:
+        bl = _size_driven_blocks(data)
+    nt = [(z, e) for z, e, c in bl if c == 0x2519]
+    if not nt:
+        return
+    n_ents = len(_inline_name_entries(data, nt[0][0], nt[0][1], bl))
+    n_trk = sum(1 for _z, _e, c in bl if c in _TRACK_RECORD_TYPES)
+    if n_ents < n_trk:
+        raise ValueError(
+            f"name table appears truncated: {n_ents} entries parsed for {n_trk} track records. "
+            "The 0x2519 walk stops at the first framed child, and this session continues past it. "
+            "Editing would operate on a subset of the tracks, so it is refused.")
+
+
 def remove_track(data: bytes, track_name: str) -> bytes:
     """Remove an AUDIO track (with all its clips) from an arbitrary session, leaving every
     other track/clip/plugin/automation intact.
@@ -5768,6 +5795,7 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # it returns 0 for `128 click tracks.ptx` -- a genuine 128-track Pro Tools session -- and this
     # guard refused every edit on it with "the session's only track". Any session whose tracks are
     # all of a kind track_types omits was uneditable for the same reason.
+    _assert_name_table_complete(data)
     if sum(1 for _z, _e, c in _size_driven_blocks(data) if c in _TRACK_RECORD_TYPES) <= 1:
         raise ValueError(
             "cannot remove the session's only track (a .ptx needs at least one track); "
@@ -6273,6 +6301,7 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
 
     # The source's track-id range, read BEFORE the splice: the copy will inherit it verbatim and
     # must be moved off it, but any OTHER collision already in the session is left alone.
+    _assert_name_table_complete(data, bl)
     _src_id_first = None
     for _z, _e, _c in bl:
         if _c == 0x261B and any(pz < _z < pe for pz, pe in pl_ranges):

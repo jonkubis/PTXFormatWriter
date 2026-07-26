@@ -3062,6 +3062,28 @@ fixing a non-bug.
 `validate_pt_invariants` checks the permutation at `nonconforming` (not `error`): 196/196 is strong
 evidence for the RULE, but nothing yet shows Pro Tools rejects a file that breaks it.
 
+### READER LIMITATION — a name table can continue PAST its first child block
+
+`_inline_name_entries` walks `0x2519` entries from the preamble up to the **first framed child** of
+the name-table block. On **249 of 250** real sessions that is the entire table. On one it is not:
+
+```
+20230209 GENE GOO GOO DOLLS.ptx   18 entries parsed, 54 track records
+   last visible entry 'Audio 4' ends at 1061, first child starts at 1076
+   its 23-byte trailer runs PAST 1076, and the next bytes are  07 00 00 00 "Audio 6"
+```
+
+So the table is interleaved with child blocks and continues beyond the one the walk stops at. The
+walk is not wrong about entry FRAMING — it is wrong about where the region ends.
+
+Until that is handled, `duplicate_track` and `remove_track` **refuse** such a session
+(`_assert_name_table_complete`): every editor identifies tracks through this table, so editing it
+would renumber and splice against a third of the tracks. Refusing loudly beats corrupting quietly.
+
+The check is `entries < track records`, which is `False` on 249/250 real sessions and on every local
+control, so it costs nothing elsewhere. **It is a symptom test, not a fix** — the walk itself still
+needs to learn to resume after a child block.
+
 ### The SIX per-track record types — one table
 
 All are siblings under the single top-level `0x2624` track-definitions container. The "three track
