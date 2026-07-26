@@ -3,6 +3,30 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## NARROWED — the re-key does NOT touch PT-authored small sessions (2026-07-25)
+
+Re-keying all 282 `control_files` sessions UNTOUCHED changes **11**, and **0 of the 213 PT-authored
+ones**. Every changed file is our own synth output being REPAIRED. So "the writer corrupts every
+real session it touches" was too strong: the 10,624 bytes / 25 sessions measured earlier is real,
+but it is specific to the LARGE external-corpus sessions whose zero-sentinels and restarting runs
+these small local controls simply do not contain.
+
+**A near-miss worth recording.** Three local files disagreed with our `0x2015` rule, so I read them
+as PT ground truth and derived "the click's ordinal is always 3". It is not. Pro Tools numbers the
+click POSITIONALLY with everything else — its own `3 stereo plus click.ptx` stores audio 1,2,3 and
+click **4**, and `1 stereo plus click on top.ptx` stores click **1**, audio 2. The three dissenting
+files (`test_clickbottom_*`, `test_F2_12stereo_clicktop`) are OUR output, and one of them gives the
+click an ordinal already used by an audio track. **I was one step from "fixing" a correct rule to
+match our own broken files.** The provenance test that misled me was the `next_kind` chain, which an
+ALL-AUDIO session satisfies trivially — it cannot tell our audio-only output from PT's.
+
+USE A REAL PROVENANCE SIGNAL. Filename family (`mixedmidi_`, `synth_`, `test_`, `robust_`, `midi9`)
+is what actually separates the two sets here, and the PT-authored ladders
+(`lots of {mono,stereo} tracks/`, `N stereo plus click*`) are the trustworthy oracles.
+
+STILL OPEN, and still needs the external drive: the `0x251A` restart boundary, what lives at
+`0x261C` end-19 in a large session, and whether `0x2015` uses a zero sentinel there.
+
 ## SOLVED — the duplicate-track crash was a shared TRACK-ID RANGE (2026-07-25)
 
 PT results on the six files built from GENUINE sources: **all 3 removals clean; all 3 duplicates

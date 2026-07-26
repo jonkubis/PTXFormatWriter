@@ -3384,8 +3384,19 @@ dense unique ordinals and no anomalies. The INVARIANTS are the problem — they 
 small sessions (mostly ≤16 tracks, many synthetic-adjacent) and do not generalise to sessions with
 hundreds of tracks and richer track kinds.
 
-**THE SHARPER CONSEQUENCE (2026-07-25): these are not just over-strict GATE rules, the WRITER
-writes them.** `_rekey_offsynth_positional` applies every one of these conventions to whatever it
+**NARROWED (2026-07-25, later the same day): the re-key is a NO-OP on 213/213 PT-authored local
+controls.** Re-keying every one of the 282 `control_files` sessions untouched changes only **11**,
+and all 11 are OUR OWN synth output being REPAIRED — none is PT-authored. Worked example: our
+`test_clickbottom_3stereo.ptx` gives its click the DUPLICATE `0x2015` ordinal 3 (already used by an
+audio track) and the re-key correctly moves it to 4, which is exactly what Pro Tools' own
+`3 stereo plus click.ptx` stores. The click IS numbered positionally along with the other tracks
+(PT: click=1 when on top, click=N+1 when at the bottom) — an earlier reading of these same files as
+"the click is always 3" was wrong, and would have broken a correct rule to match our own defective
+output. So the churn below is NOT universal: it is specific to the large real-world sessions in the
+external corpus, whose zero-sentinels and restarting runs the small local controls do not contain.
+
+**THE SHARPER CONSEQUENCE (2026-07-25): on the EXTERNAL corpus these are not just over-strict GATE
+rules, the WRITER writes them.** `_rekey_offsynth_positional` applies every one of these conventions to whatever it
 edits, so a bare re-key of an UNTOUCHED real session — an edit that should be a no-op — rewrites
 **10,624 bytes across 25 sessions**: `0x251A` 4630, `0x261C` 2682, `0x2015` 2218, `0x200B` 1094.
 The C4 slot alone is overwritten in **2,432 of 2,448 records (99%)**. Fixing the `0x2519` rule to
