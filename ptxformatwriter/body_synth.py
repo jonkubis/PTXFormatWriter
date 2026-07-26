@@ -5785,7 +5785,7 @@ def _renumber_body_after_remove(data: bytes, kinds: "list[int]", base_n: int,
     return _rekey_positional_by_slot(out, kinds, base_n)
 
 
-def _assert_name_table_complete(data: bytes, bl=None) -> None:
+def _assert_name_table_complete(data: bytes, bl=None, where: str = "appears truncated") -> None:
     """Refuse to edit a session whose 0x2519 walk is demonstrably INCOMPLETE.
 
     `_inline_name_entries` stops at the first framed child of the name-table block. On 249 of 250
@@ -5807,9 +5807,9 @@ def _assert_name_table_complete(data: bytes, bl=None) -> None:
     n_trk = sum(1 for _z, _e, c in bl if c in _TRACK_RECORD_TYPES)
     if n_ents < n_trk:
         raise ValueError(
-            f"name table appears truncated: {n_ents} entries parsed for {n_trk} track records. "
-            "The 0x2519 walk stops at the first framed child, and this session continues past it. "
-            "Editing would operate on a subset of the tracks, so it is refused.")
+            f"name table {where}: {n_ents} entries parsed for {n_trk} track records. Every editor "
+            "identifies tracks through this table, so proceeding would operate on a subset of "
+            "them. Refused.")
 
 
 def remove_track(data: bytes, track_name: str) -> bytes:
@@ -6611,6 +6611,16 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
         out = _adjust_midi_list_count(out, 1)                  # 0x1058 = MIDI count
     if not _do_renumber:
         out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
+
+    # NOT verified on the way OUT. Asserting completeness on `out` was tried and REVERTED: it fires
+    # on `duplicate_track`'s own placeholder-then-rename step, whose intermediate table reads short
+    # on ordinary PT-authored sessions that round-trip byte-exactly. A check that rejects files
+    # which are fine is the trap this project has hit repeatedly, so the guard stays on the INPUT.
+    #
+    # KNOWN GAP: on the one session with a phantom-truncated table the input now walks 54/54 but
+    # the spliced output walks 18/55, so duplicate_track returns a file whose table later passes
+    # cannot re-walk. remove_track's input guard catches it downstream. Fixing it properly means
+    # making the SPLICE phantom-aware, not adding another assertion.
 
     # THE COPY MUST NOT INHERIT THE SOURCE'S TRACK IDS. Pro Tools gives each track a contiguous
     # block of 10 session-unique ids in its 0x261B and resolves a track's IDENTITY through them, so

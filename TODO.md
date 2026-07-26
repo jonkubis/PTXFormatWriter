@@ -31,6 +31,43 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## THE NAME-TABLE READER WAS BLIND ON 17.5% OF REAL SESSIONS (2026-07-25)
+
+Chasing "one odd session" turned into the largest reader defect found this session. **105 of 600**
+real sessions could not be walked; most returned **ZERO** entries for 49-84 tracks. Every editor
+identifies tracks through that table, so on a sixth of real sessions the reader saw nothing.
+
+TWO INDEPENDENT CAUSES, both the same shape -- a rule fitted to `control_files`:
+
+  1. **A third preamble variant.** `_name_table_shift` models the preamble as a binary flag (base or
+     +2), "verified on 436 local sessions, 362/74, no exceptions". `20220503 LAST TIME 2.ptx` starts
+     its entries at payload+0x18 -- two bytes past the +2 case -- so the head parsed a garbage
+     length (458752) and the walk returned nothing. FIXED by resolving the start EMPIRICALLY: if no
+     entry parses where the flag says, step forward in 2-byte units (bounded, alignment-preserving)
+     to the first offset that does. 105 -> 1.
+  2. **A GUID byte 0x5A manufacturing a phantom child.** In `GENE GOO GOO DOLLS.ptx` the entry GUID
+     `56 bc 4b e0 b7 5a c9 00` gets framed by the size-driven walk as a 25-byte "type 0x0700" block
+     mid-trailer. That phantom sits INSIDE the entry region, so `min(child start)` dropped the bound
+     into the middle of the table and the walk stopped at 18 of 54. Same class as the file-header
+     index-pointer record. FIXED by falling back to the block's own end when the bounded walk comes
+     up short and letting PARSE FAILURE stop it -- real children (`0x251A`, `5a 02 00 ...`) yield an
+     absurd length and terminate it naturally. 1 -> 0.
+
+    truncated name-table walks over 600 real sessions:   105  ->  1  ->  0
+
+### Guard on the INPUT only, and one gap left open
+
+`duplicate_track`/`remove_track` refuse a session whose table reads short (`_assert_name_table_
+complete`). Asserting the same on the OUTPUT was tried and REVERTED -- it fires on
+`duplicate_track`'s own placeholder-then-rename step, whose intermediate reads short on ordinary
+sessions that round-trip byte-exactly. Rejecting files that are fine is the trap this project keeps
+hitting.
+
+**KNOWN GAP:** on the phantom session the input now walks 54/54 but the spliced OUTPUT walks 18/55,
+so `duplicate_track` returns a file later passes cannot re-walk; `remove_track`'s input guard catches
+it downstream. Fixing it properly means making the SPLICE phantom-aware, not adding another
+assertion. Real-session duplicate->remove is byte-exact in 29/30 (that session is the 1).
+
 ## VALIDATOR CALIBRATED AGAINST REAL SESSIONS: 119 -> 2 FALSE POSITIVES (2026-07-25)
 
 `validate_pt_invariants` had never been checked against real third-party sessions -- only against
