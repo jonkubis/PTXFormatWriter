@@ -3062,6 +3062,33 @@ fixing a non-bug.
 `validate_pt_invariants` checks the permutation at `nonconforming` (not `error`): 196/196 is strong
 evidence for the RULE, but nothing yet shows Pro Tools rejects a file that breaks it.
 
+### The SIX per-track record types — one table
+
+All are siblings under the single top-level `0x2624` track-definitions container. The "three track
+kinds" this project worked from for months was wrong; there are six, and the three that were missing
+are exactly the ones absent from the local corpus.
+
+| type | kind | `next_kind` code | local instances | notes |
+|---|---|---|---|---|
+| `0x261C` | audio | 0 | 1291 in 217 sessions | has a `0x1014` track-list entry; carries a `0x261B` id range |
+| `0x2620` | MIDI | 1 | 102 in 69 sessions | track-list entry is `0x1057` inside `0x1058`; **no `0x261B` id run** |
+| `0x261E` | click / aux | 2 | 162 in 35 sessions | no track-list entry; **`track_types()` does not report these** |
+| `0x263B` | folder / VCA | 5 | **0** | not present in ANY local session — external corpus only |
+| `0x2621` | instrument | 7 | **0** | not present in ANY local session — external corpus only |
+| `0x261D` | master / bus | 11 | **0** | not present locally; documented separately from the external corpus |
+
+The `next_kind` codes are measured, not assumed: 3379/3379 consecutive name-table pairs across 40
+real sessions (see the `0x2519` trailer section). They are what the `0x0500`/`0x0700`/`0x0B00` values
+meant — a three-kind model had to treat them as anomalies.
+
+Two consequences a writer must respect, both of which caused real bugs:
+
+- **`track_types()` omits click/aux tracks.** `remove_track`'s "only track" guard counted it and so
+  refused every edit on `128 click tracks.ptx` — a genuine 128-track PT session — claiming it had
+  one track. Count TRACK RECORDS, not reported tracks.
+- **MIDI tracks carry no `0x261B` id run**, so a mixed session legitimately has fewer id ranges than
+  tracks. Anything asserting "one range per track" is wrong.
+
 ### `0x261B` — the per-track IDENTITY range (the duplicate-track crash)
 
 Every `0x261B` carries **one run of 10 consecutive `u32` ids** at a 4-byte stride. Located by
