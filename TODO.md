@@ -97,8 +97,26 @@ subclassing every `bytearray` in `remove_track` (there are exactly two) to log s
 221900..222100 produced NO hits, while the output still differed. So the bytes are not written inside
 `remove_track`'s own body, nor by any of the 16 functions it calls that were individually wrapped.
 
-That is a genuinely odd result and the honest state of it. Two things worth testing next, neither of
-which I got to:
+**RESOLVED TO A BOUNDARY, by checking the lead above -- and my offset mapping WAS the error.**
+`dup` at 221996 is a DIFFERENT block from `orig` at 221970 (GUIDs `e3890be0...` vs `7cff58e0...`),
+so the earlier "the duplicate is clean" check compared the wrong block. Locating the block by GUID
+instead of by offset:
+
+    ORIG  <GUID 7cff58e0..> 5a 03 00 27 00 00 00 14 10 | 09 ... "2nd take"
+    DUP   <GUID 7cff58e0..> 5a 03 00 26 00 00 00 14 10 | 08 ... "ZZ Probe"   <- the COPY, spliced here
+    BACK  <GUID 7cff58e0..> 5a 03 00 27 00 00 40 00 10 | 09 ... "2nd take"   <- neighbour clobbered
+
+The copy's `0x1014` is spliced immediately BEFORE another track's `0x1014`, sharing the preceding
+GUID context. On removal the boundary for that range is two bytes off, so it clips the NEIGHBOUR's
+size/content-type word instead of ending cleanly. That is why no write probe ever fired: nothing
+writes those bytes -- the removal simply cuts in the wrong place, and the bytes that survive are the
+neighbour's shifted by the error.
+
+The fix is in how `remove_track` computes the span of the copy's `0x1014` when the copy's NAME is a
+different length from the source's (here 8 vs 9, size `0x26` vs `0x27`). The two-byte error matches
+that one-byte name-length delta plus its length prefix.
+
+Two further leads, untested:
   * whether the difference is a WRITE at all -- confirm empirically where dup's block at 221996
     actually lands in `back` (by searching for its surrounding byte pattern) rather than assuming the
     26-byte mapping. If it lands elsewhere, this is a local misalignment, not a value change.
