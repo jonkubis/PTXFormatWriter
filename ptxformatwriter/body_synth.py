@@ -5449,11 +5449,22 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     # post-duplicate or the post-remove shape. Structure settles it where values could not.
     _c261c = by.get(0x261C, [])
     _all = [(z, e) for _t, _lst in by.items() for z, e in _lst]
-    for s, (z, e) in enumerate(_c261c):
+    _slots = []
+    for _s, (z, e) in enumerate(_c261c):
         tgt = e - _B261C_C4_FROM_END
         if any(zz > z and ee <= e and zz <= tgt < ee for zz, ee in _all):
             continue                          # lands in a child: leave Pro Tools' bytes alone
-        su32(tgt, s)
+        _slots.append((_s, tgt))
+    # ...and even in-record, only when the session actually USES this as an index. In real sessions
+    # the slot is ZERO in 622 of 622 records, and no offset anywhere in a real 0x261C's own bytes
+    # holds a per-track index (scanned every offset, 40 sessions, no hits). The "audio display
+    # index" is an artefact of synth-shaped sessions; writing 0,1,2,... over a real session's zeros
+    # was corruption. An all-zero slot set means the session does not use the convention -- and that
+    # test survives both post-edit shapes, which is where the earlier value-based predicates failed:
+    # a duplicate gives [0,1,2,3,3] and a removal [0,1,3], neither of which is all-zero.
+    if any(int.from_bytes(body[t : t + 4], "little") for _s, t in _slots):
+        for _s, t in _slots:
+            su32(t, _s)
     return bytes(body)
 
 
@@ -5576,9 +5587,20 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
         elif chains != list(range(n_ents)):
             note("0x2589-view-chains", f"{chains} is not a clean permutation of range({n_ents})")
 
-    check("0x261C-C4",
-          [int.from_bytes(data[e - _B261C_C4_FROM_END : e - _B261C_C4_FROM_END + 4], "little")
-           for z, e in by.get(0x261C, [])], 0)
+    # DEMOTED to `nonconforming` (2026-07-25). As an ERROR this rejected 119 of 120 UNTOUCHED real
+    # Pro Tools sessions -- files PT wrote and opens. Real sessions store ZERO in these slots (622
+    # of 622 records measured), which is "repeated values" by definition; gating on all-zero still
+    # left 102 of 120 failing, because real sessions mix zeros with a few repeated non-zeros.
+    #
+    # A rule that fires on 85% of untouched real sessions is a false-positive generator, which is
+    # the over-strictness trap this project has now hit four times. The index reading is
+    # synth-shaped only: scanning EVERY offset in a real 0x261C's own bytes found no per-track index
+    # anywhere (40 sessions, no hits). Kept as a note because it is still true of, and useful for,
+    # synth-shaped sessions.
+    _c4 = [int.from_bytes(data[e - _B261C_C4_FROM_END : e - _B261C_C4_FROM_END + 4], "little")
+           for z, e in by.get(0x261C, [])]
+    if len(set(_c4)) != len(_c4):
+        note("0x261C-C4", f"repeated values in {_c4[:8]}")     # NONCONFORMING, not an error
 
     # The `Click II` plug-in descriptor (0x1017 under 0x1018) is present IFF the session has a
     # click track -- 35 sessions with both, 247 with neither, 0 exceptions across all 282.
