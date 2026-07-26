@@ -5,15 +5,30 @@ from ptxformatwriter import body_synth as BS
 from ptxformatwriter.core import PTFFormat
 def L(p):
     f=PTFFormat(); f.load(p,48000); return f.unxored_data()
+# EVERY reachable corpus, not just the local controls. control_files is ONE machine (PT Studio
+# 2024) and /Volumes/Samples is ONE vendor (PT HD 10.3/11.2); measuring on either alone has
+# repeatedly produced rules that a third corpus refuted. /Volumes/Backups is disconnected; the two
+# SSDs below are not, and they are a different PT generation again.
+CORPORA = ["control_files/**/*.ptx",
+           "/Volumes/Samples/**/*.ptx",
+           "/Volumes/Mac 4TB SSD/**/*.ptx",
+           "/Volumes/Hack 2TB SSD Old/**/*.ptx"]
+paths=[]
+for pat in CORPORA:
+    hits=sorted(glob.glob(pat,recursive=True))
+    if not hits and pat.startswith("control_files"):
+        raise SystemExit("control_files glob is EMPTY -- refusing to report a fabricated coverage number")
+    print("  %-34s %d sessions" % (pat.split("/**")[0], len(hits)))
+    paths += hits
 counts=collections.Counter(); sessions=collections.Counter(); indexed=collections.Counter(); n=0
-for p in sorted(glob.glob("control_files/**/*.ptx",recursive=True)):
+for p in sorted(set(paths)):
     try:
         d=L(p); bl=BS._size_driven_blocks(d)
         holes,_zm=BS._index_offset_holes(d); idx=set(t for _a,t in holes if t)
     except Exception: continue
     n+=1; seen=set()
     for z,e,c in bl:
-        if z < 31:          # the file-header index-pointer record is NOT a block (see spec)
+        if z < 31 or c == -1:   # the index-pointer record is NOT a typed block (see spec)
             continue
         counts[c]+=1; seen.add(c)
         if z in idx: indexed[c]+=1
@@ -26,7 +41,7 @@ lines=[]
 lines.append("# `.ptx` content-type coverage tracker\n")
 lines.append("*(The file-header index-pointer record at body offset 20 is excluded — it is not a block; see the spec. Counting it invents one bogus type per session.)*\n")
 lines.append("Measured with the **size-driven block walk** (`body_synth._size_driven_blocks`) over the")
-lines.append("**%d-session local corpus** — %d distinct real content-types, %d block instances.\n"%(n,len(counts),tot))
+lines.append("**%d-session corpus (every reachable drive)** — %d distinct real content-types, %d block instances.\n"%(n,len(counts),tot))
 lines.append("**%d/%d content-types have a spec entry = %.1f%%**, covering %.2f%% of block instances.\n"%(
     len(doc),len(counts),100.0*len(doc)/len(counts),100.0*(tot-ub)/tot))
 lines.append("**Read that number carefully.** It means every type observed in this corpus is")

@@ -62,6 +62,37 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
+## THE 0x2015 ORDINAL IS A PLAYLIST INDEX — and I got it wrong once myself (2026-07-26)
+
+`value[i] = 1 + (playlists owned by tracks before i)` — the 1-based position of the track's FIRST
+playlist in the session-wide `0x210B` list. PROOF: `SANTA CLAUS IS COMIN.bak.011.ptx`, 36 tracks and
+126 `0x210B`, reads `[1, 2, 12, 22, ..., 102, 103, ...]`; gaps `[1, 10, 10, ..., 1, 1, ...]` (tracks
+3-12 own ten playlists each) and `sum(gaps) + 1 == 126` == the `0x210B` count exactly.
+
+**Earlier the same day I wrote into the spec that "density IS the invariant, dense 1..N in 250/250".
+That was wrong,** and it is a cleaner example of the corpus-width trap than the one it replaced:
+
+    reading                                     corpus it was true on          why it failed
+    "stable per-track ID, distinct with gaps"   a locator missing 24.1%        phantom gaps
+    "dense 1..N, density is the invariant"      250/250 Samples + 255/255      single-playlist only
+                                                controls                       (14 real sessions differ)
+
+250/250 reads like overwhelming evidence and is exactly as narrow as 1/1: `control_files` is ONE
+machine, `/Volumes/Samples` is ONE vendor, and every session in both owns one playlist per track.
+
+**NOT IMPLEMENTED, deliberately.** Every duplicate does leave two tracks sharing an ordinal (216/216
+control sessions), so the defect is real -- but Pro Tools opened, used and closed such a file
+cleanly (PT-confirmed this session), so it is FIDELITY, not a crash. Correcting it rewrites SURVIVING
+tracks (everything after the copy shifts by the copy's playlist count), which is the exact class of
+change reverted repeatedly here, and no local oracle can validate it. Trading a PT-CONFIRMED-WORKING
+path for an unverifiable fidelity gain is a bad trade; it waits for a PT run.
+
+    THE RULE, ready to implement:
+      pc(src) = value[src+1] - value[src]          (or n_0x210B + 1 - value[src] if src is last)
+      copy    = value[src] + pc(src)
+      every track after the copy  +=  pc(src)
+      GATE on the pre-edit column satisfying the invariant; leave non-conforming sessions alone.
+
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
 Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:

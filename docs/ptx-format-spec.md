@@ -3605,13 +3605,34 @@ The failing rules are:
 | `0x2519-entry-ordinals` | **SOLVED 2026-07-25.** Not "repeated values" but a sentinel: `0` means *not numbered* (40.6% of entries), and the NONZERO ordinals in table order are exactly `1..k` — **300/300 random corpus sessions, no exceptions**. `[1,2,3,4,0,0,5,0,6,…]` is the normal shape. |
 | `0x251A-lane-ordinals` | **RESTART BOUNDARY SOLVED (2026-07-25):** the table is LANE-MAJOR and the sequence is `[1..N]` repeated once per lane index, so the run restarts every N where N = track count. Verified against Pro Tools' own sessions at **N = 99, 128 and 512** (`512 stereo tracks.ptx` = 1024 lane ordinals, exactly `[1..512]×2`), and the synth rule `(i%N)+1` reproduces all three EXACTLY. What remains open is only how the **zero sentinel** interacts in heterogeneous sessions — the `7/25` external-corpus mismatch is entirely sessions where zeros are present. |
 | `0x261C-C4` | **THE WRITE WAS LANDING INSIDE CHILD BLOCKS — fixed structurally 2026-07-25.** The fixed `end - 19` offset is inside the record's OWN bytes only in synth-shaped sessions: 709/709 across the PT-authored controls, but just 253 of 1479 in real ones, where **1226 (83%) fall inside a NESTED CHILD**. The 4-byte write therefore ran through that child's data — visible as writes at `end - 2` of a `0x200B`, overrunning it by two bytes — and that is what BOTH the `0x261C` and `0x200B` churn were. The write is now skipped unless the target is contained in the record itself; no theory about the field is needed, since writing into a child is wrong whatever it means. What C4 *means* in a real session is still UNPROVEN. |
-| `0x2015`/`0x200A`/`0x200B` | **SOLVED 2026-07-25: a stable per-track ID, not a positional counter.** Over 200 real sessions the value is DISTINCT **200/200**, but dense `1..k` in only 129 — the other 71 are distinct with GAPS (`2, 3, 4, 5, 7, …`), the holes left where tracks were deleted. **Uniqueness is the invariant; density is not** (the same shape as the `0x261B` range). Now PRESERVED rather than renumbered; forcing `1..k` had been rewriting Pro Tools' own identities. |
+| `0x2015`/`0x200A`/`0x200B` | **SOLVED 2026-07-26: the 1-based index of the track's FIRST PLAYLIST** — `value[i] = 1 + Σ playlist_count(t)` over tracks before `i`. Proof: `SANTA CLAUS IS COMIN.bak.011.ptx`, 36 tracks / 126 `0x210B`, reads `[1, 2, 12, 22, …, 102, 103, …]`; the gaps are `[1, 10, 10, …, 1, 1, …]` (tracks 3–12 own ten playlists each) and `sum(gaps) + 1 == 126`, the `0x210B` count exactly. On a single-playlist session this degenerates to dense `1..N`, which is why it reads as a positional counter almost everywhere. **Two earlier readings here were wrong, both from too-narrow corpora — see the note below.** |
 | `0x2589-view-chains` | chain count ≠ name-entry count. Low-word UNIQUENESS is the one universal invariant found (68/68). |
 
 The reader is NOT at fault: spot-checking a real session parses 10 name entries with sane names,
 dense unique ordinals and no anomalies. The INVARIANTS are the problem — they were derived from
 small sessions (mostly ≤16 tracks, many synthetic-adjacent) and do not generalise to sessions with
 hundreds of tracks and richer track kinds.
+
+### The `0x2015` ordinal, and two wrong readings of it — a worked case in corpus width
+
+This one field was mis-read twice, in opposite directions, and both errors are instructive because
+neither was careless — each was the correct conclusion from the corpus in front of it.
+
+1. **"A stable per-track ID, distinct with gaps where tracks were deleted"** (2026-07-25). Measured
+   through an 18-byte locator that pinned two bytes of `0x2434` *payload* (the track height, 60 or
+   64) as if they were framing. It silently failed on **24.1%** of real blocks, and every call site
+   guarded `if a >= 0`, so a quarter of the column simply wasn't read. A column missing a quarter of
+   its entries looks exactly like one with deletion holes. That reading became the stated reason
+   never to renumber the field.
+2. **"Dense `1..N`, so density is the invariant"** (2026-07-26, after fixing the locator). True on
+   **250/250** `/Volumes/Samples` sessions and **255/255** PT-authored controls — and still wrong.
+   Every session in both corpora is single-playlist, where the real rule degenerates to `1..N`. Two
+   further drives contain **14** genuine Pro Tools sessions that are not dense.
+
+The actual rule (above) only becomes visible on a session where a track owns more than one playlist.
+**The lesson is about corpus width, not about this field:** `control_files` is one machine and
+`/Volumes/Samples` is one vendor, so a rule confirmed on both is confirmed on a sample of two — and
+"250/250" reads like overwhelming evidence while being exactly as narrow as "1/1".
 
 **NARROWED (2026-07-25, later the same day): the re-key is a NO-OP on 213/213 PT-authored local
 controls.** Re-keying every one of the 282 `control_files` sessions untouched changes only **11**,

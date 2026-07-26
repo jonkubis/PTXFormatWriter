@@ -5496,9 +5496,9 @@ def _rekey_offsynth_positional(data: bytes, *, c4_dense: "bool | None" = None) -
       * `0x251A` lane entries -- `u16` at ne+18 (nlen at z+11, ne = z+15+nlen), lane-major so the
         value is `(i mod N) + 1`; N is read as `len(0x251A)//2` (self-describing: two lanes per
         track, click included) rather than from `track_types`, which omits the click.
-      * `0x200A` / `0x200B` / `0x2015` -- `u32` at the `_ORD2015_ANCHOR` + 18, dense 1..N in FILE
-        order, each type numbered within its own domain (`0x200B` is audio-only, so it runs
-        1..n_audio while `0x200A`/`0x2015` run 1..n_entries).
+    NOT renumbered here, despite being dense in PT-authored sessions:
+      * `0x200A` / `0x200B` / `0x2015` -- `u32` at the `_ORD2015_ANCHOR` + 18. See the note at the
+        `_ = anchors` line below for why this pass is the wrong place for it.
 
     Deliberately NOT touched: `0x2589` (attributed by DISPLAY ROW, not file order -- see
     `duplicate_track`), and the `0x261C`/`0x2104` fields, which `_rekey_positional_by_slot`
@@ -5528,20 +5528,29 @@ def _rekey_offsynth_positional(data: bytes, *, c4_dense: "bool | None" = None) -
                 anchors.add(a)
     # PRESERVED, NOT RENUMBERED -- but NOT for the reason this comment used to give.
     #
-    # WITHDRAWN: "distinct in 200/200 but dense in only 129, the other 71 distinct with GAPS left
-    # where tracks were deleted, so the field is a stable per-track ID and UNIQUENESS is the
-    # invariant, not density." There are no deletion holes. That measurement was taken through the
-    # 18-byte `_ORD2015_ANCHOR`, which silently failed on 24.1% of real blocks (see its comment);
-    # a column missing a quarter of its entries is exactly what "distinct with gaps" looks like.
-    # Re-measured with the corrected anchor: dense `1..N` in 250/250 of those same sessions, and in
-    # 255/255 genuine PT-authored controls. The only non-dense sessions anywhere are 10 control
-    # files that are OUR OWN broken output -- the same 10 the `next_kind` chain check partitions
-    # out, which is two independent invariants agreeing on provenance.
+    # THE VALUE IS A PLAYLIST INDEX: `value[i] = 1 + (number of playlists owned by tracks before i)`,
+    # i.e. the 1-based position of this track's FIRST playlist in the session-wide 0x210B list.
+    # Proved on `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126 0x210B): the column reads
+    # [1, 2, 12, 22, ..., 102, 103, ...], the gaps are [1, 10, 10, ..., 10, 1, 1, ...] -- tracks 3-12
+    # own ten playlists each -- and `sum(gaps) + 1 == 126 ==` the 0x210B count exactly.
     #
-    # So density IS the invariant, and duplicate_track currently violates it. Renumbering here is
-    # still wrong, because this pass cannot tell the copy from a surviving track and rewriting
-    # survivors is what broke the round-trip every previous time. The fix belongs where the copy's
-    # bytes are made, as the 0x261B id range and the selection flags now are. Left alone until then.
+    # TWO EARLIER READINGS OF THIS FIELD WERE WRONG, both from too-narrow corpora:
+    #   * "a stable per-track ID, distinct with GAPS where tracks were deleted, so UNIQUENESS is the
+    #     invariant" -- an artefact of the 18-byte `_ORD2015_ANCHOR` silently missing 24.1% of real
+    #     blocks. A column with a quarter of its entries absent looks exactly like that.
+    #   * "dense 1..N, so DENSITY is the invariant" (mine, same day, after fixing the anchor) --
+    #     true on 250/250 `/Volumes/Samples` and 255/255 controls, and still wrong: those are all
+    #     SINGLE-PLAYLIST sessions, where the playlist rule degenerates to 1..N. Two further drives
+    #     show 14 sessions that are not dense, and they are genuine Pro Tools files.
+    #
+    # NOT RENUMBERED HERE, and deliberately not renumbered at all yet. A duplicate does leave two
+    # tracks sharing an ordinal (216/216 control sessions), so this IS violated -- but Pro Tools
+    # opened, used and closed such a file cleanly (PT-confirmed 2026-07-26), so it is a fidelity
+    # defect, not a crash. Correcting it means writing SURVIVING tracks (every track after the copy
+    # shifts by the copy's playlist count), which is the exact class of change reverted repeatedly
+    # here, and it cannot be validated locally. The rule to implement, once there is a PT run to
+    # check it against: copy gets `value[src] + pc(src)`, every later track gains `pc(src)`, where
+    # `pc(src) = value[src+1] - value[src]` (or `n_0x210B + 1 - value[src]` when src is last).
     _ = anchors
 
     if by.get(0x2519):
