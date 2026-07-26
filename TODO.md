@@ -221,8 +221,26 @@ statement of the defect comes from that same check:
 consumed, which is the same fact as `2nd takes` vanishing. Any correct fix must make that count go
 57 -> 58; that is the one-line regression test to write first.
 
-NEXT: find why the insertion offset for the copy's `0x1014` lands inside the following block rather
-than at its start. `Audio 8` (the source) sits at 221926..221970 and `2nd takes` begins exactly at
+### THE EXACT CORRUPTION, AND WHY EVERY PROBE MISSED IT
+
+    orig  '2nd takes' @221970:  5a 03 00 27 00 00 00 14 10 09 ...
+    dup   same block  @222219:  5a 03 00 27 00 00 40 00 10 09 ...
+                                                  ^^ ^^
+
+`+6` (size u32's top byte, `00` -> `40`) and `+7` (content-type low byte, `14` -> `00`). Size becomes
+`0x40000027`, type becomes `0x1000`, so the block is no longer framed and drops out of the walk --
+hence `0x1014` count 57 -> 57 instead of 57 -> 58.
+
+**Why nine probes found nothing:** the write is at dup offset **222225**. Every probe watched
+221900..222100 -- the ORIGINAL/`back` coordinate -- because that is where the round-trip diff reports
+it. In the duplicate the same block sits 249 bytes later. Widening the window to 221900..222300 and
+tracing all five bytearrays inside `duplicate_track` STILL reports nothing, so the writer is in a
+HELPER it calls, not in its own body; the `_TB` substitution only covered `duplicate_track`'s own
+source text.
+
+NEXT (mechanical, and the search space is now small): apply the tracing bytearray subclass MODULE-
+WIDE, not just inside `duplicate_track`, with the window at 222180..222280, and run one duplicate.
+That will name the helper. The one-line acceptance test is the `0x1014` count going 57 -> 58. `Audio 8` (the source) sits at 221926..221970 and `2nd takes` begins exactly at
 221970, so the copy is being placed at the source unit's END -- which is correct in principle, and
 means the damage is in how that end is computed or how the following block's frame is rebuilt.
 
