@@ -269,6 +269,33 @@ symptom A. Symptom B (a broken top-level chain) may still be a size problem, but
 unproven too, and the two should not be assumed to share a cause. 35/40 sampled real sessions
 round-trip byte-exact; the 5 failures are 2 of symptom A and 3 of symptom B.
 
+## SOLVED — set_track_channels wrote PAST the block; real sessions now 40/40 (2026-07-25)
+
+`set_track_channels` writes the post-ID channel indices at `marker + 19` / `marker + 23`, offsets
+taken from the control corpus. On real sessions the marker sits legitimately INSIDE the block while
+those offsets fall past its END -- marker 221957, block end 221970, `marker + 19` = 221976, six bytes
+beyond. The channel value `40 00` landed on the NEXT block's size/content-type word (`0x27` ->
+`0x40000027`, `0x1014` -> `0x1000`), unframing it so the walk lost it entirely.
+
+That is why adding a track left the `0x1014` count unchanged, and why every write probe came up
+empty: they all watched 221900..222100, the ORIGINAL coordinate, while the write lands at 222225 in
+the DUPLICATE.
+
+    real-session duplicate->remove byte-exact:  35/40  ->  40/40
+    0x1014 count on duplicate:                  57->57  ->  57->58
+
+Also resolves the three sessions that raised `AttributeError` (`final_index_ref` returning None on
+edited output) -- the same corruption breaking top-level contiguity.
+
+FIXED BY CONTAINMENT, needing no theory about where the field lives: the marker search is bounded to
+the block, and any post-ID write that would leave it is skipped. Same principle that settled the
+`0x261C` C4 write.
+
+NINE failed diagnoses preceded it, every one derailed by comparing blocks through an ASSUMED
+correspondence -- by offset, by name, by substring count. What found it was a module-wide tracing
+`bytearray` with no assumption in it. The regression test asserts the `0x1014` COUNT increments,
+because a count needs neither offsets nor identity mapping.
+
 ## THE FALSE-GUID BUG — a block of size 42 spells the GUID tag in its SIZE field (2026-07-25)
 
 `guids_in()` scans a block for the 4-byte tag `2a 00 00 00` and takes the next 8 bytes as a GUID.
