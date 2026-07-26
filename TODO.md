@@ -3,6 +3,28 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## THE REMAINING RE-KEY GAP, BOUNDED EXACTLY (2026-07-25)
+
+Two assumptions I repeated turned out to be false, and checking them is what narrowed this:
+
+  * **"the local controls are too small"** — FALSE. `control_files` holds genuine PT sessions of
+    **512 tracks / 46079 blocks / 1.4 MB**. Scale was never the missing dimension.
+  * **"the restart boundary is unknown"** — SOLVED. The `0x251A` table is LANE-MAJOR: `[1..N]`
+    repeated once per lane index, restarting every N = track count. PT's own files at N = 99, 128
+    and 512 match our `(i%N)+1` rule EXACTLY (`512 stereo tracks.ptx` = 1024 ordinals = `[1..512]x2`).
+
+What is left is now measured rather than guessed. Across all **213** PT-authored local controls:
+
+    zero-valued 0x2519 ordinals ....... 0
+    zero-valued lane ordinals ......... 0
+    sessions with >1 track kind ....... 23   (0x261C + 0x261E, and 0x261C + 0x2620)
+    re-key is a no-op on ............ 213/213
+
+So kind-heterogeneity IS covered locally and our rules hold on it. **The zero sentinel is simply
+absent from every local file** — 0 of 213 here versus 40.6% of entries in the external corpus. That
+one case is the whole of what the external drive is still needed for; everything else about these
+three passes is verified against Pro Tools' own output.
+
 ## NARROWED — the re-key does NOT touch PT-authored small sessions (2026-07-25)
 
 Re-keying all 282 `control_files` sessions UNTOUCHED changes **11**, and **0 of the 213 PT-authored

@@ -3006,10 +3006,15 @@ What those sessions lack is **structural heterogeneity**:
 | `0x2519` ordinals equal to 0 | **0** | **40.6%** |
 | lane-ordinal restarts | 1 (the lane-major boundary) | many |
 
-So a rule can be confirmed at scale locally, but a rule about the **zero sentinel** — which only
-appears when a session has hidden/inactive tracks and mixed kinds — cannot. That is exactly the
-residue in the three re-key passes: their positional arithmetic is right (verified to N=512), and
-what is unproven is how zeros participate.
+Measured, not assumed (2026-07-25): across all **213** PT-authored controls there are **ZERO**
+zero-valued ordinals — none in `0x2519`, none in the lane table. Mixed track KINDS do occur locally
+(23 sessions pair `0x261C` with `0x261E` or `0x2620`), and every re-key rule is a no-op on all of
+them. So kind-heterogeneity is covered here; the **zero sentinel is not present at all**.
+
+That bounds the residue in the three re-key passes exactly: their positional arithmetic is verified
+correct against Pro Tools' own files up to N=512 and across mixed kinds, and the ONLY unproven part
+is how a zero participates — a case that occurs in 40.6% of external-corpus entries and in 0 of 213
+local ones. It is the single thing the external corpus is still required for.
 
 ### `0x2589` — the value set is the law; BLOCK ORDER IS NOT
 
