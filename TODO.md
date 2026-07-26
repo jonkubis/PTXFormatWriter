@@ -193,8 +193,28 @@ Two concrete, verified facts that no earlier hypothesis produced:
 indicative rather than proven -- but the size-byte change is a genuine `replace` opcode and is not
 subject to that ambiguity.)
 
-That is where the next attempt starts: find what decrements that block's size, and why the insertion
-offset for the copy's `0x1014` is computed relative to the wrong block boundary.
+### CONFIRMED: the splice DESTROYS the neighbouring `0x1014`
+
+Enumerating `0x1014` blocks by their name field, in both files:
+
+    '2nd takes'   orig = [(221970, size 39, span 46)]      dup = []          <- GONE
+    'Audio 8'     orig = [(221926, size 37, span 44)]      dup = [(222130, 37, 44)]   source, intact
+    'ZZ Probe'    orig = []                                dup = [(222174, 38, 45)]   the copy
+
+The copy is spliced at a boundary that lands inside the following `0x1014`, so that block is no
+longer framed and drops out of the walk. The two "differing bytes" after a round trip are the tail of
+that damage, not a write -- which is why every write probe came up empty.
+
+**I RETRACTED THIS FINDING ONCE, WRONGLY.** An earlier by-name diff reported exactly this, and I
+dismissed it after counting the TEXT `2nd takes`, which occurs 36 times in both files. That count
+measures the string anywhere in the body -- in paths, region names, other blocks -- not the `0x1014`
+block whose NAME FIELD is `2nd takes`. The block-level enumeration above is the right measurement and
+confirms the original result. Lesson: a substring count is not a block census.
+
+NEXT: find why the insertion offset for the copy's `0x1014` lands inside the following block rather
+than at its start. `Audio 8` (the source) sits at 221926..221970 and `2nd takes` begins exactly at
+221970, so the copy is being placed at the source unit's END -- which is correct in principle, and
+means the damage is in how that end is computed or how the following block's frame is rebuilt.
 
 STOPPING HERE deliberately. Six refuted hypotheses is strong evidence that my mental model of this
 splice is wrong somewhere I cannot see by probing, and each wrong answer has had to be walked back
