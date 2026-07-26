@@ -5700,7 +5700,11 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     # emits a session Pro Tools rejects rather than an empty one. Refuse instead of writing a
     # file that fails to open: every 1-track fixture in the local corpus produced an invalid
     # result this way, while 2..512-track removals are clean.
-    if len(track_types(data)) <= 1:
+    # Count TRACK RECORDS, not `track_types()`. track_types does not report click/aux tracks, so
+    # it returns 0 for `128 click tracks.ptx` -- a genuine 128-track Pro Tools session -- and this
+    # guard refused every edit on it with "the session's only track". Any session whose tracks are
+    # all of a kind track_types omits was uneditable for the same reason.
+    if sum(1 for _z, _e, c in _size_driven_blocks(data) if c in _TRACK_RECORD_TYPES) <= 1:
         raise ValueError(
             "cannot remove the session's only track (a .ptx needs at least one track); "
             "create the replacement track first, or synthesize a new session")

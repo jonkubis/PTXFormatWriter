@@ -1338,6 +1338,45 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_editors_work_at_scale_and_on_click_only_sessions(self):
+        """Two things the small fixtures never exercised, both on PT-AUTHORED sessions.
+
+        SCALE: `512 stereo tracks.ptx` is a genuine 512-track / 1.4 MB Pro Tools session. Duplicate
+        and remove must hold there, not just on 4-track toys.
+
+        CLICK-ONLY: `128 click tracks.ptx` is a real 128-track session whose tracks are ALL clicks —
+        and every edit on it used to be refused with "cannot remove the session's only track",
+        because the guard counted `track_types()`, which does not report click/aux tracks and so
+        returned 0. Any session whose tracks are all of a kind track_types omits was uneditable.
+
+        That file is also a Pro Tools ORACLE for this project's own fix: its 128 tracks are named
+        `Click 1`, `Click 1.dup1` … `Click 1.dup127`, i.e. PT's own Duplicate Track run 127 times,
+        and PT allocated their `0x261B` ranges as 24001, 24011, … 25271 — distinct, contiguous,
+        stepping exactly 10. Our allocator continues that sequence with 25281.
+        """
+        for rel, n_expected in (("512 tracks/512 stereo tracks.ptx", 512),
+                                ("512 tracks/128 click tracks.ptx", 128)):
+            path = ROOT / "control_files" / rel
+            if not path.exists():
+                continue
+            data = _load_path(path)
+            bl = BS._size_driven_blocks(data)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            names = [n for n, _p in BS._inline_name_entries(data, z, e, bl)]
+            self.assertEqual(len(names), n_expected, msg=f"{rel}: unexpected track count")
+
+            for label, tgt in (("last", names[-1]), ("middle", names[len(names) // 2])):
+                with self.subTest(session=rel, case=label):
+                    dup = BS.duplicate_track(data, tgt, "ZZ Probe")
+                    ranges = [f for _z, f, _l in BS.track_id_ranges(dup)]
+                    self.assertEqual(len(ranges), len(set(ranges)),
+                                     msg="a duplicate at scale must still get its own id range")
+                    self.assertEqual([v for v in BS.validate_pt_invariants(dup)
+                                      if v["severity"] == "error"], [])
+                    self.assertEqual(BS.remove_track(dup, "ZZ Probe"), data,
+                                     msg="duplicate->remove must invert byte-exact at scale")
+            BS.remove_track(data, names[-1])      # must not raise on a click-only session
+
     def test_rekey_preserves_the_zero_sentinel(self):
         """Zero means NOT NUMBERED in every ordinal table, and the re-key must never overwrite it.
 
