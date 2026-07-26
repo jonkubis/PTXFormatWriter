@@ -1338,6 +1338,51 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_rekey_preserves_the_zero_sentinel(self):
+        """Zero means NOT NUMBERED in every ordinal table, and the re-key must never overwrite it.
+
+        This case cannot be sampled locally — across all 213 PT-authored controls there is not a
+        single zero ordinal, in `0x2519` or in the lane table — while 40.6% of external-corpus
+        entries are zero. Rather than leave the behaviour unverified until that drive returns, the
+        case is CONSTRUCTED: zeros are injected into a genuine Pro Tools session and the re-key must
+        preserve them while numbering the survivors 1..k within each lane group.
+
+        That reproduces the shape actually measured on real sessions (nonzeros forming ascending
+        runs that restart at 1) without needing them present, and the same change is a byte-level
+        no-op on all 213 local controls, so it cannot regress anything that IS testable here.
+        """
+        data = _load_path(ROOT / "control_files" / "lots of mono tracks" / "4 mono tracks.ptx")
+
+        def lane_slots(d):
+            out = []
+            for z, _e, c in BS._size_driven_blocks(d):
+                if c != 0x251A:
+                    continue
+                nl = int.from_bytes(d[z + 11 : z + 15], "little")
+                out.append(z + 15 + nl + 18)
+            return out
+
+        def lane_vals(d):
+            return [int.from_bytes(d[p : p + 2], "little") for p in lane_slots(d)]
+
+        slots = lane_slots(data)
+        self.assertEqual(lane_vals(data), [1, 2, 3, 4, 1, 2, 3, 4],
+                         msg="the PT source is lane-major [1..N] per lane group")
+
+        mod = bytearray(data)
+        for i in (1, 4):                       # one zero in each lane group
+            mod[slots[i] : slots[i] + 2] = b"\x00\x00"
+        out = BS._rekey_offsynth_positional(bytes(mod))
+
+        vals = lane_vals(out)
+        for i in (1, 4):
+            self.assertEqual(vals[i], 0, msg="a zero ordinal must survive the re-key untouched")
+        n = len(slots) // 2
+        for group in (vals[:n], vals[n:]):
+            nz = [v for v in group if v]
+            self.assertEqual(nz, list(range(1, len(nz) + 1)),
+                             msg=f"survivors must be 1..k within the lane group, got {group}")
+
     def test_no_edit_path_ever_shares_a_track_id_range(self):
         """The confirmed crash-on-close cause, guarded across EVERY path that clones a track.
 

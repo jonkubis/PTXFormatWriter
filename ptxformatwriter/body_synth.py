@@ -5376,8 +5376,15 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
             a = body.find(_ORD2015_ANCHOR, z, e)
             if a >= 0:
                 anchors.add(a)
-    for s, a in enumerate(sorted(anchors)):
-        su32(a + 18, s + 1)
+    # Same sentinel rule: number only the NONZERO anchors, 1..k in address order. A no-op on all
+    # 213 PT-authored local controls (none holds a zero here); dense 1..n held in only 33 of 149
+    # external sessions, and those failures are the ones carrying zeros.
+    k = 0
+    for a in sorted(anchors):
+        if int.from_bytes(body[a + 18 : a + 22], "little") == 0:
+            continue
+        k += 1
+        su32(a + 18, k)
 
     if by.get(0x2519):
         z, e = by[0x2519][0]
@@ -5385,11 +5392,29 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
         region_end = min(inside) if inside else e
         _renumber_name_entry_ordinals(body, z, region_end, su16)
 
+    # LANE-MAJOR: the table is `[1..N]` repeated once per lane index, so the run restarts every
+    # N = track count. Verified against Pro Tools' own sessions at N = 99, 128 and 512
+    # (`512 stereo tracks.ptx` = 1024 ordinals = exactly `[1..512]x2`).
+    #
+    # ZERO IS A SENTINEL and is preserved, exactly as in the 0x2519 table: only the NONZERO lanes
+    # are numbered, 1..k within each lane group. No local control contains a zero here (0 of 213
+    # PT-authored files), so this is a byte-level NO-OP on everything available to test against --
+    # but 40.6% of external-corpus entries are zero, and renumbering straight through them
+    # overwrote Pro Tools' own values. Preserving them cannot be worse than overwriting them, and
+    # it matches the measured shape: the nonzeros form ascending runs restarting at 1 (25/25, and
+    # 148/149 on the wider sample).
     lanes = by.get(0x251A, [])
     n = len(lanes) // 2 or 1                    # two lane entries per track, click included
+    k = 0
     for i, (z, e) in enumerate(lanes):
+        if i % n == 0:
+            k = 0                               # new lane group -> restart the run
         nlen = int.from_bytes(body[z + 11 : z + 15], "little")
-        su16(z + 15 + nlen + 18, (i % n) + 1)
+        pos = z + 15 + nlen + 18
+        if int.from_bytes(body[pos : pos + 2], "little") == 0:
+            continue                            # not numbered: leave it alone
+        k += 1
+        su16(pos, k)
 
     # 0x261C "C4" per-track counter. Block-END anchored, so it is the one 0x261C field whose offset
     # does not depend on the track's kind (C1/C2/C3 sit at per-kind `_B261C` offsets and are NOT
