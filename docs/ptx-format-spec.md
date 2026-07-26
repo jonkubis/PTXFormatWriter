@@ -2739,6 +2739,47 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** Stores the two default title-block field labels ('Title', 'Composer') as length-prefixed strings, followed by a small run of f32 page-layout geometry values (Score Editor page setup). A singleton child under the 0x2023 session-settings group, immediately after a sibling 0x2434. Score-editor page-setup state PT would recompute/rewrite from the Score Setup dialog. The 'Title'/'Composer' strings make the score/print-header role certain; WHICH geometric quantity each f32 represents is inferred from context, NOT proven.
 - **Confidence:** MEDIUM. All f32 offsets, the +53 flags, both strings, and the fixed 77-byte size are CONFIRMED exact across the 7 instances. GENERALITY CAVEAT: all 7 are one project, so treat as a one-project sample — role confident, exact geometric semantics best-effort, cross-project stability untested.
 
+### 0x261F / 0x2610 / 0x2515 / 0x2514 — a seventh entry under the track list (**structure PROVEN, purpose UNKNOWN**)
+
+Absent from **both** corpora this project measured for most of its life (0/282 `control_files`,
+0/250 `/Volumes/Samples`) and present in 65 of 300 sampled sessions on two other drives. Found by
+diffing the content-type sets across corpora, not by looking for it.
+
+**Containment — 527/527 instances, no exceptions:**
+
+```
+0x2624  (the track list)
+└── 0x261F
+    ├── 0x2515
+    └── 0x2610
+        └── 0x2514
+```
+
+`0x261F` therefore sits as a **sibling of the six known track-record kinds** (`0x261C` audio,
+`0x2620` MIDI, `0x261E` click, `0x263B` folder/VCA, `0x2621` instrument, `0x261D` master/bus) and,
+like them, contains the full per-track apparatus — `0x102D` → `0x2619` (identity + creation name),
+`0x2015`, `0x2434`, `0x2580` (automation lane), `0x260A` (breakpoints), `0x2037`, `0x2038`,
+`0x4301` — all 527/527.
+
+**Sizes:** `0x2514` is fixed at **42 bytes, 527/527**. The others vary: `0x261F` 727–745,
+`0x2610` 173–197, `0x2515` 357–365, each in a tight band, consistent with a name-length-driven
+record rather than a payload-driven one.
+
+**PURPOSE UNKNOWN — and one attractive hypothesis is already REFUTED.** Because `0x261F` carries
+per-track machinery and appears in sessions with more `0x210B` playlists than tracks, it looked like
+the alternate-playlist record. On the 16 sessions that surfaced during its dissection,
+`n(track records) + n(0x261F) == n(0x210B)` held **16/16** — which is exactly what that hypothesis
+predicts.
+
+It is wrong. Across 87 sessions sampled from all four corpora the relation holds only **74/87**, and
+it fails on the very session that established the `0x2015` ordinal rule: `SANTA CLAUS IS
+COMIN.bak.011.ptx` has 36 tracks, **zero** `0x261F`, and 126 playlists. The 16/16 came from
+sampling only sessions that *carry* the family — all of which belong to one engineer's project
+family. Whatever accounts for extra playlists there, `0x261F` is not it in general.
+
+To settle it: a session known to contain the feature, opened in Pro Tools, so the on-screen object
+can be matched to the block. Nothing in the reachable corpora distinguishes the candidates.
+
 ### 0x2612 — I/O routing-path entry (single output/bus signal path)
 
 - **Kind:** CONTAINER (block_type u16 = 0x0003) with exactly 2 immediate children in fixed order: 0x2626 (a 2-byte empty/placeholder marker, block_type 0x0001) then 0x260e (path-detail record carrying the name, block_type 0x0001). Parent = 0x2627 (path list; sibling children there are 0x2625 ×6 and 0x2616 ×4). Grandparent = 0x261b (I/O/bus group). NOTE: the size-driven enumerator gives the two children a 1-byte overlap (0x2626 rel-end = 0x260e rel-start = 18) because they share the 0x5A frame marker.

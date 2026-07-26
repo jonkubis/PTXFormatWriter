@@ -62,6 +62,38 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
+## FOUR UNDOCUMENTED TYPES, AND THE SAME SAMPLING TRAP A THIRD TIME (2026-07-26)
+
+Diffing content-type sets across all four corpora (A/B exhaustive, C/D 150-session samples):
+
+    corpus                      sessions   distinct ctypes
+    A control_files                282           256
+    B /Volumes/Samples             250           194
+    C /Volumes/Mac 4TB SSD         150           421
+    D /Volumes/Hack 2TB SSD Old    150           307
+
+150 sessions from ONE new drive carry more distinct types than all 282 controls. 213 types appear in
+C/D and never in A/B -- but **164 of those are phantoms**, and the naive reading ("213 undocumented
+types!") would have produced a wildly wrong coverage claim. `0x1600` and `0x0c00` pass a
+session-count filter and are still noise: exactly one per session, and `0x1600` = 256 x 22,
+`0x0c00` = 256 x 12 -- a string LENGTH being framed as a block type. After filtering: 49 real,
+38 already in the spec, **11 genuinely undocumented**.
+
+REAL AND NEW: `0x261F > {0x2515, 0x2610 > 0x2514}` under `0x2624`, 527/527 containment, `0x261F` a
+sibling of the six track-record kinds carrying the full per-track apparatus. Written up in the spec.
+
+**AND THE HYPOTHESIS ABOUT IT WAS WRONG, refuted by my own test.** `0x261F` looked like the
+alternate-playlist record: on the 16 sessions that surfaced during its dissection,
+`n(records) + n(0x261F) == n(0x210B)` held 16/16. Across 87 sessions from all four corpora it holds
+74/87, and it FAILS on the session that proved the ordinal rule (36 tracks, 0 x `0x261F`, 126
+playlists). The 16/16 came from sampling only sessions that CARRY the family -- all one engineer's
+project family.
+
+**That is the third time in one session that a rule confirmed on a narrow sample turned out to be a
+property of the sample** (after "distinct with gaps" from a locator missing 24.1%, and "dense 1..N"
+from two single-playlist corpora). The pattern is now unmistakable: *sampling on the presence of the
+thing you are studying guarantees a biased denominator.* Sample the population, then measure.
+
 ## A THIRD OF THE "PT ORACLE" IS OUR OWN OUTPUT (2026-07-26)
 
 `control_files` has been the Pro Tools oracle for this entire project. **94 of its 282 sessions are
