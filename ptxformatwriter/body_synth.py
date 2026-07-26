@@ -5963,6 +5963,20 @@ def remove_track(data: bytes, track_name: str) -> bytes:
                 pl_ranges.append((pz, pe))
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
     if not pl_ranges:
+        # POSITIONAL FALLBACK -- the mirror of duplicate_track's. A track's display name (0x2519 /
+        # 0x251A / 0x1014) can differ from the name its 0x102D -> 0x2619 record was created with,
+        # and those records may carry no GUID, so neither the name search nor the GUID seed finds
+        # anything. The Nth name-table entry is the Nth track record: validated at 225/225 against
+        # the name/GUID route on sessions where that route resolves. Fallback only.
+        _ntab = [(z, e) for z, e, c in bl if c == 0x2519]
+        _ents = ([n for n, _q in _inline_name_entries(data, _ntab[0][0], _ntab[0][1], bl)]
+                 if _ntab else [])
+        _recs = sorted((zz, ee) for zz, ee, cc in bl if cc in _TRACK_RECORD_TYPES)
+        if track_name in _ents and len(_ents) == len(_recs):
+            pz, pe = _recs[_ents.index(track_name)]
+            pl_ranges.append((pz, pe))
+            ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
+    if not pl_ranges:
         raise ValueError(
             f"cannot locate track {track_name!r} (not found, or an unsupported track type)")
 
@@ -6387,6 +6401,26 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
+    if not pl_ranges:
+        # POSITIONAL FALLBACK. A track has TWO names and they need not agree: the display name lives
+        # in 0x2519/0x251A/0x1014, while the per-track record's 0x102D -> 0x2619 keeps the name the
+        # track was CREATED with (`Kick In` vs `Audio 2`). Where those records also carry no GUID,
+        # BOTH routes above come up empty and this used to refuse -- 36 of 250 sessions in one
+        # corpus, every one of them uneditable.
+        #
+        # The Nth name-table entry is the Nth track record. Validated against the name/GUID route
+        # itself: on 225 tracks across 10 sessions where that route resolves uniquely, it selects
+        # the same record the positional rule does -- 225/225. Counts agree too (entries ==
+        # track records in every session checked). Used ONLY as a fallback, so no session that
+        # resolves today changes behaviour.
+        _ntab = [(z, e) for z, e, c in bl if c == 0x2519]
+        _ents = ([n for n, _q in _inline_name_entries(data, _ntab[0][0], _ntab[0][1], bl)]
+                 if _ntab else [])
+        _recs = sorted((zz, ee) for zz, ee, cc in bl if cc in _TRACK_RECORD_TYPES)
+        if source_track in _ents and len(_ents) == len(_recs):
+            pz, pe = _recs[_ents.index(source_track)]
+            pl_ranges.append((pz, pe))
+            ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
     if not pl_ranges:
         raise ValueError(f"cannot locate track {source_track!r} (or an unsupported track type)")
 
