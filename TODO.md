@@ -296,9 +296,21 @@ Those same records carry **no GUID at all**, so neither of `duplicate_track`'s t
 Documented in the spec under "0x2619/0x102D can hold a DIFFERENT name from the display name".
 
 THE FIX is not a patch to the search: a correct implementation must link the `0x2519` entry to its
-`0x261C` record by POSITION or ORDINAL rather than by name or GUID. That is a real change to how
-every editor identifies a track, so it wants its own session and its own test (the 36 affected
-sessions are the fixture).
+`0x261C` record by POSITION or ORDINAL rather than by name or GUID.
+
+PARTIALLY VALIDATED, and deliberately not implemented on the strength of it:
+
+  * **entry count == track-record count in every session checked** (38/38, 56/56, 68/68, 23/23,
+    24/24, 8/8, 34/34) -- a necessary condition for positional linkage, and it holds.
+  * the ORDER is NOT yet validated. The obvious check -- does the Nth entry's name equal the Nth
+    record's inner `0x2619` name -- is useless precisely BECAUSE of the two-names finding: it
+    matches only 14/38, 15/56, 4/23, and a mismatch means "renamed", not "wrong order".
+
+So the counts line up but the correspondence is unproven. Implementing positional linkage now would
+rest on an unverified assumption, which is the specific mistake that produced nine failed diagnoses
+earlier in this session. VALIDATE THE ORDER FIRST -- e.g. on sessions where the existing name/GUID
+route DOES resolve, check that it picks the same record the positional rule would -- then implement.
+The 36 sessions are the fixture, and the acceptance test is that they stop refusing.
 
 The failure is SAFE (a refusal, not corruption) but it means `duplicate_track` cannot edit this
 session family at all.
