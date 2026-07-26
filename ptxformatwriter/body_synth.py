@@ -5389,15 +5389,16 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
             a = body.find(_ORD2015_ANCHOR, z, e)
             if a >= 0:
                 anchors.add(a)
-    # Same sentinel rule: number only the NONZERO anchors, 1..k in address order. A no-op on all
-    # 213 PT-authored local controls (none holds a zero here); dense 1..n held in only 33 of 149
-    # external sessions, and those failures are the ones carrying zeros.
-    k = 0
-    for a in sorted(anchors):
-        if int.from_bytes(body[a + 18 : a + 22], "little") == 0:
-            continue
-        k += 1
-        su32(a + 18, k)
+    # PRESERVED, NOT RENUMBERED. Measured over 200 real Pro Tools sessions: these per-track anchor
+    # values are DISTINCT in 200/200, but dense `1..k` in only 129 -- the other 71 are distinct with
+    # GAPS (`2, 3, 4, 5, 7, ...`), the holes left where tracks were deleted. So the field is a
+    # STABLE PER-TRACK ID, like the 0x261B range, and UNIQUENESS is the invariant, not density.
+    # Forcing `1..k` rewrote Pro Tools' own identities -- 8228 bytes across 250 real sessions.
+    #
+    # Nothing is written here now. duplicate_track gives the COPY an unused id, so an edit never
+    # disturbs a surviving track's identity and a removal just leaves one more hole -- which is
+    # exactly what these sessions show Pro Tools itself doing.
+    _ = anchors
 
     if by.get(0x2519):
         z, e = by[0x2519][0]
@@ -6515,6 +6516,14 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                     _o[_p : _p + 4] = (_new_id_first + (_v - _src_id_first)).to_bytes(4, "little")
             break
         out = bytes(_o)
+
+    # OPEN: the copy still inherits the source's 0x200A/0x200B/0x2015 anchor id, which is distinct
+    # across tracks in 200/200 real sessions. Allocating a fresh one POST-HOC was tried and reverted
+    # -- identifying the copy's anchors by GUID proximity also matched surviving tracks, renumbered
+    # them, and broke the duplicate->remove inverse on 19 of 19 sessions. It must be done where the
+    # copy's bytes are made (the `transform` closure), as the 0x261B fix ultimately was, not by
+    # scanning afterwards. Left inherited for now: a duplicate id is no worse than the dense
+    # renumber that preceded this change, and the PROVEN identity field (0x261B) is handled.
     return out
 
 

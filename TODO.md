@@ -31,6 +31,51 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## A SECOND REAL-SESSION CORPUS EXISTS ON THIS MACHINE (2026-07-25)
+
+`/Volumes/Backups` is still disconnected, but it was never the only source. **The user's other
+mounted volumes hold hundreds of real `.ptx` sessions**:
+
+    /Volumes/Hack 2TB SSD Old ..... 400+ (capped)
+    /Volumes/Mac Pro 4TB HDD ......  37
+    /Volumes/Mac 4TB SSD ..........  29
+
+Scanned 250 of them. This immediately un-blocked two things I had recorded as needing the drive:
+
+  * **the ZERO SENTINEL is present** (5 sessions carry a zero name-table ordinal);
+  * **`0x261D` master/bus is present** -- 115 instances across 105 sessions, versus 0 locally in
+    `control_files`. (`0x263B` folder/VCA and `0x2621` instrument are still absent from all 370
+    sessions seen, so those two remain genuinely drive-only.)
+
+### `0x2015`/`0x200A`/`0x200B` SOLVED — a stable ID, not a positional counter
+
+Measured over 200 real sessions, the per-track anchor value is:
+
+    DISTINCT ......... 200/200
+    dense 1..k ....... 129/200
+    distinct + GAPPED . 71/200   e.g. 2, 3, 4, 5, 7, ...  (holes where tracks were deleted)
+    duplicated ....... 0/200
+
+So **uniqueness is the invariant, density is not** -- the same shape as the `0x261B` range. Our
+writer forced `1..k`, rewriting Pro Tools' own identities in the 71 gapped sessions. The re-key now
+PRESERVES these values. Bare-re-key churn over 250 real sessions: **16543 -> 14938 bytes**, and the
+`0x2015` share (1605 B) is gone entirely. The `0x251A` share went to zero with the earlier sentinel
+fix.
+
+REMAINING CHURN, now studiable locally: `0x261C` 8315 B (the C4 field whose meaning is still
+unproven) and `0x200B` 6623 B (NOT the anchor pass -- that is preserved now, so something else
+writes there; unidentified).
+
+### OPEN: the copy still inherits the source's anchor ID
+
+Allocating a fresh one POST-HOC was tried and REVERTED: identifying the copy's anchors by GUID
+proximity also matched surviving tracks, renumbered them, and broke the duplicate->remove inverse on
+19 of 19 sessions. **That is the second time post-hoc identification of "the copy" has failed** (the
+first was the 0x261B dedup). The lesson is now explicit: the copy must be altered where its bytes
+are MADE -- inside `transform` -- not by scanning the result. Left inherited meanwhile: a duplicate
+id is no worse than the dense renumber it replaced, and the PROVEN identity field (`0x261B`) is
+handled.
+
 ## THE REMAINING RE-KEY GAP, BOUNDED EXACTLY (2026-07-25)
 
 Two assumptions I repeated turned out to be false, and checking them is what narrowed this:
