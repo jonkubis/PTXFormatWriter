@@ -5120,6 +5120,19 @@ def _blocks_by_type(data: bytes) -> "dict[int, list[tuple[int, int]]]":
     ref = _FI.final_index_ref(data)
     by: "dict[int, list[tuple[int, int]]]" = {}
     for z, e, c in sorted(_raw_block_bounds(data, ref.start)):
+        # SKIP THE FILE-HEADER INDEX-POINTER RECORD at body offset 20. It is framed like a block
+        # but is not one: the u16 read as its content_type is the low half of the stored index
+        # OFFSET, so it takes a different, session-specific value in every file (see the spec).
+        #
+        # It is not merely noise. When that value happens to equal a type this dict is used to
+        # patch, the record is treated as a real block of that type and written to -- and it sits
+        # at (20, 31), so an end-anchored field lands in the FILE HEADER. The 0x261C C4 write
+        # (`end - 19`) landed on byte 12 and zeroed the four header bytes `0101`, which broke the
+        # duplicate->remove inverse on 2 of 213 PT-authored controls. Which sessions are hit is
+        # pure luck -- it depends on the low 16 bits of an intermediate index offset -- so this was
+        # a latent, data-dependent header corruption for every caller, not a quirk of those files.
+        if z < 31:
+            continue
         by.setdefault(c, []).append((z, e))
     return by
 

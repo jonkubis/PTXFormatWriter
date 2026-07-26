@@ -1338,6 +1338,53 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(BS.remove_track(dup, new), data,
                              msg=f"duplicate->remove must invert byte-exact for {new!r}")
 
+    def test_every_pt_authored_control_survives_duplicate_then_remove(self):
+        """The whole PT-authored corpus, swept: duplicate a track and remove it again.
+
+        This sweep is what found the header corruption. `_blocks_by_type` was including the
+        file-header index-pointer record at body offset 20 -- framed like a block but not one, its
+        "content_type" being the low half of the stored index OFFSET. When that session-specific
+        value happened to equal a type a pass patches, the record was written to as a real block of
+        that type; sitting at (20, 31), the end-anchored `0x261C` C4 write (`end - 19`) landed on
+        byte 12 and zeroed the four header bytes `0101`.
+
+        It hit 2 of 213 controls, and which ones is pure luck -- it depends on the low 16 bits of an
+        intermediate index offset -- so it was a latent, data-dependent header corruption for every
+        caller. Only a sweep across many real sessions was ever going to surface it.
+        """
+        import re as _re
+        ours = _re.compile(r"(mixedmidi_|synth_|test_|robust_|midi9)")
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if ours.search(path.name):
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            if len(data) > 600_000:          # the 512-track giants: covered by the scale test
+                continue
+            bl = BS._size_driven_blocks(data)
+            nt = [(z, e) for z, e, c in bl if c == 0x2519]
+            if not nt:
+                continue
+            names = [n for n, _p in BS._inline_name_entries(data, nt[0][0], nt[0][1], bl)]
+            if len(names) < 2:
+                continue
+            with self.subTest(session=path.name):
+                dup = BS.duplicate_track(data, names[-1], "ZZ Probe")
+                self.assertEqual(BS.remove_track(dup, "ZZ Probe"), data,
+                                 msg="duplicate->remove must invert byte-exact")
+                # Bytes 0..26 only: the u32 at 27 is the stored index offset and MUST change when
+                # the body grows. Byte 12 is inside this range -- it is what the phantom-block
+                # write zeroed.
+                self.assertEqual(data[:27], dup[:27],
+                                 msg="the file header must never be written to")
+            checked += 1
+        # 94 on this checkout: 213 PT-authored files minus the single-track fixtures, the ones
+        # with no name table, and the >600 KB giants the scale test covers separately.
+        self.assertGreater(checked, 85, msg=f"expected a broad sweep, only {checked} sessions")
+
     def test_editors_work_at_scale_and_on_click_only_sessions(self):
         """Two things the small fixtures never exercised, both on PT-AUTHORED sessions.
 
