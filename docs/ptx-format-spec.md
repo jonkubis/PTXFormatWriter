@@ -2991,6 +2991,31 @@ Consequences for editing:
   *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
   kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
 
+### `0x2589` — the value set is the law; BLOCK ORDER IS NOT
+
+The `u16` at `+9` of each `0x2589` is the track's display row. Measured over the **196 PT-authored
+local controls**, the values are **unique and exactly `0..k-1`** — 196/196 on both counts.
+
+**The order the blocks appear in is allocation order and carries no meaning.** Pro Tools' own
+ladders disagree with each other at the same track count:
+
+```
+n=5   mono   [1, 4, 0, 3, 2]
+n=5   stereo [3, 4, 0, 1, 2]
+n=8   mono   [1, 6, 4, 7, 0, 3, 5, 2]
+n=8   stereo [5, 0, 7, 3, 2, 1, 6, 4]
+```
+
+This CLOSES an open question. Comparing our `duplicate_track` output against Pro Tools' own
+5-track session left exactly one unexplained difference — PT stored `[1, 4, 0, 3, 2]` where we
+stored `[1, 0, 3, 4, 2]` — and it was recorded as a possible defect. It is not one: both are the
+same set, and PT's own files show the sequence is not stable even between two of its own sessions of
+equal size. Only uniqueness and the `0..k-1` range are real; anything that "fixes" the ordering is
+fixing a non-bug.
+
+`validate_pt_invariants` checks the permutation at `nonconforming` (not `error`): 196/196 is strong
+evidence for the RULE, but nothing yet shows Pro Tools rejects a file that breaks it.
+
 ### `0x261B` — the per-track IDENTITY range (the duplicate-track crash)
 
 Every `0x261B` carries **one run of 10 consecutive `u32` ids** at a 4-byte stride. Located by
