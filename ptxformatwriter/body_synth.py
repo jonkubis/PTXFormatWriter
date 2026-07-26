@@ -4783,6 +4783,18 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
         bl = _size_driven_blocks(data)
     end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
     q = z + 9 + 0x14 + _name_table_shift(data, z)
+    # `_name_table_shift` models the preamble as a binary flag (base or +2), verified on 436 LOCAL
+    # sessions with no exceptions. Real sessions have at least a third form: 105 of 600 start their
+    # entries elsewhere -- e.g. `20220503 LAST TIME 2.ptx` begins at payload+0x18, two bytes past
+    # the +2 case -- so the head parsed as a garbage length (458752) and the walk returned ZERO
+    # entries for a 72-track session. Rather than guess at another flag, resolve the start
+    # EMPIRICALLY: if no entry parses where the flag says it should, step forward (in 2-byte units,
+    # preserving alignment) to the first offset that does.
+    if _name_entry_head(data, q, end) is None:
+        for _cand in range(q, min(q + 64, max(q, end - 8)), 2):
+            if _name_entry_head(data, _cand, end) is not None:
+                q = _cand
+                break
     out: "list[tuple[str, int]]" = []
     while True:
         head = _name_entry_head(data, q, end)
