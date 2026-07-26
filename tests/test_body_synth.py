@@ -1662,9 +1662,24 @@ class ViewChainAttributionTests(unittest.TestCase):
         discriminating PT-authored sessions with ZERO exceptions, e.g. `multiple track types`
         (Click 1, MIDI 1, Audio 1, Audio 2) stores [0, 1], NOT the global display slots [2, 3].
 
-        A duplicate cloned it verbatim, so two tracks carried the same identity ([0,1,2,2] for
-        four audio tracks). Pro Tools resolves tracks through these per-track ordinals, which is
-        why duplicates showed the copy under the SOURCE's name."""
+        A duplicate cloned it verbatim, so two tracks carried the same value ([0,1,2,2] for four
+        audio tracks).
+
+        CAUSAL CLAIM CORRECTED (2026-07-25): this docstring used to say that was "why duplicates
+        showed the copy under the SOURCE's name". It was not. Six files whose C4 counters were
+        already correct STILL displayed the copy under the source's name in Pro Tools and still
+        crashed on close; the real identity field is the `0x261B` track-id range (see
+        `test_no_edit_path_ever_shares_a_track_id_range` and the spec). Keeping C4 distinct per
+        track is right for every session that uses this convention -- and this test still pins it --
+        but it explains none of the observed crashes.
+
+        NOTE for anyone tempted to make this pass conditional: `c4 == 0..k-1` holds in 0 of 149
+        real external sessions, so the writer does impose our convention on sessions that do not
+        use it. Skipping the renumber when the session "looks non-conforming" was tried and
+        REVERTED: the check runs after the copy is spliced in, so it sees [0,1,2,3,3], calls the
+        session non-conforming, and skips the very renumber the copy needs. Every predicate tried
+        mis-classified either the post-duplicate or the post-remove shape. Doing this properly needs
+        the meaning of the field at `end-19` in a real session, which is still UNPROVEN."""
         data = _load_path(next(iter(ROOT.glob(
             "control_files/**/multiple track types no click.ptx"))))
 

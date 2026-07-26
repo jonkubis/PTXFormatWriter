@@ -3,6 +3,34 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## 0x261C C4 — CONDITIONAL RENUMBER ATTEMPTED AND REVERTED (2026-07-25)
+
+The last big churn source. Our re-key writes `c4 = 0..k-1` over every `0x261C`, which is how all 213
+PT-authored local controls store it (the re-key is a no-op on them) but holds in **0 of 149** real
+external sessions, where it overwrote 2432 of 2448 records.
+
+ATTEMPT: renumber only when the session already uses the convention, otherwise preserve PT's bytes.
+Verified as a no-op on 213/213 and confirmed to preserve a scrambled C4 — then it broke 6 tests.
+
+WHY IT FAILED, and it is a general lesson: the conformance check runs AFTER the copy is spliced in,
+so it sees `[0,1,2,3,3]`, judges the session non-conforming, and skips exactly the renumber the copy
+needs. Every predicate tried mis-classified one shape or another —
+
+    sorted(cur) == range(k)          post-duplicate [0,1,2,3,3] -> skip (wrong)
+    sorted(set(cur)) == range(n)     real all-zero [0,0,0,0]    -> renumber (wrong)
+    max(cur) <= len(cur)             real all-zero              -> renumber (wrong)
+    distinct >= k-1 and set==range   post-remove [0,1,3]        -> skip (wrong, gap must close)
+
+REVERTED. This cannot be settled by a cleverer predicate: it needs the MEANING of the field at
+`end-19` in a real session, which is UNPROVEN — the reader may be as wrong as the rule. Nothing
+depends on forcing it in the meantime, because identity is guarded by `0x261B`
+(`track-id-uniqueness`), which IS proven.
+
+ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a duplicated C4 was
+"why duplicates showed the copy under the SOURCE's name". It was not — the six 2026-07-25 files had
+correct C4 counters and still showed the source's name and still crashed on close. The identity
+field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
+
 ## THE REMAINING RE-KEY GAP, BOUNDED EXACTLY (2026-07-25)
 
 Two assumptions I repeated turned out to be false, and checking them is what narrowed this:
