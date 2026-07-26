@@ -4782,6 +4782,37 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
     if bl is None:
         bl = _size_driven_blocks(data)
     end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+    # A "child" can be a PHANTOM. An entry's 8-byte GUID may contain the byte 0x5A, which the
+    # size-driven walk frames as a block -- in `20230209 GENE GOO GOO DOLLS.ptx` the GUID
+    # `56 bc 4b e0 b7 5a c9 00` manufactures a 25-byte 'type 0x0700' block mid-trailer, dropping
+    # `end` into the middle of the table so the walk stopped at 18 of 54 entries. Same class as the
+    # file-header index-pointer record.
+    #
+    # The entries are self-describing, so when the phantom bound truncates the table, fall back to
+    # the block's own end and let PARSE FAILURE stop the walk instead: the real children here
+    # (`0x251A`, starting `5a 02 00 ...`) yield an absurd name length and terminate it naturally.
+    # Applied only when the bounded walk is demonstrably short, so nothing else changes.
+    def _walk(limit):
+        q0 = z + 9 + 0x14 + _name_table_shift(data, z)
+        if _name_entry_head(data, q0, limit) is None:
+            for _c in range(q0, min(q0 + 64, max(q0, limit - 8)), 2):
+                if _name_entry_head(data, _c, limit) is not None:
+                    q0 = _c
+                    break
+        acc = []
+        while True:
+            h = _name_entry_head(data, q0, limit)
+            if h is None:
+                break
+            nm, ne = h
+            acc.append((nm, q0 + 4))
+            q0 = _next_name_entry(data, ne, limit)
+        return acc
+    if end != e:
+        _short = _walk(end)
+        _full = _walk(e)
+        if len(_full) > len(_short):
+            end = e
     q = z + 9 + 0x14 + _name_table_shift(data, z)
     # `_name_table_shift` models the preamble as a binary flag (base or +2), verified on 436 LOCAL
     # sessions with no exceptions. Real sessions have at least a third form: 105 of 600 start their
