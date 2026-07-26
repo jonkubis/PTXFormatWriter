@@ -170,9 +170,31 @@ WHAT IS RELIABLE, for whoever picks it up:
   * refuted: grow-pass off-by-one, size accounting, preceding-GUID-tag, in-body write,
     name-length boundary, by-name identity diff, stale copy size field
 
-The next person should start by building a mapping that is VERIFIED (assert every unchanged byte
-maps correctly across the whole file) before interpreting any single difference. Every failure above
-came from skipping that step.
+### THE VERIFIED ALIGNMENT (difflib over a window) -- what seven guesses missed
+
+Doing what every previous attempt skipped -- a real diff alignment instead of an assumed mapping --
+gives this, immediately:
+
+    replace  orig[221973] = 27   ->   dup[222177] = 26     <- a SURVIVING block's SIZE byte, -1
+    equal    orig[221974:221978] = 00 00 00 14
+    insert   45 bytes at orig[221978], beginning  10 08 00 00 00 "ZZ Probe"
+
+The insert lands INSIDE the following block's header -- between the two bytes of its content-type
+word (`14 10`) -- and that surviving block's declared size is decremented from `0x27` to `0x26`.
+
+Two concrete, verified facts that no earlier hypothesis produced:
+  * a SURVIVING block's size byte is modified by the duplicate (0x27 -> 0x26). Every probe looked
+    for a write to the CONTENT-TYPE bytes; the size byte one position earlier was never checked.
+  * the copy's insertion offset splits that block's content-type word, so the two "corrupted" bytes
+    are not corrupted at all -- they are the neighbour's header being re-read at a boundary the
+    insert moved.
+
+(difflib's boundary between `equal` and `insert` is not unique, so the exact split point is
+indicative rather than proven -- but the size-byte change is a genuine `replace` opcode and is not
+subject to that ambiguity.)
+
+That is where the next attempt starts: find what decrements that block's size, and why the insertion
+offset for the copy's `0x1014` is computed relative to the wrong block boundary.
 
 STOPPING HERE deliberately. Six refuted hypotheses is strong evidence that my mental model of this
 splice is wrong somewhere I cannot see by probing, and each wrong answer has had to be walked back
