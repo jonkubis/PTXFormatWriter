@@ -33,6 +33,19 @@ field is `0x261B`. The test still pins C4 per-track, which is right; only its ca
 
 ## THE LAST TWO REAL-SESSION EDIT DEFECTS, DIAGNOSED (2026-07-25)
 
+PROVENANCE CHECKED before blaming today's changes -- both were run against the session-start code
+(`1ec478d`) and against the two intermediate reader commits:
+
+| session | at session start | now |
+|---|---|---|
+| GOO GOO DOLLS | `entries=18 / tracks=54`, dup "succeeded" -- silently building from a THIRD of the table, remove not byte-exact | reads 54/54; `duplicate->remove` differs by **2 bytes** |
+| GENE DEAD AND GONE | `entries=58/58`, `duplicate_track` raises ValueError | IDENTICAL -- pre-existing, untouched by today's work |
+
+So defect #2 is not a regression from the phantom-classification work (verified at `572876f` and
+`c54db13` too), and defect #1 went from silent corruption over two-thirds of a table to a 2-byte
+discrepancy with a complete read.
+
+
 Both survive on the 600-session set; everything else round-trips. Diagnosed precisely rather than
 patched speculatively -- two guesses at this stage were already reverted today.
 
