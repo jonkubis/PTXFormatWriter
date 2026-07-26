@@ -5569,6 +5569,18 @@ def _rekey_offsynth_positional(data: bytes, *, c4_dense: "bool | None" = None) -
             k = 0                               # new lane group -> restart the run
         nlen = int.from_bytes(body[z + 11 : z + 15], "little")
         pos = z + 15 + nlen + 18
+        # CONTAINED, or not written. `nlen` is read out of the block, so a block where +11 is not a
+        # name length -- a PHANTOM framed by a stray 0x5A inside a big payload -- yields a wild
+        # offset and this wrote two bytes somewhere else entirely in the file. Measured on
+        # `M14 BOOM ZAHRAMAY_MIX.bak.047.ptx`: a 290-byte 0x251A at 1977310 read nlen=26403 and the
+        # write landed at 2003746, ~1.31 MB inside a 0x1038 audio payload. 23 of 120 sampled
+        # sessions on one real corpus were being damaged this way, 2 bytes each.
+        #
+        # The 0x5A block walk cannot avoid manufacturing phantoms (0x5A is 'Z' and occurs freely in
+        # leaf data), so every offset DERIVED from a block's own bytes has to be bounds-checked
+        # against that block before it is written -- the same guard the post-ID writes already use.
+        if not (z + 15 <= pos and pos + 2 <= e):
+            continue
         if int.from_bytes(body[pos : pos + 2], "little") == 0:
             continue                            # not numbered: leave it alone
         k += 1

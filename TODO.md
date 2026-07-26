@@ -44,13 +44,23 @@ given the copy a distinct value, and it round-tripped ONLY because remove renumb
 and painted over it. 0x261C dropped from that helper; the copy now gets an in-range value from the
 renumber itself (`4 mono -> 5` now reads `[0,1,2,3,4]`, was `[0,1,2,3,5]`).
 
-**OPEN -- Defect 3: the re-key writes into PHANTOM blocks inside large payloads.** After both fixes
-Mac 4TB still shows 23/120 sessions changed, but only **46 bytes total** (2 per session, down from
-18062). Every one is `e0 ff` -> `01 00` at a position ~1.31 MB inside a `0x1038` blob: a stray `0x5A`
-in that payload frames a fake per-track block and an ordinal pass writes `s+1` into real data.
-Reproduce: `_rekey_offsynth_positional(load('M14 BOOM ZAHRAMAY_MIX.bak.047.ptx'))`, byte 2003746.
-The fix is a reality predicate on the write targets (the 0x0002 master index is the authority on
-which blocks exist), not another offset guard. Not attempted yet -- it wants its own change.
+**Defect 3 -- an UNBOUNDED offset let a phantom block steer a write 1.31 MB away.** Exposed only
+after defects 1 and 2 stopped masking it: Mac 4TB still showed 23/120 sessions changed, 46 bytes
+(2 each). The `0x251A` lane-ordinal pass computed `pos = z + 15 + nlen + 18` where `nlen` is read
+from the block's own `+11`, and wrote `su16(pos, k)` with no check that `pos` lies inside `[z, e)`.
+On `M14 BOOM ZAHRAMAY_MIX.bak.047.ptx` a **290-byte** `0x251A` at 1977310 read `nlen=26403`, so the
+write landed at 2003746 -- inside a `0x1038` audio payload.
+
+The block itself is a PHANTOM, and that is not the bug: `0x5A` is `'Z'` and occurs freely in leaf
+data, so the walk manufactures phantoms inside big payloads and always will. **The rule is that any
+offset DERIVED from a block's own bytes must be bounds-checked against that block before it is
+written** -- the same guard the post-ID writes already carry. My first instinct, a "reality
+predicate" keyed on the 0x0002 master index, would have been wrong: most real blocks are nested and
+never referenced by the index, so index-membership rejects far too much.
+
+FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/120 changed, 0 bytes,
+on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
+`test_no_write_is_derived_from_a_phantom_block`.
 
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 

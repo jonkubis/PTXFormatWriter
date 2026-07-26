@@ -2637,5 +2637,40 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(seen, 100, "control corpus not found -- the sweep proved nothing")
 
 
+    def test_no_write_is_derived_from_a_phantom_block(self):
+        """Every offset a re-key WRITES must be bounds-checked against the block it came from.
+
+        `0x5A` is `'Z'` and occurs freely in leaf data, so the block walk manufactures phantoms
+        inside big payloads -- that is unavoidable and not itself the bug. The bug is deriving a
+        write position from such a block's own bytes without checking it lands inside it: the
+        `0x251A` lane pass read `nlen` from `+11`, and on a 290-byte phantom that read 26403, so it
+        wrote two bytes ~1.31 MB away inside a `0x1038` audio payload.
+
+        The invariant, stated so it cannot regress: applying the re-key to an UNEDITED Pro Tools
+        session must be a NO-OP everywhere it does not legitimately renumber, and in particular must
+        never write outside the block whose bytes produced the offset.
+        """
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if "Backups" in str(path):
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            bl = BS._size_driven_blocks(data)
+            lanes = [(z, e) for z, e, c in bl if c == 0x251A]
+            if not lanes:
+                continue
+            checked += 1
+            with self.subTest(session=path.name):
+                for z, e in lanes:
+                    nlen = int.from_bytes(data[z + 11 : z + 15], "little")
+                    pos = z + 15 + nlen + 18
+                    self.assertTrue(pos + 2 <= e or not (z + 15 <= pos),
+                                    msg=f"a 0x251A at {z} derives a write at {pos}, outside [{z},{e})")
+        self.assertGreater(checked, 50, "control corpus not found -- the sweep proved nothing")
+
+
 if __name__ == "__main__":
     unittest.main()
