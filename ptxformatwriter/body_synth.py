@@ -6316,12 +6316,20 @@ def _reuuid_copied_track(data: bytes, zb: int, eb: int) -> bytes:
         o2 = _uuid_list_offset(data[z:e])
         if o2 is not None:
             seen.update(bytes(data[z + o2 + 2 + 16 * k : z + o2 + 18 + 16 * k]) for k in range(10))
+    import hashlib
     out = bytearray(data)
     for k in range(10):
         a = zb + off + 2 + 16 * k
-        new = bytes(out[a : a + 16])
+        cur = bytes(out[a : a + 16])
+        # Derive a WHOLLY different 16 bytes, not an increment of the leading u32. Incrementing
+        # leaves 12 of 16 bytes equal to the source's; the values are still unique, but Pro Tools'
+        # own sibling tracks differ across the entire id and there is no reason to hand it a
+        # near-identical one. Hashed so the result is deterministic and runs stay reproducible.
+        n = 0
+        new = hashlib.sha256(cur + b"ptx-dup" + bytes([n])).digest()[:16]
         while new in seen:
-            new = ((int.from_bytes(new[:4], "little") + 1) & 0xFFFFFFFF).to_bytes(4, "little") + new[4:]
+            n += 1
+            new = hashlib.sha256(cur + b"ptx-dup" + bytes([n])).digest()[:16]
         seen.add(new)
         out[a : a + 16] = new
     return bytes(out)
@@ -6353,6 +6361,38 @@ def _dense_index_offsets(data: bytes, ctype: int) -> "list[tuple[int, int]]":
         elif vals == list(range(1, n + 1)):
             out.append((off, 1))
     return out
+
+
+def _give_copy_free_track_index(before: bytes, after: bytes, newg: "set[bytes]") -> bytes:
+    """Give the COPY an unused value in each dense per-track index; leave every other track alone.
+
+    The fields are located on the PRE-edit session by `_dense_index_offsets`, so a session that does
+    not use the convention is untouched. Only the copy's block is written -- identified by the fresh
+    identity GUIDs, the same way its `0x261B` id range and UUIDs are.
+
+    Densifying ALL blocks was tried first and reverted: it rewrites surviving tracks, `remove_track`
+    does not undo that, and three tests failed -- exactly how the post-hoc `0x2519` ordinal renumber
+    failed. Touching only the copy keeps `duplicate -> remove` an exact inverse, because removing the
+    copy removes the only bytes that changed.
+    """
+    out = bytearray(after)
+    for ctype in (0x2015, 0x200A, 0x200B, 0x261C):
+        offs = _dense_index_offsets(before, ctype)
+        if not offs:
+            continue
+        blks = [(z, e) for z, e, c in _size_driven_blocks(bytes(out)) if c == ctype]
+        for off, base in offs:
+            vals = [out[z + off] for z, e in blks if z + off < e]
+            for z, e in blks:
+                if z + off >= e or not any(g in bytes(out[z:e]) for g in newg):
+                    continue
+                nv = base
+                while nv in vals and nv < 255:
+                    nv += 1
+                out[z + off] = nv
+                vals.append(nv)
+                break
+    return bytes(out)
 
 
 def _renumber_dense_track_indices(before: bytes, after: bytes) -> bytes:
@@ -6860,7 +6900,8 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # Off-synth only, like the id remap: the synth path renumbers positionally so a grown session
     # equals a fresh synthesize(N+1), and rewriting UUIDs there breaks that equivalence.
     if not _do_renumber:
-        # NOT densifying the per-track index fields here. `_renumber_dense_track_indices` finds them
+        out = _give_copy_free_track_index(data, out, set(gmap.values()))
+        # NOT densifying ALL blocks (only the copy is touched above). `_renumber_dense_track_indices` finds them
         # correctly (0x2015+154, 0x200A+163, 0x261C+1298/+1304 in the mono ladder, located by the
         # dense-sequence property rather than by remembered offsets), but renumbering them touches
         # SURVIVING tracks, and remove_track does not undo that -- it broke the duplicate->remove
