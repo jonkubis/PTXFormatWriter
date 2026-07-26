@@ -31,6 +31,32 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## BOTH REMAINING EDIT DEFECTS ARE ONE ROOT CAUSE: SIZE ACCOUNTING (2026-07-25)
+
+After the false-GUID fix, what is left on the real-session set collapses to a single class -- a size
+field that is not updated correctly by the splice.
+
+**Symptom A -- 2 bytes in a `0x1014` header** (`GENE DEAD AND GONE`, `GOO GOO DOLLS`, identical
+signature in both):
+
+    orig  5a 03 00 | 28 00 00 00 | 14 10      size=40, content_type=0x1014
+    back  5a 03 00 | 28 00 00 5b | 00 10      size and type both destroyed
+
+A 4-byte write landing at block+4 instead of block+3 -- the container grow/shrink pass writes
+`body[nz + 3 : nz + 7]`, so `nz` is one byte high for this block.
+
+**Symptom B -- `AttributeError` on 3 of 40 sampled sessions.** `final_index_ref` walks TOP-LEVEL
+blocks by declared size and requires them to be CONTIGUOUS; it returns None the moment one size is
+wrong. The input chains fine (117 steps ending at the `0x0002` index); the failure happens INSIDE
+`duplicate_track`, on an intermediate buffer, and surfaces in `_reallocate_duplicate_track_ids`
+because that is the next thing to call `_size_driven_blocks`. So the edit breaks top-level
+contiguity on these sessions. PRE-EXISTING -- verified against the committed code.
+
+Both are the same defect wearing different clothes: a declared size written to the wrong offset, or
+not written at all. Fixing the offset arithmetic in the grow/shrink pass should address both, and it
+is the ONLY thing now standing between the editors and a byte-exact round trip on the real-session
+set (35/40 sampled; the 5 failures are 2 of symptom A and 3 of symptom B).
+
 ## THE FALSE-GUID BUG — a block of size 42 spells the GUID tag in its SIZE field (2026-07-25)
 
 `guids_in()` scans a block for the 4-byte tag `2a 00 00 00` and takes the next 8 bytes as a GUID.
