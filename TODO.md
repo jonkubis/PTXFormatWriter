@@ -31,6 +31,30 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## RE-KEY CHURN ON REAL SESSIONS: 16543 -> 483 BYTES (2026-07-25)
+
+The `0x261C` C4 write and the `0x200B` churn were the SAME BUG, and it was structural, not semantic.
+
+`_B261C_C4_FROM_END = 19` was derived from synth-shaped sessions, where `end - 19` is always inside
+the record's own bytes: **709 of 709** across the PT-authored controls. In the user's REAL sessions
+it usually is not — **1226 of 1479 (83%) land inside a NESTED CHILD BLOCK** — so the 4-byte write
+ran straight through that child's data. It surfaced as `su32` writes at `end - 2` of a `0x200B`,
+overrunning the child's boundary by two bytes, which is why both types showed churn.
+
+The write is now skipped whenever the target is not contained in the `0x261C` itself. **No theory
+about what C4 means is needed** — writing into a child block is wrong whatever the field is, and
+containment is checkable. That matters because the earlier attempt to make this conditional on the
+VALUES was reverted after four predicates each mis-read either the post-duplicate or the post-remove
+shape. Structure settled what values could not.
+
+    bare re-key over 250 real sessions:  249 sessions / 16543 bytes  ->  23 sessions / 483 bytes
+    remaining 483 B: 0x261C records whose C4 target IS in their own bytes but whose value differs
+    from PT's -- the genuinely unproven part of the field.
+
+Together with the two earlier fixes this closes the churn story for three of the four passes:
+`0x2519` (zero sentinel), `0x251A` (zero sentinel, lane-major), `0x2015`/`0x200A`/`0x200B` (stable
+IDs, preserved). Only C4's residual value question is open.
+
 ## A SECOND REAL-SESSION CORPUS EXISTS ON THIS MACHINE (2026-07-25)
 
 `/Volumes/Backups` is still disconnected, but it was never the only source. **The user's other

@@ -5436,8 +5436,24 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     # sessions with ZERO exceptions: `multiple track types` (Click, MIDI, Audio 1, Audio 2) stores
     # [0, 1], not the global display slots [2, 3]. A duplicate cloned it verbatim ([0,1,2,2] for
     # four audio tracks), giving two tracks the same identity.
-    for s, (z, e) in enumerate(by.get(0x261C, [])):
-        su32(e - _B261C_C4_FROM_END, s)
+    # ONLY when `end - 19` is really inside the record's OWN bytes. That fixed end-relative offset
+    # was derived from synth-shaped sessions, where it always is: 709 of 709 0x261C blocks across
+    # the PT-authored controls. In the user's real sessions it is NOT -- 1226 of 1479 (83%) land
+    # inside a NESTED CHILD block, so the 4-byte write ran through that child's data (it showed up
+    # as writes at `end - 2` of a 0x200B, overrunning its boundary by two bytes) and accounted for
+    # BOTH the 0x261C and the 0x200B churn.
+    #
+    # This needs no theory about what C4 means -- which is still unproven. Writing into a child
+    # block is wrong whatever the field is, and containment is checkable. A conditional renumber
+    # based on the VALUES was tried earlier and reverted: every predicate mis-read either the
+    # post-duplicate or the post-remove shape. Structure settles it where values could not.
+    _c261c = by.get(0x261C, [])
+    _all = [(z, e) for _t, _lst in by.items() for z, e in _lst]
+    for s, (z, e) in enumerate(_c261c):
+        tgt = e - _B261C_C4_FROM_END
+        if any(zz > z and ee <= e and zz <= tgt < ee for zz, ee in _all):
+            continue                          # lands in a child: leave Pro Tools' bytes alone
+        su32(tgt, s)
     return bytes(body)
 
 
