@@ -5543,10 +5543,16 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             f"repeated: {sorted({n for n in names if names.count(n) > 1})}")
 
     def check(kind: str, vals: "list[int]", dense_from: "int | None") -> None:
-        if len(set(vals)) != len(vals):
-            err(kind, f"repeated values in {vals}")
-        elif dense_from is not None and vals != list(range(dense_from, dense_from + len(vals))):
-            note(kind, f"{vals} is unique but not dense from {dense_from}")
+        # ZEROS ARE EXCLUDED from the uniqueness test. Zero is the "not numbered" sentinel in every
+        # one of these tables (40.6% of entries in real sessions), so zeros repeat BY DESIGN --
+        # `[1, 2, 0, 0, 3, 4, ...]` is a normal Pro Tools shape, not a defect. Counting them as
+        # repeats made this reject untouched real sessions, which is the same false-positive trap
+        # the 0x261C-C4 rule fell into. It is the NONZERO values that must be distinct.
+        nz = [v for v in vals if v]
+        if len(set(nz)) != len(nz):
+            err(kind, f"repeated values in {vals[:24]}")
+        elif dense_from is not None and nz != list(range(dense_from, dense_from + len(nz))):
+            note(kind, f"{vals[:24]} is unique but not dense from {dense_from}")
 
     check("0x2519-entry-ordinals",
           [int.from_bytes(data[p + len(n) + 18 : p + len(n) + 20], "little")

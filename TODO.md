@@ -31,6 +31,39 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## VALIDATOR CALIBRATED AGAINST REAL SESSIONS: 119 -> 2 FALSE POSITIVES (2026-07-25)
+
+`validate_pt_invariants` had never been checked against real third-party sessions -- only against
+`control_files`, where every rule looked perfect. Run over 120 UNTOUCHED real Pro Tools sessions it
+rejected **119 of them**. Files Pro Tools wrote and opens.
+
+Two causes, both the same mistake in different places:
+
+  * **`0x261C-C4` (119 sessions).** Demoted to `nonconforming`. Real sessions store ZERO in every
+    one of these slots (622/622), which is "repeated values" by definition; gating on all-zero still
+    left 102 failing because real sessions mix zeros with a few repeated non-zeros. Scanning EVERY
+    offset in a real `0x261C`'s own bytes found no per-track index anywhere (40 sessions, 0 hits) --
+    the index reading is synth-shaped only.
+  * **the shared uniqueness check (6 sessions).** It counted the ZERO SENTINEL as repeats.
+    `[1, 2, 0, 0, 3, 4, ...]` is a normal PT shape -- zeros repeat by design. Only the NONZERO
+    values must be distinct. Same trap, one layer down: the writer had already learned this for
+    `0x2519` and `0x251A`, but the validator had not.
+
+    120 untouched real sessions with an error-severity violation:  119  ->  2
+
+THE TWO SURVIVORS, both investigated:
+
+  * `0x2589-view-chains` -- "54 chains for 18 name entries" in one session. Not yet explained.
+  * `track-id-uniqueness` -- one save, `20220215 FIRST.bak.019.ptx`, shares range 3065. It is a
+    SINGLETON: bak.018 and bak.020 have the same 46 tracks and are clean, and 30 of the family's 31
+    saves are clean. A transient state in one save, not a Pro Tools convention -- so the rule stays
+    at ERROR, where 4/4 PT crash reports put it. (It does show PT can momentarily write a collision,
+    which is worth remembering if that specific file ever misbehaves.)
+
+LESSON, and it is the same one as the writer's: a rule measured only against our own control corpus
+says nothing about real sessions. Every "invariant" should be re-run over the real-session set
+before being trusted -- that set is what turned four separate over-strict rules into measured ones.
+
 ## RE-KEY CHURN ON REAL SESSIONS: 16543 -> 483 BYTES (2026-07-25)
 
 The `0x261C` C4 write and the `0x200B` churn were the SAME BUG, and it was structural, not semantic.
