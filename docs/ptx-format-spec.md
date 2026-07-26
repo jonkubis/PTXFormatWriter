@@ -113,6 +113,46 @@ to be containers, never inside leaves (strings, GUIDs, `0x1000`/`0x1017` records
 `0x0002` master index is the authority on which blocks are real; anything the walk finds that the
 index never references, and that sits within a leaf's declared payload, is a phantom.
 
+### The index-pointer block — a real block with no content_type
+
+The file's **first** block is a special case that no amount of grammar bounding fixes, because the
+block itself is genuine. Directly after the 20-byte header:
+
+```
++20   1   0x5A
++21   2   btype  = 0x0001
++23   4   size   = 4
++27   4   payload = absolute offset of the trailing 0x0002 master index (u32 LE)
+```
+
+Its declared size is **4**, so the generic frame reads the payload's low half as `content_type` —
+i.e. the low 16 bits of the index offset. That value is not a type at all, and it varies per
+session: across 243 control sessions it takes 200+ distinct values, each appearing a handful of
+times. It is 243/243 the lowest-offset block, and always `size == 4` (a genuine field, not a
+`0x5A` coincidence: a stray marker would give a wild size).
+
+**Consequence for tooling.** Any code that counts blocks by `content_type` can be fooled by this
+one, roughly 1 in 65 536 files per type of interest. It happened here: on a generated session the
+value landed on `0x261C`, the walk counted a fifth *track record* in a four-track session, and the
+name-table completeness guard refused a perfectly good file (`4 entries parsed for 5 track
+records`). Identify it exactly — lowest offset, `size == 4`, payload equal to the index start —
+and give it a `content_type` that cannot collide.
+
+### `2A 00 00 00` is both a GUID tag and the number 42
+
+Track-list entries store an 8-byte identity GUID after the tag `2A 00 00 00`. That tag is also
+simply how the `u32` value **42** is stored, so any field that happens to hold 42 spells it. The
+practical failure: track **42**'s own ordinal produces the tag, the eight bytes after it are
+ordinary neighbouring data rather than an id, and searching for that "GUID" finds it inside *every*
+track record. `Audio 42` therefore resolves to all 512 records in `512 mono tracks.ptx`, all 128 in
+`128 stereo tracks.ptx`, and so on in **every session with at least 42 tracks**.
+
+Skipping a known-bad offset does not fix this (the earlier case, where a block whose declared size
+is exactly 42 spells the tag in its own size field, *was* fixable that way). A tag-based GUID
+search must instead treat a multi-way match as **no match** and fall back to a positional rule.
+Genuine id sharing exists too: in `midi9.ptx` one seed occurs 18 times and lies inside two
+different track records.
+
 ---
 
 ## 4. Primitive encodings
@@ -723,6 +763,51 @@ tracks that have it and distinguishes **grow-path** provenance (present on synth
 **scaffold** provenance (zero on rows `0–7`) — independent of the final display row. A duplicate
 of a scaffold track therefore differs here from a fresh grown track; to reach byte-identity with a
 fresh session the writer regenerates the grow-path pattern (and pool) for the appended track.
+
+**5. Track SELECTION — user state, TWO flags, and a duplicate must not inherit them.** Each
+`0x2015` carries two binary per-track flags: one at **`zmark + 28`**, one at **`end - 4`**. `0x2015`
+is **1:1 with the track records, in track order, in 226/226** control sessions, and both columns are
+binary in 226/226.
+
+The `0x261C` → `0x200B` → `0x200A` → `0x2015` nest is one physical structure — each block starts 9
+bytes after its parent — so each flag is also `0x200A+37`/`0x200B+46` (head) and the same byte
+relative to those ends; a naive offset search reports each one four times.
+
+**Anchor the second flag to the block END.** `0x2015` is *not* fixed-length: 258, 277, 218, 210, 230
+and 212 all occur. On the 258-byte form the tail flag sits at `+254`, and quoting that number runs
+off the end of the four smaller forms — which reads as unrelated data and makes the field look like
+something else entirely. `end - 4` is binary at every size.
+
+Pro Tools' own mono ladder names the field outright:
+
+| session | `+28` per track |
+|---|---|
+| `1 mono tracks` | `[1]` |
+| `2 mono tracks` | `[1,1]` |
+| `3 mono tracks` | `[0,0,1]` |
+| `4 mono tracks` | `[0,0,0,1]` |
+| … | … |
+| `8 mono tracks` | `[0,0,0,0,0,0,0,1]` |
+
+— the just-created track, in **both** columns. Neither is a structural "is last" bit: `1..4 stereo
+tracks` have none set and `5 stereo tracks` has all five, which is what user-visible selection looks
+like after clicking away or Select All, and not what a derived field would ever do. The two columns
+do not always agree — `2 mono tracks` reads head `[1,1]` and tail `[1,0]`, `5 stereo tracks` reads
+head `[1,1,1,1,1]` and tail `[1,0,0,0,0]` — so they are related but distinct state (a selection set
+and its anchor is the natural reading, though which is which is **UNPROVEN**).
+
+A duplicate that byte-copies its source inherits both, leaving **two tracks selected** — which is
+what Pro Tools showed, verbatim: *"Both Audio 4 tracks are selected"*, our file reading `[0,0,0,1,1]`
+where PT's own 5-track session reads `[0,0,0,0,1]`.
+
+**Clearing only the head flag is not enough** — confirmed in Pro Tools, not inferred: a file whose
+head column read `[0,0,0,1,0]` still displayed both tracks selected, because the tail column still
+read `[0,0,0,1,1]`. PT's displayed selection follows at least the tail flag.
+
+Pro Tools' Duplicate Tracks *moves* the selection to the new track; a writer that wants
+`duplicate → remove` to stay byte-exact should instead only **clear** both flags on the copy, since
+removing the copy then removes the only bytes that changed, and "source selected, copy not" is a
+state PT itself writes.
 
 **Editing rule of thumb.** The numeric positional fields (1, 2) are **self-inverse under a
 slot re-key** — recomputing every field from its physical body slot works identically for add and

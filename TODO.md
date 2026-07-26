@@ -3,6 +3,76 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
+
+Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:
+
+> fixes it. Both "Audio 4" and "Audio 5" are selected, but otherwise everything is good and Pro
+> Tools doesn't crash on close.
+
+**The crash on close is gone.** That is the first duplicate this project has produced that Pro Tools
+opens, uses and closes cleanly. Which of the identity fixes did it is NOT established — the tested
+file carried all of them at once (fresh `0x261B` id range, wholly-hashed UUIDs, a free dense
+per-track index, and the head selection flag cleared). Do not attribute it to one of them in future
+notes without an isolating test.
+
+The residual selection display was a SECOND flag, and the verdict is what proved it: the tested file
+already had the head flag cleared (`[0,0,0,1,0]`) and Pro Tools still showed both tracks selected,
+so its displayed selection follows at least the tail flag at `0x2015 end-4`. Both are now cleared.
+
+That flag was in front of me and I misread it. I had found the column, seen it disagree with the
+head flag, and dismissed it as "the focused track" -- because I quoted it as `+254`, its offset in
+the 258-byte `0x2015`, and `0x2015` is not fixed-length (258, 277, 218, 210, 230, 212 all occur).
+At `+254` it reads past the end of four of those sizes and looks non-binary and unrelated. Anchored
+to the block END it is binary in 226/226 sessions. **A field near the end of a variable-length block
+must be anchored to the end** -- the same lesson the spec already records for `0x2010`'s trailing
+footer, re-learned the hard way.
+
+## THE SELECTION SYMPTOM IS NAMED, AND TWO WORSE DEFECTS FELL OUT OF LOOKING FOR IT (2026-07-26)
+
+Pro Tools' report was *"Both Audio 4 tracks are selected"*. That half of the symptom now has an
+exact cause, found by asking the ladder instead of guessing: each `0x2015` carries TWO binary
+per-track SELECTION flags, at `zmark + 28` and at `end - 4`. `1..8 mono tracks.ptx` reads `[1]`,
+`[1,1]`, `[0,0,1]`, `[0,0,0,1]` … — the just-created track, in both columns. Neither is a structural
+"is last" bit: `1..4 stereo` have none set and `5 stereo` has all five, which is a user's selection
+state, not a derived field. The columns do not always agree (`2 mono` reads head `[1,1]`, tail
+`[1,0]`), so they are related but distinct state — a selection set and its anchor is the natural
+reading, though which is which is UNPROVEN. Our duplicate read `[0,0,0,1,1]` in both where PT's own
+5-track session reads `[0,0,0,0,1]`.
+
+FIXED by clearing BOTH flags on the COPY only. Deliberately not PT's own behaviour — PT's Duplicate
+Tracks MOVES the selection to the new track — because rewriting the source would break the
+`duplicate -> remove` inverse, and "source selected, copy not" is a state PT itself writes.
+
+The copy could not be found by its fresh GUIDs (its `0x2015` carries none), so it is identified
+structurally: the added block is the one whose removal turns the post-edit run back into the
+pre-edit run byte for byte (`_added_block_index`).
+
+**Two defects found while verifying that, both worse than the one I was chasing:**
+
+**1. `2A 00 00 00` is the GUID tag AND the number 42.** Track 42's own ordinal spells the tag, and
+the 8 bytes after it — ordinary neighbours, not an id — are found inside EVERY track record. So
+`Audio 42` resolved to all 512 records in `512 mono tracks.ptx`, all 128 in `128 stereo tracks.ptx`,
+and so on in every session with >= 42 tracks. `duplicate_track` spliced the copy in once per match;
+`remove_track` would have deleted every matched track. 15 of 4458 corpus tracks were ambiguous
+(track 42 in 11 sessions, plus genuinely shared ids in `midi9`/`mixedmidi_9_mix3midi`, where one
+seed occurs 18 times and lies inside two records). FIXED: a multi-way match is treated as NO match
+and falls through to the positional rule, which resolves all 15. Note this is the same hazard as
+the already-skipped offset-3 size-field case, at a position no offset skip can reach.
+
+**2. The index-pointer block has no content_type.** The file's first block (offset 20, `size == 4`)
+stores the master-index offset in its payload, so the frame reads the low half of that offset as a
+type — a different session-specific value in every file. `_blocks_by_type` already skipped it
+locally (it once zeroed four header bytes); `_size_driven_blocks` did not, so on a generated session
+the value landed on `0x261C`, the walk counted a fifth TRACK RECORD in a four-track session, and the
+name-table guard refused a good file. FIXED at the source (`_raw_block_bounds` tags it `-1`), so
+every consumer is covered rather than each one re-learning it.
+
+REVERTED ALONG THE WAY: a plain dedup of `pl_ranges`. Every track record holds exactly two of the
+identity children (a `0x102D` and the `0x2619` nested inside it, 4458/4458), so a dedup looked
+obviously right — but it changed nothing on 226 sessions, because the real problem was two DIFFERENT
+records matching, not one record twice. Kept only as part of the ambiguity check above.
+
 ## 0x261C C4 — CONDITIONAL RENUMBER ATTEMPTED AND REVERTED (2026-07-25)
 
 The last big churn source. Our re-key writes `c4 = 0..k-1` over every `0x261C`, which is how all 213
@@ -783,6 +853,14 @@ File 01's block profile is identical to PT's own `5 mono tracks.ptx`.
     C_mixedkind/04_dup_multiple_track_types_no_cl.ptx   MIDI+audio, 3 -> 4
     C_mixedkind/05_rm_multiple_track_types_no_cl.ptx    MIDI+audio, 3 -> 2
     D_withclick/06_dup_multiple_track_types.ptx         click+MIDI+audio, 4 -> 5
+
+REGENERATED 2026-07-26, twice: first with the head-selection, ambiguous-GUID and index-pointer
+fixes -- that set is the one Pro Tools confirmed no longer crashes -- and again with the tail
+selection flag. Every file: `rc=0`, name entries == track records, zero id collisions, zero UUID
+collisions, and the copy is NOT selected in EITHER column (`01` now reads
+`sel_head=1/5 sel_tail=1/5`, matching PT's own `5 mono tracks.ptx`; before the tail fix the same
+file read `sel_tail=2/5`, which is exactly what PT displayed). All four duplicates round-trip
+byte-exact. `PTX_VERIFY_2026-07-24/` regenerated too.
 
 TODO NEXT: fix the SYNTH writer's next_kind so newly synthesized mixed sessions are valid, and
 regenerate the 10 broken controls (they are checked-in artifacts used as test inputs).

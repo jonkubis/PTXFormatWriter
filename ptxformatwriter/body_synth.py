@@ -2743,6 +2743,15 @@ def _raw_block_bounds(data: bytes, end0: int) -> "list[tuple[int, int, int]]":
                 ct = int.from_bytes(data[pos + 7 : pos + 9], "little")
                 end = (pos + 7) + size
                 if size > 0 and end <= hi:
+                    if size == 4 and int.from_bytes(data[pos + 7 : pos + 11], "little") == end0:
+                        # The index-POINTER block (the file's first, 4-byte payload). Its payload is
+                        # the absolute offset of the trailing 0x0002 index, so the generic framing
+                        # reads the low half of that offset as a content_type -- a value that varies
+                        # per session and is not a type at all. Reported as -1 so it can never be
+                        # mistaken for one: it collided with 0x261C on a generated session and was
+                        # counted as a fifth track record, which made the name-table guard refuse a
+                        # perfectly good file ("4 entries parsed for 5 track records").
+                        ct = -1
                     out.append((pos, end, ct))
                     descend(pos + 9, end)   # children begin after the ct word
                     pos = end
@@ -5961,7 +5970,16 @@ def remove_track(data: bytes, track_name: str) -> bytes:
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
-                ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
+    # EXACTLY ONE record, or nothing -- see duplicate_track's note. Here the stakes are higher: a
+    # seed that matched every record would have REMOVED every track. `Audio 42` in any session with
+    # at least 42 tracks matched all of them, because `2A 00 00 00` is both the GUID tag and the
+    # number 42.
+    pl_ranges = list(dict.fromkeys(pl_ranges))
+    if len(pl_ranges) == 1:
+        _pz, _pe = pl_ranges[0]
+        ident |= {zz for zz, _ee, _cc in bl if _pz <= zz < _pe}
+    else:
+        pl_ranges = []
     if not pl_ranges:
         # POSITIONAL FALLBACK -- the mirror of duplicate_track's. A track's display name (0x2519 /
         # 0x251A / 0x1014) can differ from the name its 0x102D -> 0x2619 record was created with,
@@ -6395,6 +6413,106 @@ def _give_copy_free_track_index(before: bytes, after: bytes, newg: "set[bytes]")
     return bytes(out)
 
 
+# The per-track SELECTION state, TWO binary flags in each 0x2015 -- one anchored to the block head,
+# one to its end. The 0x200B > 0x200A > 0x2015 nest is one physical structure (each block starts 9
+# bytes after its parent), so each byte is also +9/+18 against those, and 0x261C wraps the lot; a
+# naive offset search reports each flag four times.
+#
+# `0x2015` is NOT fixed-length (258, 277, 218, 210, 230 and 212 bytes all occur), which is what makes
+# the second flag easy to get wrong: on the 258-byte form it sits at +254, and quoting that number
+# runs off the end of the four smaller forms. Anchored to the END it is binary in 226/226 sessions at
+# every size. Anchoring it by its head offset instead is what made it look like a different field.
+_SELECTED_SITES = (("head", 28), ("tail", 4))
+
+
+def _selection_flag_offsets(data: bytes) -> "list[tuple[str, int]]":
+    """The `(anchor, delta)` sites in each `0x2015` holding this session's per-track SELECTION
+    flags -- `("head", d)` meaning `zmark + d`, `("tail", d)` meaning `end - d` -- or `[]` if the
+    session does not match the signature, in which case nothing is written.
+
+    Pro Tools' own ladders name this field. `0x2015` is 1:1 with the track records, in track order,
+    in 226/226 control sessions, and across `1..8 mono tracks` the flag reads::
+
+        1 mono [1]            5 mono [0,0,0,0,1]
+        2 mono [1,1]          6 mono [0,0,0,0,0,1]
+        3 mono [0,0,1]        7 mono [0,0,0,0,0,0,1]
+        4 mono [0,0,0,1]      8 mono [0,0,0,0,0,0,0,1]
+
+    -- the just-created track. Neither is a structural "is last" bit: `1..4 stereo tracks` have NONE
+    set and `5 stereo tracks` has ALL five, which is what a user-visible selection looks like after
+    clicking away or Select All, and not what a derived field would ever do.
+
+    A duplicate inherited both, so two tracks were flagged -- reported back from Pro Tools verbatim:
+    "Both Audio 4 tracks are selected". Clearing only the head flag was NOT enough: Pro Tools still
+    displayed both tracks selected on a file whose head column read `[0,0,0,1,0]`, so its on-screen
+    selection follows at least the tail flag. Both are cleared.
+
+    Each site is confirmed against `data` before use rather than trusted: the column must be binary
+    across every `0x2015` and at least one track must be flagged, or there is nothing to clear.
+    Offsets remembered from the control corpus and applied blind are what caused several defects
+    here, so a site that does not match is dropped and a session that matches neither is untouched.
+    """
+    blks = [(z, e) for z, e, c in _size_driven_blocks(data) if c == 0x2015]
+    if not blks:
+        return []
+    span = min(e - z for z, e in blks)
+    sites = []
+    for anchor, delta in _SELECTED_SITES:
+        if delta >= span:
+            continue
+        col = [data[(z + delta) if anchor == "head" else (e - delta)] for z, e in blks]
+        if set(col) - {0, 1} or not any(col):
+            continue
+        sites.append((anchor, delta))
+    return sites
+
+
+def _added_block_index(before: bytes, after: bytes, ctype: int) -> "int | None":
+    """Index of the one `ctype` block a track-add INSERTED, or `None` if that cannot be pinned down.
+
+    Found by deletion: the added block is the one whose removal turns the post-edit run back into
+    the pre-edit run byte for byte. No offsets and no GUIDs are involved -- the copy's `0x2015` does
+    not contain the fresh per-channel GUIDs that identify its `0x261B` and `0x261C`, so the route
+    used for those identity fixes cannot reach it.
+
+    When the copy is still byte-identical to its source both positions qualify; the LATER one is
+    returned, because a copy is inserted immediately after the track it was made from.
+    """
+    pre = [bytes(before[z:e]) for z, e, c in _size_driven_blocks(before) if c == ctype]
+    post = [bytes(after[z:e]) for z, e, c in _size_driven_blocks(after) if c == ctype]
+    if len(post) != len(pre) + 1:
+        return None
+    hits = [i for i in range(len(post)) if post[:i] + post[i + 1 :] == pre]
+    return hits[-1] if hits else None
+
+
+def _deselect_copied_track(before: bytes, after: bytes, newg: "set[bytes]") -> bytes:
+    """Clear the SELECTION flag on the copy, so a duplicate of a selected track does not come back
+    with two tracks selected.
+
+    Only the copy's bytes change -- as with its `0x261B` id range, its UUIDs and its dense index --
+    which keeps `duplicate -> remove` an exact inverse, since removing the copy removes the only
+    bytes that were written.
+
+    Pro Tools' own Duplicate Tracks instead MOVES the selection to the new track. That is not done
+    here: it would rewrite a surviving track, and `remove_track` cannot restore a bit it never saw.
+    Leaving the source selected and the copy not is a state Pro Tools itself writes -- the stereo
+    ladder saves sessions with any subset flagged, including none.
+    """
+    sites = _selection_flag_offsets(before)
+    idx = _added_block_index(before, after, 0x2015)
+    if not sites or idx is None:
+        return after
+    blks = [(z, e) for z, e, c in _size_driven_blocks(after) if c == 0x2015]
+    z, e = blks[idx]
+    out = bytearray(after)
+    for anchor, delta in sites:
+        p = (z + delta) if anchor == "head" else (e - delta)
+        if z <= p < e:
+            out[p] = 0
+    return bytes(out)
+
+
 def _renumber_dense_track_indices(before: bytes, after: bytes) -> bytes:
     """Re-densify the per-track indices that a track add/remove left duplicated or gapped.
 
@@ -6539,7 +6657,29 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
             if cs:
                 pz, pe = max(cs)
                 pl_ranges.append((pz, pe))
-                ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
+    # EXACTLY ONE record, or this route has identified nothing. The seeded GUID is not always
+    # unique, in two distinct ways, and acting on a multi-way match splices the copy in once per
+    # match:
+    #
+    #   * `2A 00 00 00` is the GUID TAG, so it is also how the number 42 is stored. Track 42's own
+    #     ordinal spells the tag, and the 8 bytes after it -- ordinary neighbouring data, not an id
+    #     -- are read as its GUID and found inside EVERY track record. `Audio 42` resolves to all
+    #     512 records in `512 mono tracks.ptx`, all 100 in `100 stereo tracks.ptx`, and so on for
+    #     every session with at least 42 tracks. (The size-field case at offset 3 was already
+    #     skipped; this is the same hazard at a different position, and cannot be fixed by skipping
+    #     an offset.)
+    #   * genuinely shared ids: in `midi9.ptx` MIDI 9's seed occurs 18 times and sits inside MIDI 2's
+    #     record too. The copy went in twice -- 11 records for 10 name entries -- and the result
+    #     could then not be edited at all, the name-table guard (correctly) refusing it.
+    #
+    # 15 of 4458 tracks across the control corpus are ambiguous this way. Falling through to the
+    # positional rule resolves all 15; the 4443 that already resolve uniquely are unaffected.
+    pl_ranges = list(dict.fromkeys(pl_ranges))
+    if len(pl_ranges) == 1:
+        _pz, _pe = pl_ranges[0]
+        ident |= {zz for zz, _ee, _cc in bl if _pz <= zz < _pe}
+    else:
+        pl_ranges = []
     if not pl_ranges:
         # POSITIONAL FALLBACK. A track has TWO names and they need not agree: the display name lives
         # in 0x2519/0x251A/0x1014, while the per-track record's 0x102D -> 0x2619 keeps the name the
@@ -6901,6 +7041,10 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # equals a fresh synthesize(N+1), and rewriting UUIDs there breaks that equivalence.
     if not _do_renumber:
         out = _give_copy_free_track_index(data, out, set(gmap.values()))
+        # ...and the copy must not inherit the source's SELECTION flag. Pro Tools reported the copy
+        # and its source selected together; ours read [0,0,0,1,1] where PT's own 5-track session
+        # reads [0,0,0,0,1].
+        out = _deselect_copied_track(data, out, set(gmap.values()))
         # NOT densifying ALL blocks (only the copy is touched above). `_renumber_dense_track_indices` finds them
         # correctly (0x2015+154, 0x200A+163, 0x261C+1298/+1304 in the mono ladder, located by the
         # dense-sequence property rather than by remembered offsets), but renumbering them touches

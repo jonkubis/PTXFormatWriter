@@ -2494,6 +2494,140 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertEqual(BS.rename_track(renamed, src + " with a longer name", src), data,
                          msg="rename must round-trip byte-exact")
 
+    def test_index_pointer_block_is_never_mistaken_for_a_content_type(self):
+        """The file's first block (offset 20, `size == 4`) stores the master-index offset in its
+        payload, so the generic frame reads the low half of that offset as a content_type.
+
+        It is a real block, so no grammar bound removes it, and its "type" is a different
+        session-specific value in every file. On a generated session it landed on `0x261C` and the
+        walk counted a fifth TRACK RECORD in a four-track session -- the name-table guard then
+        refused a perfectly good file. Tagged -1 at the source so no consumer can be fooled.
+        """
+        seen = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if "Backups" in str(path):
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            bl = BS._size_driven_blocks(data)
+            if not bl:
+                continue
+            seen += 1
+            first = min(bl)
+            self.assertEqual(first[0], 20, msg=f"{path.name}: first block is not at offset 20")
+            self.assertEqual(first[2], -1, msg=f"{path.name}: index-pointer block reported a type")
+            self.assertNotIn(-1, {c for z, _e, c in bl if z != 20},
+                             msg="only the index-pointer block may carry the sentinel")
+        self.assertGreater(seen, 100, "control corpus not found -- the sweep proved nothing")
+
+    def test_a_track_whose_guid_is_ambiguous_still_resolves_to_one_record(self):
+        """`2A 00 00 00` is the identity-GUID tag AND the number 42, so track 42's own ordinal
+        spells the tag and the bytes after it -- ordinary neighbours, not an id -- are found inside
+        EVERY track record. `Audio 42` matched all 512 records in `512 mono tracks.ptx`.
+
+        Duplicating it spliced the copy in once per match; removing it would have deleted every
+        matched track. Both editors must treat a multi-way match as no match and fall back to the
+        positional rule.
+        """
+        checked = 0
+        for path in (BIG_MONO, CONTROL_DIR / "99 stereo tracks.ptx",
+                     CONTROL_DIR / "100 stereo tracks.ptx", ROOT / "control_files" / "midi9.ptx"):
+            if not path.exists():
+                continue
+            data = _load_path(path)
+            bl = BS._size_driven_blocks(data)
+            nt = [(z, e) for z, e, c in bl if c == 0x2519]
+            names = [n for n, _p in BS._inline_name_entries(data, nt[0][0], nt[0][1], bl)]
+            n_rec = sum(1 for _z, _e, c in bl if c in BS._TRACK_RECORD_TYPES)
+            for victim in ("Audio 42", "MIDI 9"):
+                if victim not in names:
+                    continue
+                checked += 1
+                with self.subTest(session=path.name, track=victim):
+                    dup = BS.duplicate_track(data, victim, "ZZ Probe")
+                    self.assertEqual(
+                        sum(1 for _z, _e, c in BS._size_driven_blocks(dup)
+                            if c in BS._TRACK_RECORD_TYPES), n_rec + 1,
+                        msg="a duplicate must add exactly ONE track record")
+                    self.assertEqual(BS.remove_track(dup, "ZZ Probe"), data,
+                                     msg="duplicate->remove must invert byte-exact")
+                    self.assertEqual(
+                        sum(1 for _z, _e, c in BS._size_driven_blocks(BS.remove_track(data, victim))
+                            if c in BS._TRACK_RECORD_TYPES), n_rec - 1,
+                        msg="a remove must drop exactly ONE track record")
+        self.assertGreater(checked, 0, "no ambiguous-GUID control present -- proved nothing")
+
+    def test_a_duplicate_does_not_come_back_with_two_tracks_selected(self):
+        """Each `0x2015` carries TWO per-track selection flags -- one at `zmark + 28`, one at
+        `end - 4` -- and a byte-copied duplicate inherited both. Pro Tools reported it verbatim:
+        "Both Audio 4 tracks are selected".
+
+        BOTH must be cleared. Clearing only the head flag was confirmed insufficient: Pro Tools
+        still displayed two selected tracks on a file whose head column read `[0,0,0,1,0]` while the
+        tail column still read `[0,0,0,1,1]`.
+
+        `0x2015` is not fixed-length, so the second flag has to be anchored to the block END --
+        quoting its 258-byte-form offset (`+254`) runs off the end of the 210/212/218/230-byte forms
+        and makes it look like a different field. Only the COPY is cleared, never the source, so
+        `duplicate -> remove` stays an exact inverse.
+        """
+        def flags(d):
+            bs = [(z, e) for z, e, c in BS._size_driven_blocks(d) if c == 0x2015]
+            return [d[z + 28] for z, _e in bs], [d[e - 4] for _z, e in bs]
+
+        checked = 0
+        for n in range(1, 8):
+            src_path = MONO_DIR / f"{n} mono tracks.ptx"
+            if not src_path.exists():
+                continue
+            data = _load_path(src_path)
+            bl = BS._size_driven_blocks(data)
+            nt = [(z, e) for z, e, c in bl if c == 0x2519]
+            names = [nm for nm, _p in BS._inline_name_entries(data, nt[0][0], nt[0][1], bl)]
+            checked += 1
+            with self.subTest(n=n):
+                dup = BS.duplicate_track(data, names[-1], f"Audio {n + 1}")
+                for got, was, site in zip(flags(dup), flags(data), ("head+28", "end-4")):
+                    self.assertEqual(len(got), len(was) + 1,
+                                     msg="0x2015 is 1:1 with tracks")
+                    self.assertEqual(sum(got), sum(was),
+                                     msg=f"{site}: the copy must not add a selected track")
+                    self.assertEqual(got[-1], 0, msg=f"{site}: the copy must not be selected")
+                    self.assertEqual(got[:-1], was,
+                                     msg=f"{site}: no surviving track's selection may change")
+                self.assertEqual(BS.remove_track(dup, f"Audio {n + 1}"), data,
+                                 msg="clearing the flags must not break the inverse")
+        self.assertGreaterEqual(checked, 4, "mono ladder not found -- the sweep proved nothing")
+
+    def test_both_selection_flags_are_binary_across_the_corpus(self):
+        """Both sites must be real fields, not offsets that happen to work on the ladder.
+
+        `0x2015` occurs at six sizes (258, 277, 218, 210, 230, 212). Anchored as `zmark + 28` and
+        `end - 4`, both columns are binary in every session -- which is what justifies writing them.
+        Anchoring the second by its 258-byte-form head offset instead reads past the end of four of
+        those sizes, and that misreading is why it was first dismissed as an unrelated field.
+        """
+        seen = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if "Backups" in str(path):
+                continue
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            bs = [(z, e) for z, e, c in BS._size_driven_blocks(data) if c == 0x2015]
+            if not bs:
+                continue
+            seen += 1
+            with self.subTest(session=path.name):
+                self.assertLessEqual({data[z + 28] for z, _e in bs}, {0, 1},
+                                     msg="head flag is not binary")
+                self.assertLessEqual({data[e - 4] for _z, e in bs}, {0, 1},
+                                     msg="tail flag is not binary")
+        self.assertGreater(seen, 100, "control corpus not found -- the sweep proved nothing")
+
 
 if __name__ == "__main__":
     unittest.main()
