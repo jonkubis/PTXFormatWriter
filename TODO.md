@@ -211,6 +211,16 @@ measures the string anywhere in the body -- in paths, region names, other blocks
 block whose NAME FIELD is `2nd takes`. The block-level enumeration above is the right measurement and
 confirms the original result. Lesson: a substring count is not a block census.
 
+CONTAINER ARITHMETIC IS NOT THE CAUSE (checked): the enclosing `0x1015` grows by exactly the copy's
+span -- 45 for the longer name, 44 for the same-length name -- in both cases. And the cleanest single
+statement of the defect comes from that same check:
+
+    0x1014 count:  orig 57  ->  dup 57      for BOTH name lengths
+
+**Adding a track does not increase the `0x1014` count.** The copy is added and one existing block is
+consumed, which is the same fact as `2nd takes` vanishing. Any correct fix must make that count go
+57 -> 58; that is the one-line regression test to write first.
+
 NEXT: find why the insertion offset for the copy's `0x1014` lands inside the following block rather
 than at its start. `Audio 8` (the source) sits at 221926..221970 and `2nd takes` begins exactly at
 221970, so the copy is being placed at the source unit's END -- which is correct in principle, and
