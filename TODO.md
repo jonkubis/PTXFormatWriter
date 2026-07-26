@@ -54,8 +54,26 @@ the FALSE-GUID hazard again, at a position my fix does not cover: `guids_in` sca
 container's bytes, so a `2a 00 00 00` at the END of one block makes the NEXT block's header look
 like the 8 bytes following a tag. Skipping offset 3 only catches the size-field case.
 
-That is a hypothesis, not a conclusion -- unlike the size-42 case I have not yet confirmed a tag
-sits immediately before this block. Confirm that before changing anything.
+**THAT HYPOTHESIS IS ALSO REFUTED.** There is no `2a 00 00 00` at `z-4`. The nearest preceding tag
+is at `z-13` and the 8 bytes after it are a genuine GUID (`7cff58e0c960dcce`) that ends two bytes
+before the block. The header is not being rewritten as a GUID.
+
+FIVE WRITERS ELIMINATED BY INSTRUMENTATION, not by argument:
+
+    container grow/shrink pass ....... never fires near this block, in either editor
+    the re-key's su16 / su32 ......... never writes in 221900..222100
+    all 12 post-splice passes ........ each wrapped to report a change at 221976:221978;
+                                       none of them reports one
+    a preceding GUID tag ............. absent (nearest is at z-13, and it is a real GUID)
+    the size-42 false-GUID case ...... this block's size is 39/40, not 42
+
+Yet the emitted file differs there (`00 14` -> `40 00`). By elimination the write happens in the
+BODY ASSEMBLY itself -- the slice/splice loop that concatenates `data[prev:at]` with each insert --
+so a range boundary is a couple of bytes off for this session. Lengths still match exactly, which
+rules out a plain shift.
+
+That is where the next session should instrument: log every `(prev, at)` pair the assembly emits and
+find the one whose boundary lands inside this block.
 
 **Symptom B -- `AttributeError` on 3 of 40 sampled sessions.** `final_index_ref` walks TOP-LEVEL
 blocks by declared size and requires them to be CONTIGUOUS; it returns None the moment one size is
