@@ -5587,11 +5587,17 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     # nonconforming -- `mixedmidi_reorder_*` and `midi9` repeat them and PT opens them fine.
     chains = sorted(int.from_bytes(data[z + 9 : z + 11], "little")
                     for z, _e in by.get(0x2589, []))
+    # Counted against TRACK RECORDS, not name-table entries. Measured over 120 real sessions the
+    # chain count is either 0 (absent -- 58 sessions) or exactly the track-record count (62), with
+    # no other value: 120/120. Comparing it to the name-entry count only ever worked because the
+    # two usually coincide, and it rejected a real session with 18 entries but 54 tracks and 54
+    # chains -- a file Pro Tools opens.
+    _n_trk = sum(1 for _z, _e, _c in bl if _c in _TRACK_RECORD_TYPES)
     if chains:
-        if len(chains) != n_ents:
-            err("0x2589-view-chains", f"{len(chains)} chains for {n_ents} name entries")
-        elif chains != list(range(n_ents)):
-            note("0x2589-view-chains", f"{chains} is not a clean permutation of range({n_ents})")
+        if len(chains) != _n_trk:
+            err("0x2589-view-chains", f"{len(chains)} chains for {_n_trk} track records")
+        elif sorted(chains) != list(range(len(chains))):
+            note("0x2589-view-chains", f"{chains[:16]} is not a permutation of range({len(chains)})")
 
     # DEMOTED to `nonconforming` (2026-07-25). As an ERROR this rejected 119 of 120 UNTOUCHED real
     # Pro Tools sessions -- files PT wrote and opens. Real sessions store ZERO in these slots (622

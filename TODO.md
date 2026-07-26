@@ -53,7 +53,17 @@ Two causes, both the same mistake in different places:
 
 THE TWO SURVIVORS, both investigated:
 
-  * `0x2589-view-chains` -- "54 chains for 18 name entries" in one session. Not yet explained.
+  * `0x2589-view-chains` -- SOLVED. The rule counted chains against NAME-TABLE ENTRIES; it should
+    count TRACK RECORDS. Measured over 120 real sessions the chain count is either 0 (absent, 58
+    sessions) or exactly the track-record count (62) -- **120/120, no other value**. The two counts
+    usually coincide, which is why the rule survived; the session that exposed it has 18 name
+    entries but 54 tracks and 54 chains, and Pro Tools opens it. Chains are also OPTIONAL: 58 of 120
+    real sessions have none at all, so their absence is not a defect.
+
+    SEPARATE OPEN ITEM found alongside it: that session's name table yields only 18 entries for 54
+    track records. Every other session of the 120 has entries >= tracks. Either the session really
+    does name a subset, or `_inline_name_entries` stops early there -- a possible READER bug worth
+    checking before trusting entry counts on unusual sessions.
   * `track-id-uniqueness` -- one save, `20220215 FIRST.bak.019.ptx`, shares range 3065. It is a
     SINGLETON: bak.018 and bak.020 have the same 46 tracks and are clean, and 30 of the family's 31
     saves are clean. A transient state in one save, not a Pro Tools convention -- so the rule stays
