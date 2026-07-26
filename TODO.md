@@ -62,6 +62,30 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
+## A THIRD OF THE "PT ORACLE" IS OUR OWN OUTPUT (2026-07-26)
+
+`control_files` has been the Pro Tools oracle for this entire project. **94 of its 282 sessions are
+not Pro Tools saves.** A session records its own `.ptx` filename in the `0x2067` save-lineage block;
+a donor-transplanted session keeps the DONOR's name there. Comparing the two:
+
+    188  self-consistent (genuine PT saves)
+     85  records a donor that IS still in the corpus   -- unambiguously our output
+      5  records a donor no longer present             -- SYNTH_*, also ours
+      4  near-identical name                           -- genuine PT sessions RENAMED on disk
+
+So ~90 of 282 are ours. The 4 renames are why the sharper test (`session_is_probably_ours`) requires
+the donor to be PRESENT, not merely to differ: `2 stereo plus click on top.ptx` records
+`2 stereo click on top.ptx` and is a perfectly good PT file.
+
+**Any figure ever quoted here as "n/n on PT-authored controls" that did not exclude these is partly
+circular.** That includes several in this file. It also explains the earlier finding that 10
+controls fail the `next_kind` chain and the `0x2015` ordinal invariant -- those 10 are a subset of
+these ~90, and the two invariants were partitioning by provenance all along.
+
+Shipped as `session_self_name()` / `session_is_probably_ours()` with
+`test_a_third_of_the_control_corpus_is_our_own_output`, so a future sweep can filter rather than
+rediscover this. USE IT before quoting any oracle statistic.
+
 ## THE 0x2015 ORDINAL IS A PLAYLIST INDEX — and I got it wrong once myself (2026-07-26)
 
 `value[i] = 1 + (playlists owned by tracks before i)` — the 1-based position of the track's FIRST

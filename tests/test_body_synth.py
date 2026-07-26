@@ -2672,5 +2672,42 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(checked, 50, "control corpus not found -- the sweep proved nothing")
 
 
+    def test_a_third_of_the_control_corpus_is_our_own_output(self):
+        """`control_files` has been used as a Pro Tools oracle for this whole project. It is not
+        entirely one: 94 of its 282 sessions record a DIFFERENT `.ptx` name in their `0x2067`
+        save-lineage block than the name on disk, because a donor-transplanted session keeps the
+        DONOR's name there.
+
+        85 of those name a donor that is still in the corpus -- unambiguously our output. Only 4 are
+        genuine Pro Tools sessions renamed on disk, which is why the sharper test requires the donor
+        to be PRESENT rather than merely differing.
+
+        This is pinned because the consequence is easy to forget: any figure quoted as "n/n on
+        PT-authored controls" that did not exclude these is partly circular.
+        """
+        paths = sorted(ROOT.glob("control_files/**/*.ptx"))
+        self.assertGreater(len(paths), 200, "control corpus not found -- proved nothing")
+        siblings = {q.name for q in paths}
+        ours, mismatched = 0, 0
+        for path in paths:
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            recorded = BS.session_self_name(data)
+            self.assertIsNotNone(recorded, msg=f"{path.name}: no 0x2067 self-name")
+            if recorded != path.name:
+                mismatched += 1
+            if BS.session_is_probably_ours(data, path, siblings):
+                ours += 1
+        self.assertGreater(mismatched, 50,
+                           msg="the self-name check found almost nothing -- it has probably broken")
+        self.assertGreater(ours, 50,
+                           msg="the donor-present check found almost nothing -- it has probably broken")
+        self.assertLess(ours, mismatched,
+                        msg="donor-present must be STRICTLY narrower than name-differs; if they are "
+                            "equal the renamed-PT-session cases are being misclassified as ours")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3886,6 +3886,70 @@ def _index_offset_holes(data: bytes) -> "tuple[list[tuple[int, int]], set[int]]"
     return holes, zmarks
 
 
+def session_self_name(data: bytes) -> "str | None":
+    """The `.ptx` filename the session records for ITSELF, from its `0x2067` save-lineage block.
+
+    Read as a length-prefixed string (`u32 len` immediately before the bytes) so it does not depend
+    on an offset -- `0x2067` has over a hundred distinct sizes across the corpus.
+
+    WHY THIS MATTERS: a donor-transplanted session keeps the DONOR's name here, so comparing this
+    against the name on disk separates files Pro Tools wrote from files THIS PROJECT wrote. That
+    partition was badly needed: of the 282 sessions in `control_files`, which the whole project has
+    treated as a Pro Tools oracle, **94 disagree** -- 85 of them naming a donor that is still in the
+    corpus, plus 5 more naming a donor that is not. Roughly a third of the "PT-authored" control set
+    is our own output, and any statistic quoted as "n/n on PT-authored controls" that did not
+    exclude them is partly circular.
+
+    It is NOT a pure provenance test on its own: a genuine Pro Tools session renamed on disk, or
+    produced by Save As, also disagrees. Four of the 94 are exactly that (`2 stereo plus click on
+    top.ptx` recording `2 stereo click on top.ptx`). Use `session_is_probably_ours` for the sharper
+    test, which additionally requires the recorded donor to exist in the same directory tree.
+    """
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x2067:
+            continue
+        blk = data[z:e]
+        k = 0
+        while True:
+            k = blk.find(b".ptx", k)
+            if k < 0:
+                return None
+            for ln in range(4, 120):
+                st = k + 4 - ln
+                if st < 4:
+                    continue
+                if int.from_bytes(blk[st - 4 : st], "little") != ln:
+                    continue
+                s = blk[st : st + ln]
+                if s.endswith(b".ptx") and all(32 <= b < 127 for b in s):
+                    return s.decode("latin1")
+            k += 1
+    return None
+
+
+def session_is_probably_ours(data: bytes, path, siblings=None) -> bool:
+    """True when this file looks like OUR donor-transplant output rather than a Pro Tools save.
+
+    The test: the name in `0x2067` differs from the file's own name AND names a file that exists
+    alongside it -- i.e. the donor is right there. Requiring the donor to be present is what keeps a
+    merely-renamed Pro Tools session from being misread as ours; on `control_files` that separates
+    85 transplants from 4 renames, where the name check alone flags all 89 together.
+
+    `siblings` is the set of filenames to consider (defaults to every `.ptx` beside `path`).
+    """
+    import pathlib
+    p = pathlib.Path(path)
+    recorded = session_self_name(data)
+    if recorded is None or recorded == p.name:
+        return False
+    if siblings is None:
+        root = p.parent
+        while root.parent != root and root.name not in ("control_files",):
+            root = root.parent
+        siblings = {q.name for q in root.rglob("*.ptx")}
+    return recorded in siblings
+
+
 def region_names(data: bytes) -> "list[tuple[int, str]]":
     """Every audio REGION's name, as ``(region_zmark, name)`` in file order. An audio
     region record (content_type 0x2628) frames as
