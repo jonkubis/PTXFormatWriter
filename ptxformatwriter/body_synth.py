@@ -6327,6 +6327,53 @@ def _reuuid_copied_track(data: bytes, zb: int, eb: int) -> bytes:
     return bytes(out)
 
 
+def _dense_index_offsets(data: bytes, ctype: int) -> "list[tuple[int, int]]":
+    """Byte offsets inside every block of `ctype` whose values across those blocks form a DENSE
+    per-track index -- `0..N-1` or `1..N` -- returned as `(offset, base)`.
+
+    Found by the property, not by a remembered position. Pro Tools' own mono ladder carries such an
+    index at `0x2015 + 154` and `0x200A + 163` (1..N) and at `0x261C + 1298` and `+1304` (0..N-1),
+    but those numbers are artefacts of that layout; a real session need not match them, and hard
+    offsets taken from the control corpus are exactly what caused several defects here.
+
+    A duplicate leaves two tracks sharing the source's value, which Pro Tools resolves as one track.
+    Only offsets that are ALREADY dense are renumbered, so a session that does not use the
+    convention is left alone.
+    """
+    blks = [(z, e) for z, e, c in _size_driven_blocks(data) if c == ctype]
+    n = len(blks)
+    if n < 3:
+        return []
+    span = min(e - z for z, e in blks)
+    out = []
+    for off in range(9, span):
+        vals = [data[z + off] for z, e in blks]
+        if vals == list(range(n)):
+            out.append((off, 0))
+        elif vals == list(range(1, n + 1)):
+            out.append((off, 1))
+    return out
+
+
+def _renumber_dense_track_indices(before: bytes, after: bytes) -> bytes:
+    """Re-densify the per-track indices that a track add/remove left duplicated or gapped.
+
+    `before` is the pre-edit session, used only to decide WHICH offsets the session actually uses as
+    a dense index; `after` is rewritten. Doing it this way means a copy no longer shares its
+    source's index, and no session that lacks the convention is touched.
+    """
+    out = bytearray(after)
+    for ctype in (0x2015, 0x200A, 0x200B, 0x261C):
+        for off, base in _dense_index_offsets(before, ctype):
+            blks = [(z, e) for z, e, c in _size_driven_blocks(bytes(out)) if c == ctype]
+            if len({z for z, _e in blks}) != len(blks):
+                continue
+            for i, (z, e) in enumerate(blks):
+                if z + off < e:
+                    out[z + off] = (base + i) & 0xFF
+    return bytes(out)
+
+
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
     `remove_track`, validated by round-trip byte-identity (`duplicate_track` then
@@ -6813,6 +6860,13 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # Off-synth only, like the id remap: the synth path renumbers positionally so a grown session
     # equals a fresh synthesize(N+1), and rewriting UUIDs there breaks that equivalence.
     if not _do_renumber:
+        # NOT densifying the per-track index fields here. `_renumber_dense_track_indices` finds them
+        # correctly (0x2015+154, 0x200A+163, 0x261C+1298/+1304 in the mono ladder, located by the
+        # dense-sequence property rather than by remembered offsets), but renumbering them touches
+        # SURVIVING tracks, and remove_track does not undo that -- it broke the duplicate->remove
+        # inverse on three tests, the same way the post-hoc 0x2519 ordinal renumber did. The helper
+        # is kept because the analysis is right; what is missing is giving the COPY a free index
+        # without renumbering its neighbours.
         _newg3 = set(gmap.values())
         for _z3, _e3, _c3 in _size_driven_blocks(out):
             if _c3 == 0x261B and any(_g in out[_z3:_e3] for _g in _newg3):
