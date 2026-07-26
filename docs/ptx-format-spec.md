@@ -3084,6 +3084,30 @@ The check is `entries < track records`, which is `False` on 249/250 real session
 control, so it costs nothing elsewhere. **It is a symptom test, not a fix** — the walk itself still
 needs to learn to resume after a child block.
 
+### `0x2619`/`0x102D` can hold a DIFFERENT name from the display name
+
+A track has two names, and they need not agree. The user-visible name lives in the `0x2519` table
+(and in `0x251A` lanes and the `0x1014` track-list entry); the per-track record's `0x102D` → `0x2619`
+carries what looks like the name the track was CREATED with:
+
+```
+0x2519 / 0x251A / 0x1014 :  'Kick In', 'Snare Top', 'Hat', ...
+0x102D / 0x2619          :  'Audio 2',  'Audio 4',  ...
+```
+
+i.e. these tracks were renamed in Pro Tools and only the first set followed the rename. In the same
+family the `0x102D`/`0x2619` records contain **no GUID at all**, so there is nothing to bridge the
+two names.
+
+**Consequence for editing:** `duplicate_track` locates a track by searching for its name, seeding
+GUIDs from the hits, and finding the `0x102D`/`0x2619` that carries one. On such a session both
+routes fail — the name is absent from those records and so is any GUID — so `pl_ranges` is empty and
+the edit is refused with "cannot locate track". Measured: **36 of 250** sessions in one corpus
+(`* Multi-Drums.ptx`, `* Full Stereo.ptx`); the refusal is safe, but the family cannot be edited.
+
+Anything that assumes the display name appears in the per-track record is wrong. A correct
+implementation has to link the `0x2519` entry to its `0x261C` by position or ordinal, not by name.
+
 ### The SIX per-track record types — one table
 
 All are siblings under the single top-level `0x2624` track-definitions container. The "three track

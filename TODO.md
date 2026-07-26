@@ -287,11 +287,18 @@ with a complete-looking block set: `0x1014` x12, `0x102D` x12, `0x2619` x12, `0x
 `0x251A` lanes, AND in a `0x1014` (z=41657, namelen 7). Yet `pl_ranges` comes out EMPTY for every
 track, so `duplicate_track` refuses at the "cannot locate" guard.
 
-`pl_ranges` is built from `0x102D`/`0x2619` blocks containing a GUID seeded from the
-`0x1014`/`0x1057`/`0x251A`/`0x210B` hits. So the seeded GUIDs do not match this session's
-`0x102D`/`0x2619` contents -- the same class as the note already in the code that "a MIDI 0x1057's
-GUID differs from its identity GUID". Note this family has **`0x210B` x0**, where every previously
-swept session had one per track; that is the obvious structural difference to start from.
+**CAUSE FOUND: the track has TWO NAMES and they disagree.** The `0x102D`/`0x2619` records in this
+family read `Audio 2`, `Audio 4`, ... while the display name in `0x2519`/`0x251A`/`0x1014` is
+`Kick In`, `Snare Top`, ... -- the tracks were RENAMED in Pro Tools and only the second set followed.
+Those same records carry **no GUID at all**, so neither of `duplicate_track`'s two routes to
+`pl_ranges` can work: it searches for the display name (absent there) and seeds GUIDs (absent too).
+
+Documented in the spec under "0x2619/0x102D can hold a DIFFERENT name from the display name".
+
+THE FIX is not a patch to the search: a correct implementation must link the `0x2519` entry to its
+`0x261C` record by POSITION or ORDINAL rather than by name or GUID. That is a real change to how
+every editor identifies a track, so it wants its own session and its own test (the 36 affected
+sessions are the fixture).
 
 The failure is SAFE (a refusal, not corruption) but it means `duplicate_track` cannot edit this
 session family at all.
