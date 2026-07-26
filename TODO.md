@@ -55,10 +55,21 @@ above; it is NOT a phantom-bound problem any more.
 
 ### 2. `20230208 GENE DEAD AND GONE.ptx` — the copy is not findable afterwards
 
-`remove_track('ZZ Probe')` raises `cannot locate track 'ZZ Probe'` on the file `duplicate_track` just
-produced. The 58-entry table reads fine, so this is the ADD path failing to register the new name
-somewhere `remove_track` looks -- a different defect from #1, and the one that makes the sampled
-figure 29/30 rather than 30/30.
+`remove_track('ZZ Probe')` raises `cannot locate track 'ZZ Probe'` on the file `duplicate_track`
+just produced. NARROWED to a single missing structure:
+
+    dup('01 KICK IN')    block delta includes  0x251A: +2   -> remove OK
+    dup('XTRA LF GTR')   block delta has NO    0x251A       -> remove raises
+
+Both tracks are in the SAME session. The copy's name reaches only `0x2519`, `0x1052` and `0x1014`;
+a complete track also needs it in the two `0x251A` LANE entries, which is exactly what `remove_track`
+seeds its GUID search from. The source `XTRA LF GTR` does have both lane entries (its name occurs
+`0x251A` x2, `0x2519`, `0x1052`, `0x1014`), so they exist to be copied -- the identification walk
+simply does not pick them up FOR THIS TRACK while it does for `01 KICK IN` in the same file.
+
+Note this source also has NO `0x2628`/`0x103A` occurrences, unlike `01 KICK IN` (7 and 3): it is a
+track with no clips/audio-file references. That is the obvious structural difference between the
+track that works and the one that does not, and where the next attempt should look.
 
 Neither is guarded: an output-side structural assertion was tried earlier today and reverted because
 it fired on `duplicate_track`'s own placeholder-then-rename intermediate on ordinary sessions.
