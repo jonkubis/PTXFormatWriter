@@ -6947,18 +6947,38 @@ def set_track_channels(data: bytes, track_offset: int, channels: list[int]) -> b
     absolute offset (marker+19 for both; the bug that mis-wrote mono as if stereo)."""
     out = bytearray(data)
     nlen = int.from_bytes(out[track_offset + 2 : track_offset + 6], "little")
-    marker = out.find(b"\x2a\x00\x00\x00", track_offset)
+    # BOUND the marker search to this block. `track_offset` is the block's content start
+    # (`zmark + 7`), so its declared size sits in the four bytes just before it and the block ends
+    # at `track_offset + size`. Unbounded, `find` walks into the NEXT block when this one carries no
+    # `2a 00 00 00` tag, and the two channel writes below (`marker + 19`, `marker + 23`) then land in
+    # a neighbour's header -- observed writing `40 00` over a 0x1014's size/content-type word, which
+    # unframed that block so the walk lost it (0x1014 count stayed 57 instead of going to 58) and
+    # duplicate->remove came back 2 bytes short of byte-exact on 2 of 40 real sessions.
+    _blk_end = track_offset + int.from_bytes(out[track_offset - 4 : track_offset], "little")
+    marker = out.find(b"\x2a\x00\x00\x00", track_offset, max(track_offset, _blk_end))
     # Channel indices are u16 (the field's high byte is 0 below 256 but in use from
     # 256 up -- i.e. stereo track >=129, channel index 2k-2 >= 256). Writing a single
     # byte truncated them and raised at N>=129. Pre-marker pair is contiguous (stride
     # 2); the post-ID pair is stride 4.
+    # The post-ID offsets `marker + 19` / `marker + 23` come from the control corpus and DO NOT hold
+    # for every real 0x1014. On `20230209 GENE GOO GOO DOLLS.ptx` the marker sits legitimately inside
+    # the block (221957 < 221970) but `marker + 19` is 221976 -- SIX BYTES PAST the block's end --
+    # so the channel value `40 00` was written over the NEXT block's size/content-type word. That
+    # unframed the neighbour, the walk lost it (0x1014 count stayed 57 instead of 58), and
+    # duplicate->remove came back 2 bytes short of byte-exact.
+    #
+    # Guarded by CONTAINMENT, which needs no theory about where the field really lives: a write that
+    # would leave this block is skipped. The pre-marker channel, whose offset is derived from the
+    # name length and is always in-block, is unaffected.
     c0 = int(channels[0]).to_bytes(2, "little")
     out[track_offset + nlen + 11 : track_offset + nlen + 13] = c0   # channel0 pre-marker
-    out[marker + 19 : marker + 21] = c0                              # channel0 post-ID
+    if marker >= 0 and marker + 21 <= _blk_end:
+        out[marker + 19 : marker + 21] = c0                          # channel0 post-ID
     if len(channels) > 1:
         c1 = int(channels[1]).to_bytes(2, "little")
         out[track_offset + nlen + 13 : track_offset + nlen + 15] = c1  # channel1 pre-marker
-        out[marker + 23 : marker + 25] = c1                            # channel1 post-ID
+        if marker >= 0 and marker + 25 <= _blk_end:
+            out[marker + 23 : marker + 25] = c1                        # channel1 post-ID
     return bytes(out)
 
 

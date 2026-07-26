@@ -1472,6 +1472,38 @@ class ViewChainAttributionTests(unittest.TestCase):
                                      msg="duplicate->remove must invert byte-exact at scale")
             BS.remove_track(data, names[-1])      # must not raise on a click-only session
 
+    def test_duplicate_adds_a_track_list_entry_rather_than_consuming_one(self):
+        """Duplicating a track must INCREASE the 0x1014 count, not hold it steady.
+
+        `set_track_channels` writes the post-ID channel indices at `marker + 19` / `marker + 23`,
+        offsets taken from the control corpus. On real sessions the marker can sit legitimately
+        inside the block while those offsets fall PAST its end -- six and ten bytes past, in the
+        case that exposed this -- so the channel value `40 00` landed on the NEXT block's
+        size/content-type word. That unframed the neighbour: the walk lost it, so adding a track
+        left the 0x1014 count unchanged (one gained, one destroyed), and duplicate->remove came back
+        two bytes short of byte-exact.
+
+        The count is the honest test. It needs no offsets and no identity mapping -- the two things
+        that made this defect take nine failed diagnoses to find, every one of them derailed by
+        comparing blocks through an assumed correspondence.
+        """
+        for rel in ("lots of mono tracks/4 mono tracks.ptx",
+                    "multiple track types/multiple track types no click.ptx"):
+            path = ROOT / "control_files" / rel
+            if not path.exists():
+                continue
+            data = _load_path(path)
+            bl = BS._size_driven_blocks(data)
+            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
+            names = [n for n, _p in BS._inline_name_entries(data, z, e, bl)]
+            before = sum(1 for _z, _e, c in bl if c == 0x1014)
+            with self.subTest(session=path.name):
+                dup = BS.duplicate_track(data, names[-1], "ZZ Probe")
+                after = sum(1 for _z, _e, c in BS._size_driven_blocks(dup) if c == 0x1014)
+                self.assertEqual(after, before + 1,
+                                 msg="the copy must ADD a 0x1014, not overwrite a neighbour")
+                self.assertEqual(BS.remove_track(dup, "ZZ Probe"), data)
+
     def test_rekey_preserves_the_zero_sentinel(self):
         """Zero means NOT NUMBERED in every ordinal table, and the re-key must never overwrite it.
 
