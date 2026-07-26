@@ -31,6 +31,35 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## THE FALSE-GUID BUG — a block of size 42 spells the GUID tag in its SIZE field (2026-07-25)
+
+`guids_in()` scans a block for the 4-byte tag `2a 00 00 00` and takes the next 8 bytes as a GUID.
+**A block whose declared size is exactly 42 has `2a 00 00 00` in its SIZE FIELD at offset 3**, so the
+"GUID" it returns is really the block's CONTENT-TYPE word:
+
+    5a 02 00 | 2a 00 00 00 | 1a 25 00 00 0b 00 00 00 ...
+               ^ size = 42   ^ false "GUID" = content_type 0x251A + the bytes after it
+
+`transform()` then rewrote those bytes with a fresh GUID, so a copied `0x251A` lane came out typed
+**`0x7F40`**. The block walk no longer enumerated it as a lane, and `remove_track` -- which seeds its
+GUID search from enumerated lane blocks -- could not find the track it had just created. The earlier
+block-delta for that session showed `'0x7F40': 2`; I had seen it and not registered it.
+
+FIXED by skipping a tag match at offset 3 (the size field), in both copies of the helper. Result on
+the two problem sessions: lane counts now 116 -> 118 and 108 -> 110, and `remove_track` no longer
+raises. Both now fail only on the SAME residual 2 bytes in a `0x1014` header, so what were two
+separate defects are now one.
+
+ALSO CHANGED, honestly labelled: `transform()` now rewrites GUIDs only where one legitimately lives
+(immediately after the tag) instead of `blk.replace(g, ng)` over the whole unit. That is the same
+"target the field, never the byte pattern" lesson as the track-id remap -- but it did NOT fix the
+residual 2 bytes, so its benefit here is hazard-removal, not a measured win.
+
+STILL OPEN, unchanged by this: the 2-byte `0x1014` corruption (a size write landing one byte late,
+diagnosed above) and a PRE-EXISTING `AttributeError` -- `final_index_ref` returns None on the EDITED
+file for 3 of 40 sampled sessions, though the input parses fine. Verified against the committed code
+that this predates today's changes.
+
 ## THE LAST TWO REAL-SESSION EDIT DEFECTS, DIAGNOSED (2026-07-25)
 
 PROVENANCE CHECKED before blaming today's changes -- both were run against the session-start code

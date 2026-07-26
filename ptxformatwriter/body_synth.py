@@ -5888,7 +5888,14 @@ def remove_track(data: bytes, track_name: str) -> bytes:
             k = blk.find(b"\x2a\x00\x00\x00", k)
             if k < 0 or k + 12 > len(blk):
                 break
-            out.append(blk[k + 4 : k + 12])
+            # SKIP offset 3: that is the block's own SIZE field, and a block whose declared size is
+            # exactly 42 spells `2a 00 00 00` there. The bytes that follow are then the CONTENT-TYPE
+            # word, not a GUID -- and `transform` rewrites whatever this returns. On a real session
+            # that turned two copied `0x251A` lane blocks into type `0x7F40`, so the block walk no
+            # longer enumerated them as lanes and `remove_track` could not find the track it had
+            # just created. The tag never legitimately sits in the size field.
+            if k != 3:
+                out.append(blk[k + 4 : k + 12])
             k += 1
         return out
 
@@ -6296,7 +6303,14 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
             k = blk.find(b"\x2a\x00\x00\x00", k)
             if k < 0 or k + 12 > len(blk):
                 break
-            out.append(blk[k + 4 : k + 12])
+            # SKIP offset 3: that is the block's own SIZE field, and a block whose declared size is
+            # exactly 42 spells `2a 00 00 00` there. The bytes that follow are then the CONTENT-TYPE
+            # word, not a GUID -- and `transform` rewrites whatever this returns. On a real session
+            # that turned two copied `0x251A` lane blocks into type `0x7F40`, so the block walk no
+            # longer enumerated them as lanes and `remove_track` could not find the track it had
+            # just created. The tag never legitimately sits in the size field.
+            if k != 3:
+                out.append(blk[k + 4 : k + 12])
             k += 1
         return out
 
@@ -6441,9 +6455,24 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
 
     def transform(blk: bytes) -> bytes:
         blk = blk.replace(sb, nn)
-        for g, ng in gmap.items():
-            blk = blk.replace(g, ng)
-        return blk
+        # Rewrite GUIDs ONLY where a GUID actually lives -- immediately after a `2a 00 00 00` tag.
+        # A blanket `blk.replace(g, ng)` matches those 8 bytes ANYWHERE, and on real sessions a
+        # GUID's byte pattern straddled a nested `0x1014` header: the copy came out with a
+        # corrupted size/content-type word, which survived into the removed file and left
+        # duplicate->remove 2 bytes short of byte-exact. Same hazard, and same fix, as the track-id
+        # remap: target the field, never the byte pattern.
+        b = bytearray(blk)
+        k = 0
+        while True:
+            k = b.find(b"\x2a\x00\x00\x00", k)
+            if k < 0 or k + 12 > len(b):
+                break
+            if k != 3:                      # offset 3 is the block's own SIZE field, not a tag
+                ng = gmap.get(bytes(b[k + 4 : k + 12]))
+                if ng is not None:
+                    b[k + 4 : k + 12] = ng
+            k += 1
+        return bytes(b)
 
     # outermost copy-units + name-table strings -> insert a transformed copy after each
     units = sorted((z, zend[z]) for z in ident
