@@ -137,6 +137,25 @@ That is the SIXTH wrong answer on this defect, and the third caused by a bad ide
 assumption (offset twice, name once). Any further attempt must first establish a key that is
 provably unique -- name is not, offset is not -- before drawing any conclusion from a diff.
 
+### A PROVABLY-CORRECT MAPPING finally locates it: the corruption is IN THE COPY
+
+Exporting the actual insert list makes the offset mapping exact instead of guessed
+(`dup_off = off + sum(len for at <= off)`), and it shows an insert of **44 bytes at exactly 221970**
+-- the block's own start -- with the `dup` bytes there ALREADY reading `40 00`. So the corruption is
+in the COPIED BLOB, produced during `duplicate_track`; `remove_track` was never the writer, which is
+why no probe placed there ever fired.
+
+The source's own `0x1014` is `z=221926`, span 44 bytes, **declared size 37**. Its name occurs once,
+so the blanket replace is safe from multiple matches -- but it CHANGES LENGTH: replacing `Audio 8`
+(7) with `ZZ Probe` (8) takes the blob from 44 to 45 bytes. If the declared size is not grown to
+match, the walk mis-frames the copy and reads the FOLLOWING header at the wrong offset -- which
+presents exactly as "two corrupted bytes in the next block's size/content-type word".
+
+TO CHECK NEXT (do not assume): whether the copy's `0x1014` declared size is updated when the name
+length changes, in `duplicate_track`'s placeholder path AND in `rename_track`. Note that
+same-length names ALSO fail, so a stale size field cannot be the whole story -- but this is the
+first lead resting on a mapping that is provably right rather than assumed.
+
 STOPPING HERE deliberately. Six refuted hypotheses is strong evidence that my mental model of this
 splice is wrong somewhere I cannot see by probing, and each wrong answer has had to be walked back
 in this file. It affects 2 of 40 sampled sessions; 38 round-trip byte-exact.
