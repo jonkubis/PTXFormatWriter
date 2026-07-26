@@ -1820,7 +1820,8 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.assertEqual(loose, [], msg=f"0x{child:04x} orphaned out of 0x{parent:04x}")
         self.assertEqual(BS.validate(dup), [])
         self.assertEqual(BS.remove_track(dup, "MIDI 3"),
-                         BS._rekey_offsynth_positional(data))
+                         BS._rekey_offsynth_positional(
+                             data, c4_dense=BS._c4_uses_dense_convention(data)))
 
     def test_duplicate_gives_the_copy_its_own_0x261c_counter(self):
         """REGRESSION (bug #23): the 0x261C per-track "C4" counter (block-END anchored, so its
@@ -2460,7 +2461,14 @@ class NameTablePreambleTests(unittest.TestCase):
         # identity through them and REJECTED every duplicate that left them stale. So the pair
         # returns the session REPAIRED, not bit-for-bit. On a session whose ordinals are already
         # PT-valid -- every PT-authored one, 253 of 263 in the corpus -- the two are identical.
-        self.assertEqual(back, BS._rekey_offsynth_positional(data),
+        # The expectation must be given the SAME C4 gate the editors use. This fixture's C4 column
+        # is [0, 1, 3] -- non-dense, because the fixture is our own broken output -- so the editors
+        # now leave it alone rather than "repairing" it to [0, 1, 2]. An ungated call here would
+        # renumber it and disagree by exactly that one slot. Preserving is the correct behaviour:
+        # the ungated renumber rewrote Pro Tools' own values on 115/120 unedited sessions of one
+        # real corpus (18062 bytes), and gapped C4 columns are what PT itself writes there.
+        self.assertEqual(back, BS._rekey_offsynth_positional(
+                                   data, c4_dense=BS._c4_uses_dense_convention(data)),
                          msg="duplicate->remove must invert exactly, modulo the ordinal repair")
         self.assertEqual(BS.remove_track(BS.duplicate_track(back, src, new), new), back,
                          msg="...and once repaired, the pair is byte-exact (idempotent)")

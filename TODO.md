@@ -3,6 +3,55 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## THE RE-KEY WAS CORRUPTING REAL SESSIONS ON DRIVES I HAD RECORDED AS UNREACHABLE (2026-07-26)
+
+`/Volumes/Mac 4TB SSD` (819 `.ptx`) and `/Volumes/Hack 2TB SSD Old` (1611 `.ptx`) ARE MOUNTED. The
+"corpus disconnected" note below is about `/Volumes/Backups` only; 2430 further sessions were
+reachable the whole time, and they are where the defects below live. Neither corpus I had been using
+could have shown them.
+
+THE TEST THAT FOUND IT: apply a positional re-key to an **unedited** Pro Tools session. Every byte
+it writes is, by definition, a rewrite of PT's own value.
+
+    corpus                      re-key is NOT a no-op        bytes
+    control_files                 3/120 (our own fixtures)        6
+    /Volumes/Samples              0/120                           0
+    /Volumes/Mac 4TB SSD        115/120                       18062
+    /Volumes/Hack 2TB SSD Old    14/120                        1088
+
+**Defect 1 -- the 0x261C "C4" pass renumbered PT's own values.** Its guard was "some slot is
+nonzero", calibrated on one vendor's writer. `/Volumes/Samples` reads clean only because THAT writer
+puts a child block over the target offset, so the containment guard skips all 2580/2580 records --
+a property of those files, not of the format. Elsewhere the slot holds real values (512, 729590018)
+and they were overwritten with 0,1,2,... on records belonging to SURVIVING tracks.
+
+FIXED with a conformance gate judged on the PRE-EDIT session (`_c4_uses_dense_convention`, passed in
+as `c4_dense`). Judging POST-edit is what sank all four earlier conditional-renumber attempts: a
+duplicate leaves a repeated value and a removal a gap, so a post-edit test calls a conforming session
+non-conforming and skips exactly the renumber it needs. Result: C4 fires 115/120 -> 0/120 on Mac 4TB,
+1/120 on Hack, and still fires on 92/120 controls that genuinely use the convention.
+
+I GOT THE GATE WRONG FIRST, in a way worth remembering: I tested whether the read-back column was
+dense `0..k-1`. But the pass numbers by RANK over all 0x261C records while SKIPPING child-covered
+ones, so its own output is `[0,1,3]` when rank 2 is skipped -- my test judged the pass's own output
+non-conforming, which would have made an edit stop repairing a session it had just written. The
+correct test is idempotence: `value == rank`. That correction alone moved the control count 68 -> 92.
+
+**Defect 2 -- `_give_copy_free_track_index` wrote an OUT-OF-RANGE C4.** Found only because the gate
+exposed it: on `3 stereo plus click` the duplicate produced `[(0,0),(1,1),(2,4),(3,3)]` -- rank 2
+holding 4 on a 4-record session. It had written "lowest free" on top of a renumber that had already
+given the copy a distinct value, and it round-tripped ONLY because remove renumbered unconditionally
+and painted over it. 0x261C dropped from that helper; the copy now gets an in-range value from the
+renumber itself (`4 mono -> 5` now reads `[0,1,2,3,4]`, was `[0,1,2,3,5]`).
+
+**OPEN -- Defect 3: the re-key writes into PHANTOM blocks inside large payloads.** After both fixes
+Mac 4TB still shows 23/120 sessions changed, but only **46 bytes total** (2 per session, down from
+18062). Every one is `e0 ff` -> `01 00` at a position ~1.31 MB inside a `0x1038` blob: a stray `0x5A`
+in that payload frames a fake per-track block and an ordinal pass writes `s+1` into real data.
+Reproduce: `_rekey_offsynth_positional(load('M14 BOOM ZAHRAMAY_MIX.bak.047.ptx'))`, byte 2003746.
+The fix is a reality predicate on the write targets (the 0x0002 master index is the authority on
+which blocks exist), not another offset guard. Not attempted yet -- it wants its own change.
+
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
 Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:
@@ -865,7 +914,16 @@ byte-exact. `PTX_VERIFY_2026-07-24/` regenerated too.
 TODO NEXT: fix the SYNTH writer's next_kind so newly synthesized mixed sessions are valid, and
 regenerate the 10 broken controls (they are checked-in artifacts used as test inputs).
 
-## BLOCKED — the corpus drive is DISCONNECTED (2026-07-25)
+## PARTIALLY UNBLOCKED (2026-07-26) — two other drives were mounted all along
+
+`/Volumes/Mac 4TB SSD` (819 `.ptx`) and `/Volumes/Hack 2TB SSD Old` (1611 `.ptx`) are readable. They
+do NOT replace `/Volumes/Backups` for the `.bak`-chain work described below, but they are real
+third-party sessions from a different Pro Tools generation than either corpus used so far, and they
+immediately exposed two live corruption defects (see the 2026-07-26 entry above). USE THEM: a rule
+that holds on `control_files` + `/Volumes/Samples` alone has been wrong before, because those are one
+machine and one vendor respectively.
+
+## BLOCKED — the `/Volumes/Backups` corpus drive is DISCONNECTED (2026-07-25)
 
 `/Volumes/Backups/AI/__PTX corpus` is gone mid-session: `mount` and `diskutil list` show no
 filesystem and no unmounted volume named `Backups` (the only unmounted partitions are Apple_RAID

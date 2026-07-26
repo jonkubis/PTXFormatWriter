@@ -5064,10 +5064,27 @@ def _fix_name_table_intergroup(data: bytes) -> bytes:
 # (`_is_synth_shaped`): a session carrying clips/plugins/automation keeps the no-renumber splice
 # path -- its per-track blocks are larger/differently framed, so these fixed offsets don't apply.
 
-# the inner-0x2434 anchor whose +18 u32 holds the 1-based ordinal shared by the
-# 0x200a/0x200b/0x2015 nested subtree (the same bytes reappear in all three types).
+# The inner-0x2434 anchor whose +18 u32 holds the 1-based ordinal shared by the 0x200a/0x200b/0x2015
+# nested subtree (the same bytes reappear in all three types).
+#
+# 16 BYTES, NOT 18. The 0x2434 block is `5A 01 00 | 0B 00 00 00 | 34 24` + a 9-byte payload, so the
+# two bytes that used to end this literal (`3C 00` = 60) are the LAST u16 OF THE PAYLOAD, not part
+# of the frame -- and that value varies: it is 60 in 1958 of Pro Tools' own 0x2015 blocks and 64 in
+# the other 622. Matching it made the anchor unfindable in 622/2580 real blocks (24.1%), and every
+# call site guards `if a >= 0`, so those tracks were silently skipped -- not read, not audited.
+#
+# That silence manufactured a false rule. A column with a quarter of its entries missing reads as
+# "distinct with GAPS", and that is precisely what the comment further down used to claim (dense in
+# only 129 of 200 real sessions, so uniqueness must be the invariant, not density). Measured through
+# the 16-byte anchor the column is dense 1..N in 250/250 of those same sessions:
+#
+#     shape of the ordinal column, 250 real sessions | 18-byte literal | 16-byte anchor
+#     dense 1..N                                     |       160       |      250
+#     "distinct with gaps"                           |        90       |        0
+#
+# Where both resolve they agree 4627/4627 and 1958/1958, so this is a strict widening.
 _ORD2015_ANCHOR = bytes([0x5A, 0x01, 0x00, 0x0B, 0x00, 0x00, 0x00, 0x34, 0x24, 0x04,
-                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x00])
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
 # the grow-path 0x2104 edit-window view-scale payload (28 bytes @ block-offset 18); the
 # scaffold/donor slots (physical rank < base_n) carry an all-zero payload instead.
 _VIEW_SCALE_PAYLOAD = bytes([0xEF, 0xFF, 0xDF, 0xBF, 0xEF, 0xFF, 0xDF, 0xBF, 0x02, 0, 0, 0,
@@ -5429,7 +5446,41 @@ def _recompute_free_fields(data: bytes, kinds: "list[int]", base_n: int,
     return bytes(body)
 
 
-def _rekey_offsynth_positional(data: bytes) -> bytes:
+def _c4_slot_values(data: bytes) -> "list[tuple[int, int]]":
+    """`(rank, value)` for every `0x261C` whose "C4" u32 at `end - 19` lands in the record's OWN
+    bytes -- the slots `_rekey_offsynth_positional` is willing to write. `rank` is the index into
+    ALL `0x261C` records, not into the returned list: records where the field falls inside a child
+    block are skipped by the write pass but still consume a rank.
+    """
+    bl = _size_driven_blocks(data)
+    everything = [(z, e) for z, e, _c in bl]
+    out: "list[tuple[int, int]]" = []
+    for rank, (z, e) in enumerate((z, e) for z, e, c in bl if c == 0x261C):
+        t = e - _B261C_C4_FROM_END
+        if any(zz > z and ee <= e and zz <= t < ee for zz, ee in everything):
+            continue
+        out.append((rank, int.from_bytes(data[t : t + 4], "little")))
+    return out
+
+
+def _c4_uses_dense_convention(data: bytes) -> bool:
+    """Does this session already store C4 exactly as the re-key writes it -- `value == rank`?
+
+    This is an IDEMPOTENCE test, not a density test, and the difference is not cosmetic. The write
+    pass numbers by rank over ALL `0x261C` records but skips those whose field is child-covered, so
+    what it emits is `[0, 1, 3]` when rank 2 was skipped. Testing the READ-BACK values for
+    `0..k-1` therefore judges the pass's own output non-conforming, which would have made an edit
+    stop repairing a session it had itself just written.
+
+    MUST be asked of the PRE-EDIT session. Asking after the splice is what sank every earlier
+    attempt to make this conditional: a duplicate leaves a repeated value and a removal a gap, so a
+    post-edit test judges a conforming session non-conforming and skips the renumber it needs.
+    """
+    slots = _c4_slot_values(data)
+    return bool(slots) and all(v == rank for rank, v in slots)
+
+
+def _rekey_offsynth_positional(data: bytes, *, c4_dense: "bool | None" = None) -> bytes:
     """Re-key the per-track POSITIONAL ordinal fields that must stay unique after an off-synth
     track add/remove. Size-neutral and idempotent.
 
@@ -5475,15 +5526,22 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
             a = body.find(_ORD2015_ANCHOR, z, e)
             if a >= 0:
                 anchors.add(a)
-    # PRESERVED, NOT RENUMBERED. Measured over 200 real Pro Tools sessions: these per-track anchor
-    # values are DISTINCT in 200/200, but dense `1..k` in only 129 -- the other 71 are distinct with
-    # GAPS (`2, 3, 4, 5, 7, ...`), the holes left where tracks were deleted. So the field is a
-    # STABLE PER-TRACK ID, like the 0x261B range, and UNIQUENESS is the invariant, not density.
-    # Forcing `1..k` rewrote Pro Tools' own identities -- 8228 bytes across 250 real sessions.
+    # PRESERVED, NOT RENUMBERED -- but NOT for the reason this comment used to give.
     #
-    # Nothing is written here now. duplicate_track gives the COPY an unused id, so an edit never
-    # disturbs a surviving track's identity and a removal just leaves one more hole -- which is
-    # exactly what these sessions show Pro Tools itself doing.
+    # WITHDRAWN: "distinct in 200/200 but dense in only 129, the other 71 distinct with GAPS left
+    # where tracks were deleted, so the field is a stable per-track ID and UNIQUENESS is the
+    # invariant, not density." There are no deletion holes. That measurement was taken through the
+    # 18-byte `_ORD2015_ANCHOR`, which silently failed on 24.1% of real blocks (see its comment);
+    # a column missing a quarter of its entries is exactly what "distinct with gaps" looks like.
+    # Re-measured with the corrected anchor: dense `1..N` in 250/250 of those same sessions, and in
+    # 255/255 genuine PT-authored controls. The only non-dense sessions anywhere are 10 control
+    # files that are OUR OWN broken output -- the same 10 the `next_kind` chain check partitions
+    # out, which is two independent invariants agreeing on provenance.
+    #
+    # So density IS the invariant, and duplicate_track currently violates it. Renumbering here is
+    # still wrong, because this pass cannot tell the copy from a surviving track and rewriting
+    # survivors is what broke the round-trip every previous time. The fix belongs where the copy's
+    # bytes are made, as the 0x261B id range and the selection flags now are. Left alone until then.
     _ = anchors
 
     if by.get(0x2519):
@@ -5548,7 +5606,28 @@ def _rekey_offsynth_positional(data: bytes) -> bytes:
     # was corruption. An all-zero slot set means the session does not use the convention -- and that
     # test survives both post-edit shapes, which is where the earlier value-based predicates failed:
     # a duplicate gives [0,1,2,3,3] and a removal [0,1,3], neither of which is all-zero.
-    if any(int.from_bytes(body[t : t + 4], "little") for _s, t in _slots):
+    # ...and only when the session ACTUALLY USES this as a dense index, judged on the PRE-EDIT
+    # session by the caller (`c4_dense`). The old test -- "some slot is nonzero" -- was calibrated
+    # on one vendor's writer and silently corrupted others. Measured by applying this pass to
+    # UNEDITED Pro Tools sessions, where every byte it writes is a rewrite of PT's own value:
+    #
+    #     corpus                      not a no-op    bytes rewritten
+    #     control_files                3/120  (all our own broken fixtures)      6
+    #     /Volumes/Samples             0/120                                     0
+    #     /Volumes/Mac 4TB SSD       115/120                                18062
+    #     /Volumes/Hack 2TB SSD Old   14/120                                 1088
+    #
+    # /Volumes/Samples reads clean only because THAT writer puts a child block over the target, so
+    # the containment guard above skips all 2580/2580 records. That is a property of one vendor's
+    # files, not of the format, and it is why this looked safe. On the other drives the slot holds
+    # real values (512, 729590018, ...) and they were being overwritten with 0,1,2,... on records
+    # belonging to SURVIVING tracks -- the exact class of defect this project keeps reverting.
+    #
+    # With the pre-edit gate the pass still fires on 65/120 controls that genuinely use the
+    # convention, and on 0/120 Mac-4TB and 1/120 Hack sessions (that one is genuinely dense).
+    if c4_dense is None:
+        c4_dense = any(int.from_bytes(body[t : t + 4], "little") for _s, t in _slots)
+    if c4_dense:
         for _s, t in _slots:
             su32(t, _s)
     return bytes(body)
@@ -6172,7 +6251,9 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     if midi_edit:
         out = _adjust_midi_list_count(out, -1)                 # 0x1058 = MIDI count
     if not _do_renumber:
-        out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
+        # `c4_dense` is judged on the PRE-EDIT session: after the splice the column reads
+        # [0,1,2,3,3] / [0,1,3], and judging THAT is what sank every earlier conditional renumber.
+        out = _rekey_offsynth_positional(out, c4_dense=_c4_uses_dense_convention(data))
     return out
 
 
@@ -6394,7 +6475,13 @@ def _give_copy_free_track_index(before: bytes, after: bytes, newg: "set[bytes]")
     copy removes the only bytes that changed.
     """
     out = bytearray(after)
-    for ctype in (0x2015, 0x200A, 0x200B, 0x261C):
+    # NOT 0x261C. Its dense index is the "C4" u32 that `_rekey_offsynth_positional` already
+    # renumbers by rank, which gives the copy a distinct, IN-RANGE value on its own. Writing the
+    # lowest-free value on top of that produced an out-of-range one -- on `3 stereo plus click`
+    # the four records came out [0, 1, 4, 3] -- and that only ever round-tripped because remove
+    # renumbered unconditionally and overwrote it. Once the renumber is correctly gated to sessions
+    # that use the convention, the masking stops and the stale 4 survives the round trip.
+    for ctype in (0x2015, 0x200A, 0x200B):
         offs = _dense_index_offsets(before, ctype)
         if not offs:
             continue
@@ -6996,7 +7083,9 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     if midi_edit:
         out = _adjust_midi_list_count(out, 1)                  # 0x1058 = MIDI count
     if not _do_renumber:
-        out = _rekey_offsynth_positional(out)                  # PT identifies tracks by these
+        # `c4_dense` is judged on the PRE-EDIT session: after the splice the column reads
+        # [0,1,2,3,3] / [0,1,3], and judging THAT is what sank every earlier conditional renumber.
+        out = _rekey_offsynth_positional(out, c4_dense=_c4_uses_dense_convention(data))
 
     # NOT verified on the way OUT. Asserting completeness on `out` was tried and REVERTED: it fires
     # on `duplicate_track`'s own placeholder-then-rename step, whose intermediate table reads short
