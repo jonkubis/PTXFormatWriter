@@ -4816,6 +4816,24 @@ def _name_table_shift(data: bytes, z: int) -> int:
     return 2 if int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little") else 0
 
 
+def _name_table_entry_start(data: bytes, z: int, limit: int) -> int:
+    """Where the `0x2519` inline entries actually begin, resolved empirically.
+
+    `_name_table_shift` models the preamble as a two-valued flag (base or +2). A third form exists
+    in real sessions -- entries at `payload + 0x18` -- so the flag alone leaves the walk reading
+    garbage. Stepping forward in 2-byte units to the first offset that parses handles every form
+    seen, and the EFFECTIVE shift it implies (`start - (z + 9 + 0x14)`) is what the entry-COUNT
+    field's offset must use too: writing the count at the flag's offset put it two bytes early on a
+    `+4` session, clobbering a preamble byte.
+    """
+    q = z + 9 + 0x14 + _name_table_shift(data, z)
+    if _name_entry_head(data, q, limit) is None:
+        for c in range(q, min(q + 64, max(q, limit - 8)), 2):
+            if _name_entry_head(data, c, limit) is not None:
+                return c
+    return q
+
+
 def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[str, int]]":
     """`(name, name_start)` for each INLINE entry of the `0x2519` name table, in table order.
 
@@ -4900,7 +4918,9 @@ def _fix_name_table_count(data: bytes) -> bytes:
     for z, e, c in bl:
         if c != 0x2519:
             continue
-        shift = _name_table_shift(data, z)
+        # EFFECTIVE shift, not the two-valued flag: see `_name_table_entry_start`.
+        _end = _name_table_region_end(data, z, e, bl)
+        shift = _name_table_entry_start(data, z, _end) - (z + 9 + 0x14)
         n = len(_inline_name_entries(data, z, e, bl))
         cnt = z + 9 + 0x0E + shift
         out[cnt : cnt + 2] = n.to_bytes(2, "little")
@@ -6369,6 +6389,16 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                 ident |= {zz for zz, _ee, _cc in bl if pz <= zz < pe}
     if not pl_ranges:
         raise ValueError(f"cannot locate track {source_track!r} (or an unsupported track type)")
+
+    # A MASTER/BUS track (0x261D) has no 0x1014 track-list entry, so the copy is not findable
+    # afterwards: `remove_track` cannot locate it and the session is left with an un-removable
+    # track. Refuse up front instead of emitting that. Measured across 487 real sessions, this is
+    # the only track kind that fails -- audio, MIDI and click sources in the SAME session all
+    # duplicate and round-trip byte-exact.
+    if any(c == 0x261D for _z, _e, c in bl if (_z, _e) in [(pz, pe) for pz, pe in pl_ranges]):
+        raise ValueError(
+            f"cannot duplicate {source_track!r}: it is a master/bus track (0x261D), which carries "
+            "no 0x1014 track-list entry, so the copy could not be located or removed afterwards")
 
     # The source's track-id range, read BEFORE the splice: the copy will inherit it verbatim and
     # must be moved off it, but any OTHER collision already in the session is left alone.
