@@ -92,12 +92,18 @@ ELIMINATED BY INSTRUMENTATION (each wrapped and observed, not argued):
     the size-42 false-GUID case ....... N/A, this block's size is 39/40
     the splice ranges ................. do not cover these bytes
 
-I could not identify the writer. The remaining candidates are inline writes in `remove_track`'s body
-that I have not individually wrapped -- the `nt_ranges` two-byte ordinal truncation
-(`nt_ranges.append((ord_pos + 2, ord_pos + 4))`) is the closest match in SHAPE, since it is the only
-other place a 2-byte quantity is manipulated, and `ord_pos` derives from name-entry positions that
-this session computes unusually. Wrapping every bytearray slice-assignment in `remove_track` with a
-range filter is the mechanical next step; it will find it.
+I could not identify the writer, and the "mechanical next step" I proposed DID NOT FIND IT either:
+subclassing every `bytearray` in `remove_track` (there are exactly two) to log slice-assignments in
+221900..222100 produced NO hits, while the output still differed. So the bytes are not written inside
+`remove_track`'s own body, nor by any of the 16 functions it calls that were individually wrapped.
+
+That is a genuinely odd result and the honest state of it. Two things worth testing next, neither of
+which I got to:
+  * whether the difference is a WRITE at all -- confirm empirically where dup's block at 221996
+    actually lands in `back` (by searching for its surrounding byte pattern) rather than assuming the
+    26-byte mapping. If it lands elsewhere, this is a local misalignment, not a value change.
+  * `_FI.serialize_final_block(recs)` and the record rebuild, which regenerate bytes wholesale rather
+    than writing through a bytearray, and so would be invisible to every probe used so far.
 
 Affects 2 of 40 sampled real sessions. Everything else round-trips byte-exact.
 
