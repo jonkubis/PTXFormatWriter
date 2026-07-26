@@ -112,9 +112,23 @@ size/content-type word instead of ending cleanly. That is why no write probe eve
 writes those bytes -- the removal simply cuts in the wrong place, and the bytes that survive are the
 neighbour's shifted by the error.
 
-The fix is in how `remove_track` computes the span of the copy's `0x1014` when the copy's NAME is a
-different length from the source's (here 8 vs 9, size `0x26` vs `0x27`). The two-byte error matches
-that one-byte name-length delta plus its length prefix.
+**AND THAT CONCLUSION IS ALSO REFUTED.** I proposed the fix was in the span computation when the
+copy's name length differs from the source's. Testing name lengths of `len(src) - 1`, `len(src)`,
+and `len(src) + 1` on both sessions: **every one still fails**, including the same-length case. The
+name-length delta is not the trigger. Worse, the source for GOO GOO DOLLS is `Audio 8` (7 chars), so
+the block I had been dissecting -- name length 9 -> 8 -- was never the source's `0x1014` at all, only
+a neighbour.
+
+FIVE HYPOTHESES REFUTED on this one defect: grow-pass off-by-one, size-accounting consolidation,
+preceding-GUID-tag, an in-body write (every bytearray traced, no hits), and now the name-length
+boundary. I am recording that and stopping rather than proposing a sixth.
+
+What is solid: it affects 2 of 40 sampled real sessions, the difference is exactly 2 bytes in a
+`0x1014` header (`00 14` -> `40 00`, the size field's top byte and the content-type's low byte), the
+duplicate step is where it enters, and no probe placed so far observes anything writing them. A
+fresh approach is needed -- most likely diffing `dup` against `orig` block-by-block BY GUID
+IDENTITY rather than by offset, which is the mistake that produced two of the five wrong answers
+above.
 
 Two further leads, untested:
   * whether the difference is a WRITE at all -- confirm empirically where dup's block at 221996
