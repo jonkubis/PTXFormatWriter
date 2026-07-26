@@ -2991,6 +2991,27 @@ Consequences for editing:
   *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
   kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
 
+### The ladder oracle is EXHAUSTED — what its residual 31 differences actually are
+
+Comparing `duplicate_track(4 mono tracks)` against Pro Tools' own `5 mono tracks.ptx` leaves
+**905 of 936 blocks byte-identical** and 31 differing. Every one of the 31 is now accounted for, and
+none is a defect:
+
+- **`0x261B`, 5/5 blocks** — the alarming-looking row. For tracks 1–4 **every differing byte lies
+  inside the id run**, and the difference is only the session's BASE: ours continues `13221…`, PT's
+  independently-created session starts at `13261…`. Both are contiguous, unique and internally
+  consistent. Session-scoped allocation, not an error.
+- **`0x261C`, 5/5** — same cause; `0x261B` is its child, so the parent's byte range contains it.
+- **the 1-of-N rows** (`0x1014`, `0x102D`, `0x210B`, `0x2519`, `0x2619`, `0x200A/B`, `0x2015`) — the
+  NEW track only, which legitimately differs: ours is a copy with a fresh GUID, PT's is a track
+  created from scratch.
+- **`0x2589`, 3/5** — ordering, which is allocation order and carries no meaning (see its entry).
+
+**The consequence: this oracle can no longer find defects.** What remains differing is exactly what
+two valid sessions are entitled to disagree about. Any further verification of the add path has to
+come from Pro Tools opening the file, not from byte-comparison against a sibling session — the
+ladder has given everything it can.
+
 ### What the local control corpus can and cannot settle
 
 Worth stating precisely, because "the local set is too small" was **wrong** and cost a detour. The
