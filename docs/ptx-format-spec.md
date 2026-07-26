@@ -2991,6 +2991,26 @@ Consequences for editing:
   *promoted* to the 23-byte form with `next_kind = kind(copy) << 8` (the copy has the source's
   kind), and the copy becomes the new last in the short 21-byte form with `ordinal = N+1`.
 
+### What the local control corpus can and cannot settle
+
+Worth stating precisely, because "the local set is too small" was **wrong** and cost a detour. The
+`control_files` corpus contains genuine Pro Tools sessions of **512 tracks / 46079 blocks / 1.4 MB**
+— scale is not the missing dimension. Re-keying every one of the 213 PT-authored controls untouched
+changes **none** of them, at any size.
+
+What those sessions lack is **structural heterogeneity**:
+
+| | local 512-track PT session | real-world external-corpus session |
+|---|---|---|
+| track kinds present | one (`0x261C` only, or `0x261E` only) | audio + MIDI + click + folder/VCA + instrument + master |
+| `0x2519` ordinals equal to 0 | **0** | **40.6%** |
+| lane-ordinal restarts | 1 (the lane-major boundary) | many |
+
+So a rule can be confirmed at scale locally, but a rule about the **zero sentinel** — which only
+appears when a session has hidden/inactive tracks and mixed kinds — cannot. That is exactly the
+residue in the three re-key passes: their positional arithmetic is right (verified to N=512), and
+what is unproven is how zeros participate.
+
 ### `0x2589` — the value set is the law; BLOCK ORDER IS NOT
 
 The `u16` at `+9` of each `0x2589` is the track's display row. Measured over the **196 PT-authored
@@ -3399,7 +3419,7 @@ The failing rules are:
 | rule | what real sessions do |
 |---|---|
 | `0x2519-entry-ordinals` | **SOLVED 2026-07-25.** Not "repeated values" but a sentinel: `0` means *not numbered* (40.6% of entries), and the NONZERO ordinals in table order are exactly `1..k` — **300/300 random corpus sessions, no exceptions**. `[1,2,3,4,0,0,5,0,6,…]` is the normal shape. |
-| `0x251A-lane-ordinals` | same sentinel; the nonzeros are **ascending runs restarting at 1** (`[1,2,3,4,1,2,3,4]`) — 25/25, 148/149 on a wider sample. The synth rule `(i%N)+1` matches only 7/25. What triggers a restart is UNKNOWN. |
+| `0x251A-lane-ordinals` | **RESTART BOUNDARY SOLVED (2026-07-25):** the table is LANE-MAJOR and the sequence is `[1..N]` repeated once per lane index, so the run restarts every N where N = track count. Verified against Pro Tools' own sessions at **N = 99, 128 and 512** (`512 stereo tracks.ptx` = 1024 lane ordinals, exactly `[1..512]×2`), and the synth rule `(i%N)+1` reproduces all three EXACTLY. What remains open is only how the **zero sentinel** interacts in heterogeneous sessions — the `7/25` external-corpus mismatch is entirely sessions where zeros are present. |
 | `0x261C-C4` | the "audio-only index" reading (proven 43/43 on small sessions) does not hold: **`c4 == 0..k-1` holds in 0 of 149 real sessions**, and the tail bytes of a real `0x261C` are zeros or unrelated data. Whether anything at all lives at `end-19` in a real session is UNPROVEN — the READER may be as wrong as the rule. |
 | `0x2015`/`0x200A`/`0x200B` | dense `1..n` holds in only **33 of 149** real sessions |
 | `0x2589-view-chains` | chain count ≠ name-entry count. Low-word UNIQUENESS is the one universal invariant found (68/68). |
