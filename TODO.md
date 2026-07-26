@@ -42,8 +42,20 @@ signature in both):
     orig  5a 03 00 | 28 00 00 00 | 14 10      size=40, content_type=0x1014
     back  5a 03 00 | 28 00 00 5b | 00 10      size and type both destroyed
 
-A 4-byte write landing at block+4 instead of block+3 -- the container grow/shrink pass writes
-`body[nz + 3 : nz + 7]`, so `nz` is one byte high for this block.
+**REFUTED (same day, by instrumentation).** I attributed this to the container grow/shrink pass
+writing `body[nz + 3 : nz + 7]` with `nz` one byte high. Instrumenting that loop to report every
+write near the affected block shows it **never fires there at all**, in either `duplicate_track` or
+`remove_track`. The grow pass is not the writer.
+
+What the bytes actually say: `+6` and `+7` change together, i.e. the top byte of the size field and
+the low byte of the content-type word. That is the tail of an 8-byte write starting at the block's
+own `+0` -- the header `5a 03 00 28 00 00 00 14` being overwritten as if it were a GUID. Which is
+the FALSE-GUID hazard again, at a position my fix does not cover: `guids_in` scans a whole
+container's bytes, so a `2a 00 00 00` at the END of one block makes the NEXT block's header look
+like the 8 bytes following a tag. Skipping offset 3 only catches the size-field case.
+
+That is a hypothesis, not a conclusion -- unlike the size-42 case I have not yet confirmed a tag
+sits immediately before this block. Confirm that before changing anything.
 
 **Symptom B -- `AttributeError` on 3 of 40 sampled sessions.** `final_index_ref` walks TOP-LEVEL
 blocks by declared size and requires them to be CONTIGUOUS; it returns None the moment one size is
@@ -52,10 +64,10 @@ wrong. The input chains fine (117 steps ending at the `0x0002` index); the failu
 because that is the next thing to call `_size_driven_blocks`. So the edit breaks top-level
 contiguity on these sessions. PRE-EXISTING -- verified against the committed code.
 
-Both are the same defect wearing different clothes: a declared size written to the wrong offset, or
-not written at all. Fixing the offset arithmetic in the grow/shrink pass should address both, and it
-is the ONLY thing now standing between the editors and a byte-exact round trip on the real-session
-set (35/40 sampled; the 5 failures are 2 of symptom A and 3 of symptom B).
+The "both are one size-accounting bug" conclusion is WITHDRAWN: the grow pass is not the writer for
+symptom A. Symptom B (a broken top-level chain) may still be a size problem, but that is now
+unproven too, and the two should not be assumed to share a cause. 35/40 sampled real sessions
+round-trip byte-exact; the 5 failures are 2 of symptom A and 3 of symptom B.
 
 ## THE FALSE-GUID BUG — a block of size 42 spells the GUID tag in its SIZE field (2026-07-25)
 
