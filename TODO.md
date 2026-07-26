@@ -97,6 +97,30 @@ Two candidate explanations were TESTED AND REJECTED:
   * "the lane table is nested inside the 0x2519 block" -- true here, but ALSO true of six other real
     sessions whose last-entry duplicate works (16-64 lanes, all nested, all OK).
 
+LOCATED PRECISELY -- and the copies are NOT being dropped. Instrumenting the splice:
+
+    INSERTS include the two lane blobs .... (5119, 49 B) and (7782, 49 B)
+    emitted body contains the new name .... 5 occurrences (2519, 1052, 1014 + the two lanes)
+    final output contains the new name .... 5 occurrences
+    0x2519 container size ................. 7383 -> 7519, delta 136 = exactly the bytes inserted
+    BUT the size-driven walk enumerates ... 116 lane blocks, not 118
+
+So the bytes are written, the container is sized correctly, and the copies survive to the final
+output -- they are simply NOT ENUMERATED as `0x251A` blocks by `_size_driven_blocks`. `remove_track`
+then cannot find the track because its GUID seeding walks enumerated blocks.
+
+That reframes the defect entirely: it is a BLOCK-ENUMERATION problem in the edited file, not a
+splice problem. Correcting two of my own earlier readings: the lanes are not missing from `ident`
+(they are present), and there is no 3-byte container shortfall (the 133 I first computed came from
+the 8-char-name case, whose inserts differ; with a same-length name the delta is exactly 136).
+
+Same-length names fail identically, so the placeholder/rename path is NOT involved either.
+
+FIVE hypotheses now tested and eliminated: phantom bound, missing from ident, clipless source,
+nested lane table, container-size shortfall. The next step is to ask why the walk skips two
+well-formed `0x251A` blocks that are present in the bytes.
+
+ORIGINAL NOTE, kept for provenance:
 LOCATED, by instrumenting the identification walk. The lane blocks ARE found and ARE selected as
 copy units -- the guess that they were missing from `ident` was WRONG:
 
