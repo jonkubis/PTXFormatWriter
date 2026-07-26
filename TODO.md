@@ -31,6 +31,38 @@ ALSO CORRECTED: `test_duplicate_gives_the_copy_its_own_0x261c_counter` claimed a
 correct C4 counters and still showed the source's name and still crashed on close. The identity
 field is `0x261B`. The test still pins C4 per-track, which is right; only its causal claim was wrong.
 
+## THE LAST TWO REAL-SESSION EDIT DEFECTS, DIAGNOSED (2026-07-25)
+
+Both survive on the 600-session set; everything else round-trips. Diagnosed precisely rather than
+patched speculatively -- two guesses at this stage were already reverted today.
+
+### 1. `20230209 GENE GOO GOO DOLLS.ptx` — a size write lands ONE BYTE LATE
+
+`duplicate->remove` now differs by exactly **2 bytes** (it was an unreadable 18-of-55 table this
+morning). They corrupt a `0x1014` block HEADER:
+
+    orig   5a 03 00 | 27 00 00 00 | 14 10      size=39,          content_type=0x1014
+    back   5a 03 00 | 27 00 00 40 | 00 10      size=0x40000027,  content_type=0x1000
+
+The container-grow/shrink pass writes `body[nz + 3 : nz + 7]`. Here it wrote 221974..221977, i.e.
+`nz = z + 1` for the block at `z = 221970` -- one byte late, so it straddles the size field's top
+byte and the content-type's low byte and destroys both. In the intermediate (duplicated) file the
+corresponding block sits at 221996, a +26 shift, and there is an unexplained 46-byte gap between the
+`0x1014` at 222219 and the next at 222265.
+
+So: an offset mapped through `shift()` is off by one on this session. Everything needed to find it is
+above; it is NOT a phantom-bound problem any more.
+
+### 2. `20230208 GENE DEAD AND GONE.ptx` — the copy is not findable afterwards
+
+`remove_track('ZZ Probe')` raises `cannot locate track 'ZZ Probe'` on the file `duplicate_track` just
+produced. The 58-entry table reads fine, so this is the ADD path failing to register the new name
+somewhere `remove_track` looks -- a different defect from #1, and the one that makes the sampled
+figure 29/30 rather than 30/30.
+
+Neither is guarded: an output-side structural assertion was tried earlier today and reverted because
+it fired on `duplicate_track`'s own placeholder-then-rename intermediate on ordinary sessions.
+
 ## THE NAME-TABLE READER WAS BLIND ON 17.5% OF REAL SESSIONS (2026-07-25)
 
 Chasing "one odd session" turned into the largest reader defect found this session. **105 of 600**
