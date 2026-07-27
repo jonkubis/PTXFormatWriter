@@ -5949,7 +5949,19 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
           [int.from_bytes(data[p + len(n) + 18 : p + len(n) + 20], "little")
            for n, p in entries], 1)
 
-    lanes = by.get(0x251A, [])
+    # Only lanes the 0x2519 name table actually contains. The odd counts that made this check reject
+    # 12 untouched Pro Tools sessions were PHANTOMS, one per session, and the parent names them:
+    #
+    #     290 of 291 lanes   parent 0x2519   legitimate
+    #       1 of 291         parent 0xe196   not a real content type, and nested in a leaf payload
+    #
+    # Identical in all four sessions inspected (291, 381, 353, 291 lanes). So `2N+1` was `2N` real
+    # lanes plus one framed accident, the lane-major model is CORRECT, and the fix is to stop
+    # feeding the check noise rather than to weaken it. `0x5A` is 'Z' and occurs freely in leaf
+    # payloads; that is unavoidable, and filtering by PARENT is the cheap structural answer.
+    _nt19 = [(z, e) for z, e, c in bl if c == 0x2519]
+    lanes = [(z, e) for z, e in by.get(0x251A, [])
+             if any(nz < z and e <= ne for nz, ne in _nt19)] or by.get(0x251A, [])
     if lanes:
         nl = len(lanes) // 2 or 1
         lv = [int.from_bytes(
@@ -5959,16 +5971,9 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
         # lane-major: the same ordinal list repeated once per lane
         for half in range(0, len(lv), nl):
             check("0x251A-lane-ordinals", lv[half : half + nl], None)
-        # An ODD lane count cannot be split into equal halves, and this model has nothing to say
-        # about it. Measured: 12 of 50 sampled Mac-4TB sessions carry exactly 2N+1 lanes for N
-        # tracks (145 -> 291, 190 -> 381, 176 -> 353, 122 -> 245, 136 -> 273), and `len(lanes) // 2`
-        # then compares N entries against N+1 and reports a mismatch that is not one. All 12 were
-        # hard ERRORS on untouched Pro Tools files.
-        #
-        # NOT the multi-playlist case, which was the obvious guess and was checked: all 12 are
-        # SINGLE-playlist and all 10 multi-playlist sessions in the same sample are clean. What the
-        # odd block is -- a phantom framed in data, or a real extra lane -- is UNKNOWN, so this
-        # reports rather than rejects.
+        # An odd count should now be impossible -- the phantom that caused it is filtered by parent
+        # above -- but it is still reported rather than asserted, because an unequal split is a
+        # statement about THIS model not describing the session, not proof the session is wrong.
         if len(lv) % 2:
             note("0x251A-lane-ordinals",
                  f"{len(lv)} lanes is odd -- cannot be the same run repeated per lane; "
