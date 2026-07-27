@@ -3479,3 +3479,27 @@ NUL stays rejected in both modes -- without that, runs of zero padding parse as 
 Edit audit unchanged by this (dup 71 clean / 34 master-bus-target refusals, rm 105 clean / 0
 refusals, zero introduced errors), which is the expected result: arbitration fixes COUNTS, not
 editability.
+
+## 0x2506 SETTLED — the multiplier is the PLAYLIST count
+    n(0x2506) == n(0x2077) * n_playlists,  n_playlists = n(0x210B) or (if absent) n(0x2015)
+
+296/296 and 361/361 on two independent samples, ZERO non-integer ratios anywhere.
+
+WHY IT RESISTED FOR SO LONG, AND THE GENERAL LESSON: nearly every session gives each track
+exactly one playlist, so on ~96% of the corpus the playlist count and the track count are THE
+SAME NUMBER. That is why `n(0x2015)`, the `0x2624` declared count and the name-table entry count
+all tied at exactly 96.6% -- they were not three candidates, they were one number wearing three
+hats. And it is why `n(0x210B)` looked REFUTED at 39.3%: 181 of 296 sessions carry no 0x210B
+list at all, and for those the answer is not 0, it is one-per-track.
+
+The 3.4% that missed were the only informative sessions in the corpus -- all multi-playlist
+(DWTS PT 2603), M running 1-4 above the track count and matching n(0x210B) exactly. I found it
+by dumping every count for JUST those six and reading across the row.
+
+RULE TO REUSE: when several candidate quantities score identically, they are probably the same
+quantity on most of your data. Go straight to the rows where they DISAGREE -- that is the entire
+information content of the measurement. Averages over a corpus where the candidates coincide
+tell you nothing.
+
+Also consistent with the 0x2015 ordinal being a PLAYLIST index (spec §12): the playlist, not the
+track, is what PT scaffolds per marker.

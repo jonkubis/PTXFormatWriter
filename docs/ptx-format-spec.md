@@ -279,17 +279,32 @@ view/automation state: `0x261B` → { `0x260D` `(NEW)` → { `0x260A` · `0x260C
 `…06 25 FF FF FF FF 00 00 00 00`), emitted **once per marker per track-like object** — *not*
 waveform data (see §5c).
 
-> **REFINED 2026-07-26 — the relation is EXACT; the open question is the multiplier.** Measured over
-> 145 sessions on four drives that carry both types, `n(0x2506) == n(0x2077) × M` where `M` is a
-> per-track count. Best candidates, none universal:
+> **SETTLED 2026-07-27 — the multiplier is the PLAYLIST count, not the track count.**
 >
-> | candidate for `M` | exact |
-> |---|---|
-> | `n(0x2015)` | 139/145 = 95.9% |
-> | direct children of the `0x2624` track list | 139/145 = 95.9% |
-> | track records (`_TRACK_RECORD_TYPES`) | 134/145 = 92.4% |
-> | `n(0x200A)` | 134/145 | 
-> | `n(0x261B)` 55.9%, `n(0x1014)` 41.4%, `n(0x210B)` 39.3% | refuted |
+> ```
+> n(0x2506) == n(0x2077) × n_playlists
+>     where n_playlists = n(0x210B) if the session carries a 0x210B list, else n(0x2015)
+> ```
+>
+> **296/296 and 361/361 exact** on two independent samples across four drives, with **zero**
+> sessions showing a non-integer ratio — the relation holds everywhere, no exclusions.
+>
+> This resolves the earlier table, whose candidates were all shadows of the true one. Most
+> sessions give every track exactly one playlist, so the track count *equals* the playlist count
+> and scores 96.6% — `n(0x2015)`, the `0x2624` declared count, and the name-table entry count all
+> tie at exactly that figure because on those sessions they are the same number. The tell is the
+> 3.4% that miss: every one is a session with MULTI-playlist tracks, where `M` runs 1–4 above the
+> track count and matches `n(0x210B)` precisely (e.g. `DWTS PT 2603 g.ptx`: 146 tracks, **150
+> playlists**, M = 150).
+>
+> `n(0x210B)` alone scored only 39.3% and was wrongly "refuted": 181 of 296 sessions carry NO
+> `0x210B` list at all, and `0` is not the multiplier for those — it is one playlist per track.
+> The lesson is the recurring one in this file: a candidate that is *degenerate* on most of the
+> corpus looks either perfect or refuted depending on which half you weight, and only the
+> sessions where the candidates DISAGREE carry information.
+>
+> Consistent with §12's finding that the `0x2015` ordinal indexes the flat `0x210B` playlist
+> list: the playlist, not the track, is the unit Pro Tools scaffolds per marker.
 >
 > The exceptions are **not ragged** — every one factors exactly, with a multiplier 1, 2 or 4 larger
 > than the track count: `24840 = 138 × 180` (179 records), `26048 = 148 × 176` (175),
