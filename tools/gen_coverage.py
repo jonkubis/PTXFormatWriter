@@ -122,6 +122,25 @@ lines.append("Also excluded: ~2 files under `/Volumes/Hack 2TB SSD Old` that are
 lines.append("assembly, not Pro Tools sessions. Different `.ptx` entirely.\n")
 lines.append("**%d/%d content-types have a spec entry = %.1f%%**, covering %.2f%% of block instances.\n"%(
     len(doc),len(counts),100.0*len(doc)/len(counts),100.0*(tot-ub)/tot))
+# TWO DIFFERENT NUMBERS, reported separately because conflating them is how this file once carried
+# a FALSE 100%. "Documented" = has a spec entry describing framing/parents/counts/layout. "Settled"
+# = that entry does not itself say the purpose is unproven.
+import re as _re
+_secs = _re.split(r"(?m)^### ", open("docs/ptx-format-spec.md").read())
+_typed = [x for x in _secs if _re.match(r"0x[0-9a-fA-F]{4}", x)]
+_unsettled = [x for x in _typed
+              if _re.search(r"purpose UNKNOWN|UNPROVEN|not proven|still open|speculat|"
+                            r"INFERRED, not proven|cannot be settled", x, _re.I)]
+lines.append("## Described vs settled — two different numbers\n")
+lines.append("**%d types are DESCRIBED** (framing, parent/child, per-session counts, payload layout"%len(doc))
+lines.append("where decodable) and **0 real types are undocumented**.\n")
+lines.append("Of the %d typed sections in the spec, **%d still say the PURPOSE is unproven** —"%(len(_typed),len(_unsettled)))
+lines.append("`purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is")
+lines.append("the remaining semantic work, and it is deliberately visible: most of those entries name")
+lines.append("the Pro Tools experiment that would settle them (typically *one session, saved twice,")
+lines.append("with exactly one setting changed*), because no amount of further corpus reading can.\n")
+lines.append("Reporting only the first number would repeat this file's original error in a subtler")
+lines.append("form — \"documented\" is not \"understood\".\n")
 lines.append("**Read that number carefully.** It means every type observed in this corpus is")
 lines.append("*described* — framing, parent/child, per-session counts, and payload layout where")
 lines.append("decodable. It does NOT mean every field's *meaning* is proven: a number of spec entries")

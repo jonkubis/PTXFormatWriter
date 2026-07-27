@@ -24,6 +24,20 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 **322/482 content-types have a spec entry = 66.8%**, covering 99.93% of block instances.
 
+## Described vs settled — two different numbers
+
+**322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
+where decodable) and **0 real types are undocumented**.
+
+Of the 144 typed sections in the spec, **28 still say the PURPOSE is unproven** —
+`purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
+the remaining semantic work, and it is deliberately visible: most of those entries name
+the Pro Tools experiment that would settle them (typically *one session, saved twice,
+with exactly one setting changed*), because no amount of further corpus reading can.
+
+Reporting only the first number would repeat this file's original error in a subtler
+form — "documented" is not "understood".
+
 **Read that number carefully.** It means every type observed in this corpus is
 *described* — framing, parent/child, per-session counts, and payload layout where
 decodable. It does NOT mean every field's *meaning* is proven: a number of spec entries
