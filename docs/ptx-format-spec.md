@@ -2570,6 +2570,12 @@ form and reads garbage on another.
 
 ### 0x2016 / 0x2017 / 0x2019 / 0x201A — the `0x2011`-bearing top-level view-state run
 
+> **THE `0x2011`-CHILD FAMILY IS WIDER THAN THESE FOUR.** `0x206C`, `0x2505` and `0x259C` follow
+> the same rule — top-level, exactly one `0x2011` child, one per session in 180/180 — but sit
+> elsewhere in the top-level sequence. **Seven types share the schema**, so "holds a single
+> `0x2011`" is a structural CLASS, not a property of this run. Treat `0x2011` as the shared
+> payload record and its parent's content-type as the discriminator.
+
 - **Kind:** all four TOP-LEVEL, each holding **exactly one `0x2011` child** (180/180 sessions).
 - **Universality:** every one appears once per session in all 180 profiled (and 832 per the
   coverage tracker).
@@ -2627,6 +2633,45 @@ form and reads garbage on another.
   (`5a 05 00 6f 00 00 00 2a …`) that the size-driven walk does not surface as a child, so its
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
+
+### 0x2071 / 0x2072 — an identical adjacent PAIR (one `0x2070` child each)
+
+- **Kind:** TOP-LEVEL, each holding exactly one `0x2070` child. One of each per session, 180/180.
+- **Size:** **181 bytes, both, in every session** — no variation at all, `block_type` 1 for both.
+- **Position:** always adjacent and in this order: `0x2066 → 0x2071 → 0x2072 → 0x202D`.
+- **Payload:** identical openings (`5a 01 00 a5 00 00 00 70 20 02 00 00`). `0x2072` has exactly
+  **ONE distinct payload across 180 sessions**; `0x2071` has two.
+- **Reading:** a matched pair of the same structure rather than two unrelated types — same size,
+  same child type, same opening, always adjacent. The obvious guess is two instances of one
+  thing (a default/current pair, or two channels of something), but **which member is which is
+  UNPROVEN**: with `0x2072` byte-identical everywhere, the corpus cannot distinguish them.
+- **Confidence:** HIGH on framing/size/adjacency/universality (180/180); purpose unproven.
+
+### 0x2595 — universal single-byte top-level flag
+
+- **Kind:** TOP-LEVEL LEAF, one per session, 180/180.
+- **Size:** span 10, payload **one byte, value `0x01`, in every session** — no session deviates.
+- **Position:** `0x2069` (135/180) or `0x4841` (45/180) → `0x2595` → `0x2066` (128) or `0x259A` (52).
+- **Reading:** a presence/enabled flag. **Its meaning cannot be recovered from this corpus** —
+  a field nobody has ever set to anything else carries no evidence about what it controls. This
+  is the same limit recorded for `0x2511`'s preset names.
+- **Confidence:** HIGH on framing/value/universality; purpose UNPROVEN and corpus-unsettleable.
+
+### 0x2050 / 0x2073 / 0x202E — top-level leaves, one near-constant and two optional-payload
+
+- **`0x2050`** — TOP-LEVEL LEAF, 180/180, `0x2013 → 0x2050 → 0x204B`. Sizes 146/167/213 but only
+  **2 distinct payload openings** across 180 sessions: configuration, not session content.
+- **`0x2073`** — TOP-LEVEL LEAF, 180/180, `0x206E → 0x2073 → 0x204A`. Span **21 in 156 sessions**
+  with an all-zero payload, but **187,371 bytes in 17** — the largest optional payload seen in
+  this survey. Whatever it holds is absent from most sessions entirely.
+- **`0x202E`** — TOP-LEVEL LEAF, 180/180, `0x202D → 0x202E → 0x242F`. Span 13 with a 4-byte zero
+  payload in 174/180 (the `0x2000` stub shape), larger in the remaining 6.
+- **Reading:** all three are the same *shape* of thing — a top-level leaf whose payload is
+  usually empty/constant and occasionally large. Combined with `0x2027`/`0x202D`, that is five
+  universal types following this pattern, which is itself the finding: **the top-level sequence
+  is a fixed skeleton of slots, most of them empty in most sessions.**
+- **Confidence:** HIGH on framing/position/universality and on the empty-vs-populated split;
+  purposes UNPROVEN.
 
 ### 0x2000 — universal top-level 13-byte stub (count-0 / presence marker)
 

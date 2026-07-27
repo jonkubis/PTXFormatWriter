@@ -4244,3 +4244,32 @@ nine, all from measurement over 180 sessions:
 Every entry states its confidence honestly: framing/position/universality are HIGH (180/180),
 PURPOSE is unproven for all nine, and each says what Pro Tools experiment would settle it.
 Documenting STRUCTURE is corpus work; documenting MEANING is not.
+
+## Queue, batch 2: six more entries and TWO structural findings
+    entries 178 -> 184, mention-only 144 -> 138
+
+  * **0x2071 / 0x2072 are an identical adjacent PAIR** -- both exactly 181 bytes in every
+    session, both block_type 1, both holding one 0x2070 child, identical payload openings,
+    always in the order `0x2066 -> 0x2071 -> 0x2072 -> 0x202D`. 0x2072 has exactly ONE distinct
+    payload across 180 sessions. Two instances of one structure, not two types -- but WHICH is
+    which is corpus-unsettleable precisely because 0x2072 never varies.
+  * **0x2595** -- universal top-level LEAF, span 10, payload a single byte `0x01` in all 180.
+    A flag nobody has ever changed, so its meaning is unrecoverable here (same limit as 0x2511).
+  * **0x2050 / 0x2073 / 0x202E** -- top-level leaves whose payload is usually empty or constant
+    and occasionally large. 0x2073 is span 21 in 156 sessions and **187,371 bytes in 17**.
+
+TWO FINDINGS THAT ARE WORTH MORE THAN THE SIX ENTRIES:
+
+  1. **The `0x2011`-child rule is a CLASS, not a run.** I documented 0x2016/0x2017/0x2019/0x201A
+     as a family; 0x206C, 0x2505 and 0x259C obey the same rule (top-level, exactly one 0x2011
+     child, 180/180) from elsewhere in the sequence. **Seven types share one payload schema**, so
+     `0x2011` is the shared record and the PARENT's content-type is the discriminator. Spec
+     updated to say so rather than leaving four types looking special.
+  2. **The top-level sequence is a fixed skeleton of SLOTS, most empty in most sessions.**
+     0x2000, 0x2027, 0x202D, 0x202E and 0x2073 are all universal, all top-level, all usually a
+     13-or-21-byte stub with a zero payload, and all occasionally large. That reframes "what is
+     this 13-byte block" from a puzzle per type into one observation about the format: PT writes
+     the slot whether or not it has anything to put in it.
+
+Both findings came from PROFILING A BATCH rather than one type at a time -- the pattern is only
+visible across types, and would have been missed by documenting each in isolation.
