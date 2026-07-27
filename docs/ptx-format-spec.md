@@ -293,10 +293,28 @@ waveform data (see §5c).
 > identical). Most sessions are uniform — 51 all-`FF`, 5 all-`00`, 9 mixed — so the mixed ones
 > carry all the information.
 >
-> **What it is NOT: the mono/stereo flag.** That fit the track names in two hand-read sessions
-> (`Overheads`/`Room`/`Far Room` flagged among mono drum spots) and scored **20.8% (10/48)**
-> against actual channel counts, failing wholesale — all-set columns against mixed predictions,
-> and the reverse. Recorded because the name-reading was convincing and wrong.
+> **What it is NOT: the mono/stereo flag** — and the way that failed is worth more than the fact.
+> Broken out by session population, against real channel counts:
+>
+> | population | bit == track is stereo |
+> |---|---|
+> | sessions with MIXED bits | 77/86 = **89.5%** |
+> | all-`FF` sessions | 96/252 = 38.1% |
+> | all-`00` sessions | 9/38 = 23.7% |
+> | **all sessions** | 182/376 = **48.4%** |
+>
+> Quoting only the first row would have shipped a wrong rule with convincing evidence behind it.
+> A real rule holds in every population; this one holds exactly where the bit varies and collapses
+> where it does not, which is the signature of a correlation rather than a cause. Note this is the
+> MIRROR of the lesson that cracked the multiplier above: there, restricting to the rows where
+> candidates disagreed was the whole insight — because an exact arithmetic relation was being
+> tested. Here the same restriction manufactures a false positive, because a correlation is.
+> Restrict to the disagreeing cases to FIND a hypothesis; test it on everything to KEEP it.
+>
+> An earlier note recorded this as 20.8%; that figure came from a different alignment and the
+> table above supersedes it. Also tested and not it: track timebase (tick- vs sample-locked, which
+> could not even be aligned — `0x1052` lanes are per-CHANNEL, so a 6-playlist session has 10), and
+> whether the track has clips (72.1% inverted, 27.9% direct, on mixed sessions only).
 >
 > `0x2077` carries **no child-count field** for its `0x2506` children: no `u32`/`u16` anywhere in
 > its header matches the child count above 1.1% over 5,332 markers whose name length differs from

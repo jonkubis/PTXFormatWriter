@@ -3628,3 +3628,26 @@ sessions, which is now the fourth thing worth putting in front of Pro Tools.
 
 The regression test uses a fixture with a bare 0x5A in the header AND a trailer after the last
 row, and is verified to BITE: both earlier locators return 0 rows on it, the shipped one 3.
+
+## The 0x2506 per-playlist bit: still undecoded, and the near-miss is the lesson
+Three hypotheses tested against the bit, none survives:
+
+  * **track is STEREO** -- 89.5% on MIXED-bit sessions (77/86), but 38.1% on all-FF and 23.7%
+    on all-00; 48.4% overall. REFUTED.
+  * **track timebase** (tick vs sample) -- could not even be aligned: 0x1052 lanes are per
+    CHANNEL, so a 6-playlist session has 10 lanes. Worth remembering on its own.
+  * **track has clips** -- 72.1% inverted / 27.9% direct on mixed sessions. Noise.
+
+THE METHODOLOGICAL POINT, and it is the exact MIRROR of what cracked the 0x2506 multiplier:
+there, throwing away the rows where all candidates agreed was the entire insight -- because I was
+testing an EXACT ARITHMETIC RELATION, and the agreeing rows carried no information. Here, the
+same restriction MANUFACTURES a result: 89.5% on mixed sessions looks like a decode and is a
+selection effect, because a CORRELATION was being tested, and the agreeing rows are exactly where
+it has to be checked.
+
+    Restrict to the disagreeing cases to FIND a hypothesis. Test on everything to KEEP it.
+
+Had I quoted the 89.5% alone I would have shipped a wrong rule with convincing evidence attached
+-- the same failure as the earlier "it fits the track names" reading, one level more subtle.
+
+STILL NEEDS PT: one session saved twice with a single playlist-level setting changed.
