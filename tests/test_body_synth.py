@@ -3343,6 +3343,16 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertIn(accented.encode("utf-8"), renamed,
                       "the reported name's BYTES must actually be in the session")
 
+        # `_decode_name` is the shared fix: UTF-8 with a latin1 FALLBACK, which makes it a strict
+        # improvement over the old latin1-only decode -- valid UTF-8 round-trips, and bytes that
+        # are not valid UTF-8 decode exactly as they used to instead of raising.
+        self.assertEqual(BS._decode_name("Café".encode("utf-8")), "Café")
+        self.assertEqual(BS._decode_name(b"plain"), "plain")
+        self.assertEqual(BS._decode_name(b"\xff\xfe"), b"\xff\xfe".decode("latin1", "replace"))
+        for raw in ("Café".encode("utf-8"), "135·3BPM".encode("utf-8"), b"ascii"):
+            self.assertEqual(BS._decode_name(raw).encode("utf-8"), raw,
+                             "a decoded name must re-encode to the bytes it came from")
+
         out = BS.duplicate_track(renamed, accented, "ZZDUP")
         self.assertGreater(len(out), len(renamed))
         self.assertEqual([v for v in BS.validate_pt_invariants(out) if v["severity"] == "error"], [],

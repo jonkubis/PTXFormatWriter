@@ -4047,7 +4047,7 @@ def region_names(data: bytes) -> "list[tuple[int, str]]":
         if c != 0x2628:
             continue
         n = int.from_bytes(data[z + 9 : z + 13], "little")
-        out.append((z, data[z + 13 : z + 13 + n].decode("latin1") if n else ""))
+        out.append((z, _decode_name(data[z + 13 : z + 13 + n]) if n else ""))
     return out
 
 
@@ -4066,7 +4066,7 @@ def _region_list_names(data: bytes,
             cur = (z, e, len(out) - 1)
         elif c == 0x2628 and cur and cur[0] < z < cur[1] and out[cur[2]] == "":
             n = int.from_bytes(data[z + 9 : z + 13], "little")
-            out[cur[2]] = data[z + 13 : z + 13 + n].decode("latin1") if n else ""
+            out[cur[2]] = _decode_name(data[z + 13 : z + 13 + n]) if n else ""
     return out
 
 

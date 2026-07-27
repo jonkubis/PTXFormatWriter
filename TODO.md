@@ -3807,3 +3807,28 @@ MEASURED: accented-name tracks 0/28 -> 28/28 duplicate CLEAN with no new validat
 edit audit dup 71 -> 72 clean, refusals 34 -> 33; rm unchanged at 105 clean. 232 tests green.
 The regression test runs entirely on a local control file (rename a track to `Café`, then
 duplicate it) and is verified to bite -- reverting `_hdr_name` alone fails it.
+
+## ...and the loose end is closed: region_names and clips were broken the same way
+I flagged "~20 other latin1 name decodes remain, a smaller but real follow-up". Rather than
+reason about 20 lines, I tested WHICH PUBLIC READERS actually produce a name that is not in the
+file. That found the two that mattered in one pass:
+
+    reader          non-ASCII names   NOT in file (broken)
+    track_types                  71                      0   (fixed last commit)
+    region_names               2932                   2932
+    clips                      2305                   2305
+    markers / clip_lanes          0                      -   (no non-ASCII names produced)
+
+Both trace to the SAME two lines (`region_names` and its `_region_list_names` helper), now on
+`_decode_name`. After: 0 broken across all three readers -- 5,308 non-ASCII names, every one
+round-tripping to bytes present in its session.
+
+THE METHOD IS THE POINT, and it is the third time today it has been the fastest route: define
+the property the correct code must have (a name must re-encode to bytes IN the file), then let
+the corpus tell you which call sites violate it. Auditing 20 decode lines by reading them would
+have been slower and less certain -- and would not have told me that `markers` and `clip_lanes`
+were already fine, which is how I know the remaining latin1 decodes are not name readers at all.
+
+The remaining `.decode("latin1")` calls in this module are WAV/RIFF chunk text, plugin-id
+FourCCs and index-record tags -- byte-oriented data where latin1 is the correct choice, not
+user-facing names.
