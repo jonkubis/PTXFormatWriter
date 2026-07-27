@@ -766,7 +766,12 @@ def add_click_anyN(data: bytes, clean_ref: bytes, click_ref: bytes, at_top: bool
     # [13681, 13691, 13681, 13681, 13701] -- two collisions -- and validate() flagged it
     # `track-id-uniqueness`. The ids are session-scoped identities, so making them unique is enough;
     # they do not have to be the session's original numbers.
-    return _reallocate_duplicate_track_ids(out)
+    # ...and renumber the playlist ordinals. The click is cloned from a DONOR click track and
+    # inherits its ordinal (3), so a 4-track session with a click on top came out [3,1,2,3,4] --
+    # a REPEAT, and Pro Tools resolves a track through this ordinal, so two tracks on one slot
+    # become one object and it crashes on close (PT-confirmed 2026-07-27). EVERY click-bearing
+    # session this writer produced carried one. No-op when the column is already correct.
+    return _normalize_one_playlist_ordinals(_reallocate_duplicate_track_ids(out))
 
 
 # --- content transplant (clip / tempo / meter) from a matched control pair -----
@@ -3829,7 +3834,12 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
     #   * grown MIDI left its predecessor's next_kind mis-tagged;
     #   * a cloned track (notably the CLICK, cloned from a donor) inherited the donor's 10
     #     session-unique ids, which is what made Pro Tools treat two tracks as one object.
-    return _reallocate_duplicate_track_ids(_repair_next_kind_chain(body))
+    # ...and put the playlist ordinals in BLOCK order. The CLICK path clones a donor click track
+    # and inherits its ordinal, so `synthesize([2]*4, click='top')` emitted [3,1,2,3,4] -- a
+    # REPEAT, which is what Pro Tools crashes on (PT-confirmed 2026-07-27). Every click-bearing
+    # session this writer produced carried one. No-op where the column is already correct.
+    return _normalize_one_playlist_ordinals(
+        _reallocate_duplicate_track_ids(_repair_next_kind_chain(body)))
 
 
 # --- index-offset pointer ----------------------------------------------------
@@ -5992,11 +6002,30 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             a = data.find(_ORD2015_ANCHOR, z, e)
             if a >= 0:
                 anchors.add(a)
-    # NOT an error: PT LOADS sessions whose per-track subtree ordinals repeat. Our own
-    # `mixedmidi_click_{bottom,top,middle}` carry [1,2,5,3,4,3] and were PT-confirmed to open.
+    # A REPEAT IS AN ERROR -- the only invariant here with a direct Pro Tools crash behind it.
+    # Reported 2026-07-27 on a duplicate whose column read [1,2,3,4,4]: "Two tracks named Audio 4
+    # and Pro Tools crashes on close." Every stored NAME in that file was correct and distinct, so
+    # PT is not displaying a name there: it resolves the track through this ordinal, and two tracks
+    # on one slot collapse into a single object.
+    #
+    # THIS SUPERSEDES THE OLD NOTE HERE, which said "NOT an error: PT LOADS sessions whose per-track
+    # subtree ordinals repeat -- our own `mixedmidi_click_*` carry [1,2,5,3,4,3] and were
+    # PT-confirmed to open." That observation is TRUE and was incomplete: those files were confirmed
+    # to OPEN, and the crash happens on CLOSE. Both reports stand; the conclusion drawn from the
+    # first did not.
+    #
+    # GAPPED-BUT-DISTINCT IS NOT AN ERROR. The value is the index of the track's first playlist, so
+    # a multi-playlist session legitimately reads [1, 2, 12, 22, ...] -- `SANTA CLAUS IS COMIN` has
+    # 36 tracks and 126 playlists. Real sessions are strictly increasing in 1609/1609 Hack-drive,
+    # 250/250 Samples and 255/255 PT-authored controls, and never repeat; only our own output does.
     sub = [int.from_bytes(data[a + 18 : a + 22], "little") for a in sorted(anchors)]
-    if sub != list(range(1, len(sub) + 1)):
-        note("per-track-subtree-ordinal", f"{sub} is not dense 1..{len(sub)}")
+    if len(set(sub)) != len(sub):
+        _dups = sorted({v for v in sub if sub.count(v) > 1})
+        err("per-track-subtree-ordinal",
+            f"{sub} repeats {_dups} -- Pro Tools resolves a track through this ordinal, so two "
+            f"tracks on one slot become one object and it crashes on close")
+    elif any(b <= a for a, b in zip(sub, sub[1:])):
+        note("per-track-subtree-ordinal", f"{sub} is distinct but not increasing")
 
     # The COUNT is the rule (bug #19: a copy with no chain at all). Repeated display ROWS are only
     # nonconforming -- `mixedmidi_reorder_*` and `midi9` repeat them and PT opens them fine.
@@ -6870,7 +6899,21 @@ def _normalize_one_playlist_ordinals(data: bytes) -> bytes:
     n_pl = sum(1 for _z, _e, c in _size_driven_blocks(data) if c == 0x210B)
     vals = [v for _p, v in sites]
     want = list(range(1, len(sites) + 1))
-    if n_pl != len(sites) or vals == want or sorted(vals) != want:
+    # THE COUNT EQUALITY IS THE EVIDENCE, not the current values. One `0x210B` per `0x2015` means
+    # every track owns exactly one playlist, so the running total this ordinal encodes IS `1..N` --
+    # writing it is not invention.
+    #
+    # An earlier version also required `vals` to already be a permutation of `1..N`, which made it
+    # decline exactly where it was most needed: the click path clones a donor click track and
+    # inherits its ordinal, emitting `[3,1,2,3,4]` for a 4-track session with a click on top. Every
+    # click-bearing session this writer produced therefore carried a REPEAT, and a repeat is what
+    # Pro Tools crashes on (PT-confirmed 2026-07-27).
+    #
+    # Measured before relaxing it: among sessions where `n_0x210B == n_0x2015`, the column is
+    # exactly `1..N` in **335/345**, and all 10 exceptions are this project's own output
+    # (`mixedmidi_*`, verified with `session_is_probably_ours`). So on Pro Tools' own files this is
+    # a strict no-op; it only ever repairs ours.
+    if n_pl != len(sites) or vals == want:
         return data
     return _write_playlist_ordinals(data, [1] * len(sites))
 

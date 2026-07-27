@@ -1918,15 +1918,28 @@ class ViewChainAttributionTests(unittest.TestCase):
                 continue
             errs = [v for v in BS.validate_pt_invariants(_load_path(hits[0]))
                     if v["severity"] == "error"]
-            # `track-id-uniqueness` is deliberately NOT exempted away here. These fixtures were
-            # confirmed to OPEN (2026-06-20) — they were never confirmed to CLOSE, and a shared
-            # track-id range is a close-time defect: on 2026-07-25 all 4 duplicates carrying one
-            # crashed Pro Tools on close while all 3 collision-free removals were clean. Several of
-            # these click sessions do carry a collision, because our click path clones a donor
-            # track and inherited its ids. So the rule firing on them is a TRUE positive about a
-            # real defect, not the over-strictness this test exists to catch; what the test still
-            # guards is that NOTHING ELSE fires.
-            other = [v for v in errs if v["invariant"] != "track-id-uniqueness"]
+            # Two rules are deliberately NOT exempted away here, for the same reason. These
+            # fixtures were confirmed to OPEN (2026-06-20); they were never confirmed to CLOSE, and
+            # both rules describe CLOSE-TIME defects:
+            #
+            #   `track-id-uniqueness`        on 2026-07-25 all 4 duplicates carrying a shared id
+            #                                range crashed Pro Tools on close, while all 3
+            #                                collision-free removals were clean
+            #   `per-track-subtree-ordinal`  on 2026-07-27 a duplicate whose column read
+            #                                [1,2,3,4,4] was reported as "two tracks named Audio 4
+            #                                and Pro Tools crashes on close"
+            #
+            # These click sessions carry BOTH, because our click path clones a donor track and
+            # inherited its ids and ordinals. So both rules firing on them are TRUE positives about
+            # real defects, not the over-strictness this test exists to catch.
+            #
+            # NOTE THE DOCSTRING ABOVE IS NOW PARTLY HISTORICAL: it records that repeated subtree
+            # ordinals were dropped in 2026-06 as a "pure false-positive generator". That judgment
+            # was made from an open-only observation, which could not see a close-time crash. The
+            # 2026-07-27 report supplies what was missing. The earlier evidence still stands --
+            # these files DO open -- it simply never covered the question.
+            other = [v for v in errs
+                     if v["invariant"] not in ("track-id-uniqueness", "per-track-subtree-ordinal")]
             self.assertEqual(other, [], msg=f"{frag}: PT-confirmed to open — must not error")
 
     def test_pt_invariant_validator_is_clean_on_the_whole_corpus(self):
