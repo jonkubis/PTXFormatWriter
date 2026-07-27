@@ -1174,7 +1174,7 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** Each 0x2036 is one immediate child of a 0x2611 wrapper (sibling 0x260a); count(0x2611) == count(0x2036). Chain 0x2611 → 0x2621 → 0x2624; exactly one 0x2624 per session, so all items live in a single ordered list. N is small (1/2/5/13) and does NOT match track count; 10/19 sessions have zero 0x2036 — this is an OPTIONAL ordered permutation list, not a per-track record. WHAT the ordinal maps to and the permutation direction are not resolvable from these blocks.
 - **confidence:** high for LEAF/size/field-map/permutation/containment; medium-low for overall ROLE; low for the +20 flag meaning.
 
-### 0x206f — constant `01 00 00 00` leaf inside a per-element edit-record
+### 0x206f — leaf inside a per-element edit-record (**NOT constant — 2 payloads, 2 SIZES**) inside a per-element edit-record
 
 - **kind:** LEAF (0 children, 247/247).
 - **size:** fixed 13-byte block span (block_type 0x0002, size field 6, 4-byte payload).
@@ -1881,7 +1881,7 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** A small fixed-size top-level block holding one session-wide on/off flag (plus constant framing), sitting in the global-settings cluster between the 0x1040 preferences group and the track region. **HIGH** on layout, size, kind, parent, ROOT ordering, and on +1 being the only varying byte (all byte-exact across 19 non-Hipsters sessions, many distinct sessions); **LOW-TO-MEDIUM** on the UI/semantic MEANING of the +1 flag — demonstrably a per-session boolean that varies independently of session structure, but WHICH view/preference it gates is NOT pinned from the binary alone. Treating it as a display/behavior toggle PT owns is a reasonable inference, not a confirmed schema.
 - **Confidence:** high (layout/structure/ordering; +1 as sole varying byte); low-to-medium for the +1 flag's semantic meaning.
 
-### 0x2049 — Top-level session numeric-settings leaf
+### 0x2049 — Top-level session numeric-settings leaf (**NOT fixed — 12 payloads externally**)
 
 - **Kind:** LEAF (block_type u16@z+1 = 0x0002; no children in any of 19 instances). TOP-LEVEL, not nested: span-containment enumeration finds NO containing block in all 19 — there is no explicit ROOT wrapper block that holds it. In raw stream order invariably preceded by 0x2047 and followed by 0x206e (19/19), so it sits in the global-settings cluster before the track/media region.
 - **Size:** FIXED: size field = 22, payload = 20 bytes (span = [z, z+7+22] = z..z+29). Exactly ONE per session. Byte-identical across all 19 corpus sessions (Hipsters excluded — did not load).
@@ -1954,7 +1954,33 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** Reads as a fixed default-configuration record whose only session-variable field is the leading version/flag byte (100.0 = percent/full-scale default; 16384 = normalized-unit constant). HONESTY DOWNGRADE: reading the small integers as three u32s at +1/+7/+11 hides a structural inconsistency — a u32 at +1 ends at +5, leaving +5/+6 as an unexplained zero gap, and the strides are 6 then 4 (not uniform). What the data guarantees is isolated single nonzero bytes 0x04@+1, 0x03@+7, 0x02@+11 with everything else in +1..+14 zero; the true widths (u8 vs u16 vs u32) and whether these are enum/type tags vs counts are UNCONFIRMABLE from static corpus data. Once-per-session, consistent with a fixed default/display-state config.
 - **confidence:** HIGH on the raw facts (frame, size, parent/siblings, every constant value verified byte-for-byte across 19/19 plus a 20th Hipsters instance; flag-mapping exactly correct). MEDIUM on the field-semantics interpretation — the 'three u32 ordinals' framing is the weak point.
 
-### 0x104d — Top-level ordinal + 0.5-pair leaf (view-state)
+### "Fixed payload" claims — audited against every reachable drive (2026-07-26)
+
+Eight entries described their payload as **fixed**, **constant** or a **placeholder**. Every one of
+those words is a claim about INVARIANCE, and `control_files` is one machine — precisely the condition
+under which invariance is easy to observe and wrong. Distinct payload prefixes, inside `control_files`
+versus outside it:
+
+| type | in controls | external | verdict |
+|---|---|---|---|
+| `0x103f` | 1 | 1 | holds |
+| `0x104b` | 1 | 1 | holds |
+| `0x2103` | 1 | 1 | holds |
+| `0x2511` | 1 | 1 | holds |
+| `0x104d` | 1 | **4** | **NOT fixed** |
+| `0x2018` | 1 | **5** | **NOT fixed** |
+| `0x2049` | 1 | **12** | **NOT fixed** |
+| `0x206f` | 1 | **2**, and sizes **13 and 54** | **NOT constant** |
+
+Four of eight were wrong, in the same way `0x258e`'s "a FIXED SET OF 11 PER SESSION" was wrong —
+a constant measured where its input never varied. `0x206f` is the sharpest: documented as a
+"constant `01 00 00 00` leaf", it has a **54-byte form** as well as the 13-byte one, which is a
+different record rather than a different value.
+
+The four that hold are now backed by four drives instead of one. That still does not settle their
+PURPOSE — constant is not understood — but the denominator is honest.
+
+### 0x104d — Top-level ordinal + 0.5-pair leaf (**NOT fixed — 4 payloads externally**) (view-state)
 
 - **kind:** LEAF; top-level (no enclosing 0x5A; parent None in 26/26). No children (26/26). block_type (u16@z+1) = 3. Exactly one instance per session (26/26). Immediately follows 0x1040 and precedes 0x207e in every session.
 - **size:** Fixed: size u32@z+3 = 36 in every instance (26/26, incl. the huge Hipsters sessions). Payload = size-2 = 34 bytes (the trailing 2 bytes of a naive z+9..z+9+size read belong to the next block's 0x5A marker). Block span = [z, z+7+size]; payload@z+9.
@@ -2189,7 +2215,7 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** In the top-level session-preferences region; top-level neighbors byte-for-byte constant: ...0x2050, 0x204b, [0x207b], 0x2016, 0x2017... (19/19). PT-owned session-config state PT recomputes/rewrites; not for hand-authoring. The 'timecode/SMPTE-config' role is well-grounded for the large form (direct HH:MM:SS:FF evidence) but INFERRED for the 13 small-form sessions (no timecode string). IMPLEMENTATION CAVEAT: small form payload is 9 bytes with no child / no timecode string — consumers must not read past +9. CORRECTIONS from proposal: (1) the 0x4530 child spans 97 (size_field 90), NOT 115 (115 is the 0x207b PARENT span); (2) +1 does NOT track form/child-presence — only block_type predicts child presence, +1 varies independently within both forms.
 - **confidence:** HIGH on frame, size/kind bimodality, per-session count (1), parent=top-level, neighbor order, constant +0=0 and +3=1000, block_type-predicts-child, and the byte-identical 0x4530 child + its '00:00:00:00' timecode string. MEDIUM-LOW on the meaning of the two u16 enums (+1, +7) — distributions stable but unmapped, and +1's spread is partly a backup-duplication artifact.
 
-### 0x2018 — Small fixed boolean/flags block (top-level window/view-state)
+### 0x2018 — Small boolean/flags block (**NOT fixed — 5 payloads externally**) (top-level window/view-state)
 
 - **kind:** LEAF (0 children, 26/26). Parent: top-level (None, 26/26). block_type=0x08 (all instances). prev top-level sibling = 0x2019 (26/26). next top-level sibling = 0x201a (20/26) OR 0x4300 (6/26 — the 4 DWTS variants + MANOLITO + THE WIND, where an 11-byte 0x4300 block sits between 0x2018 and 0x201a).
 - **size:** Constant. Exactly 1 per session (26/26). span=22, size_field=15 (u32@z+3), payload 13 bytes — identical across ALL 26 incl. the 7 huge Hipsters backups. Header = `5A 08 00 (block_type=8) | 0F 00 00 00 (size=15) | 18 20 (content_type)`. Payload @z+9.
