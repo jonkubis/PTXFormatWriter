@@ -1290,15 +1290,23 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **notes:** Geometry is (x, y, width, height), NOT LTRB (decisively: 195/483 nonzero have width<x, 231/483 have height<y; 32 records are 1×1 collapsed windows). Appears exactly once inside each of 24 distinct single-instance view-container parents (0x2016, 0x2017, 0x2019, 0x201a…0x259c) PLUS 2–5×/session inside 0x2552 (browser/list windows) = 25 distinct parent content-types. Per-parent geometry is a stable role (0x2019 height always 102; 0x2016/0x2017 the ~1377×856 main windows). These are LIVE window geometries, not static constants.
 - **confidence:** high.
 
-### 0x258e — display-state flags record (a FIXED SET OF 11 PER SESSION — not per-track)
+### 0x258e — display-state flags record (**9 fixed + one per `0x202a`** — not per-track)
 
-> **CORRECTION (measured across all 282 corpus sessions).** This entry previously called `0x258e`
-> a "per-track/per-clip" record. It is not. Every session contains **exactly 11** of them —
-> 282/282 sessions, with track counts ranging from 0 to 512 — so the count is completely
-> independent of the number of tracks or clips. They also never sit inside a track record: all
-> 3102 instances are OUTSIDE every `0x261C`/`0x2620`/`0x261E`. The 11 divide by parent as
-> **7 under `0x2510`, 2 under `0x204a`, 2 under `0x202a`**, which makes them a fixed
-> session-level set (view/window state), not per-object state. The field table below is unchanged
+> **SETTLED 2026-07-26 — the count is `9 + n(0x202a)`, 260/260 sessions across four drives.**
+> `0x202a` is the track-GROUP definition, emitted twice per session (Edit-group list + Mix-group
+> list), so equivalently `0x258e` = 9 + 2 × (distinct groups). Add a group and two more appear.
+>
+> **The previous "exactly 11, 282/282" was an artifact of a corpus in which the varying term never
+> varied.** Every session in `control_files` carries only the built-in `<ALL>` group — 2 `0x202a`
+> — so 9 + 2 = 11 in all 282, and the count looked constant. On the two SSDs, where sessions define
+> real Edit/Mix groups, "exactly 11" holds in only **152 of 260** while `9 + n(0x202a)` holds in
+> **260 of 260**. This is the same failure as the `0x2015` ordinal's "dense 1..N, 250/250" and the
+> name-table renumber's "300/300": a constant measured where its input was constant.
+>
+> What survives from that correction unchanged: `0x258e` is NOT per-track or per-clip — the count is
+> independent of the 0..512 track range — and no instance sits inside a `0x261C`/`0x2620`/`0x261E`.
+> The fixed 9 divide by parent as **7 under `0x2510`, 2 under `0x204a`**; the remainder track
+> `0x202a` one-for-one. The field table below is unchanged
 > and still accurate; only the *scope* was wrong — and a writer that scaled these with track count
 > would be corrupting a session-level structure.
 
