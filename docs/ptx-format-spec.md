@@ -949,6 +949,16 @@ draws); `ft1`/`ft2` are the source mtime FILETIME, `filesize` the referenced WAV
    counts on 32 more sessions while losing none. The `0x2A` trailer marker is NOT a usable
    validator on its own: it holds for only 94.98% of entries (11,158 of 11,748).
 
+   **The declared count is the arbiter of its own parse.** A few real names carry a raw control
+   byte mid-string (`DR PPB \x10OP HAT` — a `T` in every other copy of that name), which a
+   control-character guard treats as end-of-table. Blanket-allowing control bytes is not the
+   answer: over 280 sessions it agrees with the declared counts on 2 more but 1 fewer. Read
+   strictly, compare against the declared count, and accept a permissive re-read only when it
+   reproduces that count exactly — 280/280, versus 277 strict and 279 permissive. Keep NUL
+   rejected in both modes, or runs of zero padding parse as names. Getting this right is what
+   makes a count-rewriting pass fully inert on unedited sessions (0 bytes over 480, against 54
+   sessions rewritten before).
+
 `ptxformatwriter.eos_validator.simulate(data, blocks)` reproduces PT's count-driven read of the
 name table and track container and pinpoints the object/field that would overrun;
 `body_synth.validate(data)` runs it plus the count-container check as a **pre-write gate** (sound

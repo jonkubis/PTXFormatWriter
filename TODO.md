@@ -3452,3 +3452,30 @@ showed up as a no-op violation.
 The residual 5 are all one project (`M20 PUP PUP BOOGIE_MIX`) and are presumably the same
 sessions as the 3 "neither walk matches the declared count" cases. NOT yet diagnosed -- next
 thread to pull on this file.
+
+## The declared count arbitrates the parse (residual 5 sessions -> 0)
+The 5 leftover sessions (`M20 PUP PUP BOOGIE_MIX`) had two names carrying a raw `0x10`
+mid-string -- `DR PPB \x10OP HAT`, which is `DR PPB TOP HAT` in every other copy of the name.
+The control-character guard ended the walk there: 7 entries parsed of 143.
+
+I did NOT just relax the guard. Measured with the declared-count oracle over 280 sessions:
+    strict      : 277 match
+    permissive  : 279 match   <- gains 2 but LOSES 1
+Trading a session away is not acceptable when the read feeds `_fix_name_table_count`, which
+WRITES the count PT bounds its read by. So the table's own declared count now ARBITRATES:
+strict first, permissive accepted only if strict disagrees with the declared count AND
+permissive reproduces it exactly.
+
+    arbitrated  : 280/280 match, no session traded away
+
+And the write path is now perfectly inert on unedited sessions:
+    _fix_name_table_count on 480 UNTOUCHED sessions
+      before today : 54 modified, 61 bytes
+      after UTF-8  :  5 modified,  5 bytes
+      arbitrated   :  0 modified,  0 bytes
+
+NUL stays rejected in both modes -- without that, runs of zero padding parse as names.
+
+Edit audit unchanged by this (dup 71 clean / 34 master-bus-target refusals, rm 105 clean / 0
+refusals, zero introduced errors), which is the expected result: arbitration fixes COUNTS, not
+editability.

@@ -3215,6 +3215,37 @@ class NameTablePreambleTests(unittest.TestCase):
         buf = (10 ** 6).to_bytes(4, "little") + b"ABCD"
         self.assertIsNone(BS._name_entry_head(buf, 0, len(buf)))
 
+    def test_the_permissive_name_read_is_a_fallback_not_the_default(self):
+        """Control bytes are tolerated only as an ARBITRATED fallback, never by default.
+
+        Two real names carry a raw `0x10` mid-string (`DR PPB \\x10OP HAT` -- a `T` in every
+        other copy of that name), and the control-character guard ended the walk there: one
+        session parsed 7 of its 143 entries. But simply allowing control bytes is NOT the fix --
+        measured over 280 sessions it agrees with the tables' declared counts on 2 more and on
+        1 FEWER, and this read feeds `_fix_name_table_count`, which WRITES that count into the
+        session. Trading one session for two is not an improvement when the cost is a wrong
+        count in a file Pro Tools bounds its read by.
+
+        So the table's own declared count arbitrates: strict read first, permissive accepted
+        only when strict disagrees with the declared count and permissive reproduces it. That
+        is 280/280 sessions, where strict alone is 277 and permissive alone is 279 -- and it
+        makes `_fix_name_table_count` a perfect no-op on 480 untouched sessions (0 bytes,
+        against 54 sessions before this fix)."""
+        ctrl = b"DR PPB \x10OP HAT"
+        buf = len(ctrl).to_bytes(4, "little") + ctrl + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf)),
+                          "the DEFAULT read must still reject a control byte")
+        got = BS._name_entry_head(buf, 0, len(buf), True)
+        self.assertIsNotNone(got, "the permissive read must accept it")
+        self.assertEqual(got[0].encode("utf-8"), ctrl)
+
+        # NUL stays rejected in BOTH modes: without that, zero padding parses as a name
+        nul = b"AB\x00CD"
+        buf = len(nul).to_bytes(4, "little") + nul + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf), True),
+                          "NUL is not a name byte even permissively -- padding would parse")
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf), False))
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 

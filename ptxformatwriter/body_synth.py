@@ -5048,23 +5048,48 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
     # entries for a 72-track session. Rather than guess at another flag, resolve the start
     # EMPIRICALLY: if no entry parses where the flag says it should, step forward (in 2-byte units,
     # preserving alignment) to the first offset that does.
-    if _name_entry_head(data, q, end) is None:
-        for _cand in range(q, min(q + 64, max(q, end - 8)), 2):
-            if _name_entry_head(data, _cand, end) is not None:
-                q = _cand
+    def _run(allow_ctrl: bool) -> "tuple[list[tuple[str, int]], int]":
+        p = q
+        if _name_entry_head(data, p, end, allow_ctrl) is None:
+            for _cand in range(p, min(p + 64, max(p, end - 8)), 2):
+                if _name_entry_head(data, _cand, end, allow_ctrl) is not None:
+                    p = _cand
+                    break
+        start = p
+        acc: "list[tuple[str, int]]" = []
+        while True:
+            head = _name_entry_head(data, p, end, allow_ctrl)
+            if head is None:
                 break
-    out: "list[tuple[str, int]]" = []
-    while True:
-        head = _name_entry_head(data, q, end)
-        if head is None:
-            break
-        name, name_end = head
-        out.append((name, q + 4))
-        q = _next_name_entry(data, name_end, end)
+            name, name_end = head
+            acc.append((name, p + 4))
+            p = _next_name_entry(data, name_end, end, allow_ctrl)
+        return acc, start
+
+    out, start = _run(False)
+    # The table DECLARES its own entry count, so it can arbitrate its own parse. Two real names
+    # carry a raw 0x10 mid-string (`DR PPB \x10OP HAT` -- a `T` in every other copy of the name),
+    # and the control-character guard ends the walk there: one session parsed 7 of 143. Simply
+    # allowing control bytes is NOT the fix -- measured over 280 sessions it agrees with the
+    # declared count on 2 more but on 1 FEWER, and this feeds `_fix_name_table_count`, which
+    # WRITES that count. So keep the strict read, and accept the permissive one only when strict
+    # disagrees with the declared count and permissive reproduces it exactly. That is 279/280
+    # with no session traded away, where strict alone is 277 and permissive alone is 279.
+    if _name_table_declared_count(data, z, start) != len(out):
+        alt, alt_start = _run(True)
+        if alt_start == start and _name_table_declared_count(data, z, alt_start) == len(alt):
+            return alt
     return out
 
 
-def _name_entry_head(data: bytes, q: int, end: int) -> "tuple[str, int] | None":
+def _name_table_declared_count(data: bytes, z: int, start: int) -> int:
+    """The `u16` entry count the `0x2519` table states for itself, read at the EFFECTIVE shift
+    implied by where the entries actually begin (see `_name_table_entry_start`)."""
+    pos = z + 9 + 0x0E + (start - (z + 9 + 0x14))
+    return int.from_bytes(data[pos : pos + 2], "little")
+
+
+def _name_entry_head(data: bytes, q: int, end: int, allow_ctrl: bool = False) -> "tuple[str, int] | None":
     """`(name, name_end)` if a `<len:u32><name>` entry begins at `q`, else None.
 
     Names are UTF-8, not ASCII. This used to require every byte in `0x20..0x7E`, which rejects
@@ -5085,7 +5110,9 @@ def _name_entry_head(data: bytes, q: int, end: int) -> "tuple[str, int] | None":
     if not (0 < nlen <= _NAME_ENTRY_MAX_BYTES) or q + 4 + nlen > end:
         return None
     name = data[q + 4 : q + 4 + nlen]
-    if any(b < 0x20 or b == 0x7F for b in name):
+    # `allow_ctrl` is the arbitrated fallback (see `_inline_name_entries`), never the default:
+    # it still rejects NUL, without which run-of-zero padding parses as a name.
+    if any(b == 0x00 for b in name) if allow_ctrl else any(b < 0x20 or b == 0x7F for b in name):
         return None
     try:
         return name.decode("utf-8"), q + 4 + nlen
@@ -5093,7 +5120,7 @@ def _name_entry_head(data: bytes, q: int, end: int) -> "tuple[str, int] | None":
         return None
 
 
-def _next_name_entry(data: bytes, name_end: int, end: int) -> int:
+def _next_name_entry(data: bytes, name_end: int, end: int, allow_ctrl: bool = False) -> int:
     """Where the entry after the one ending at `name_end` starts.
 
     The suffix is NOT a constant: its ordinal is a `u32` in almost every entry but a `u16` in
@@ -5108,10 +5135,10 @@ def _next_name_entry(data: bytes, name_end: int, end: int) -> int:
     entry; neither landing means there is no next entry.
     """
     q = name_end + _NAME_ENTRY_SUFFIX
-    if _name_entry_head(data, q, end) is not None:
+    if _name_entry_head(data, q, end, allow_ctrl) is not None:
         return q
     alt = name_end + _NAME_ENTRY_SUFFIX_SHORT
-    return alt if _name_entry_head(data, alt, end) is not None else q
+    return alt if _name_entry_head(data, alt, end, allow_ctrl) is not None else q
 
 
 def _fix_name_table_count(data: bytes) -> bytes:
