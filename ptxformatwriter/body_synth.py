@@ -5905,8 +5905,13 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     #
     # An 11x difference by layout says most of these are the LOCATOR misfiring on a form it was not
     # derived from -- the same failure as `_ORD2015_ANCHOR`'s 18-byte literal (24.1% of blocks) and
-    # `_uuid_list_offset`'s hardcoded `count == 10`. The residual 5% on the UUID-bearing form may be
-    # genuine sharing; nothing here distinguishes them.
+    # `_uuid_list_offset`'s hardcoded `count == 10`.
+    #
+    # PHANTOMS RULED OUT, unlike the 0x251A lane case where exactly one framed accident per session
+    # was the whole story. Every 0x261B has a legitimate track-record parent -- 0x261C 7701,
+    # 0x261E 2304, 0x261D 384, no exceptions -- and filtering to record-parented blocks leaves the
+    # collision count unchanged at 19/207. So this is the locator misreading REAL blocks of the
+    # other layout, not noise being counted.
     #
     # This does NOT weaken the duplicate fix. `_reallocate_duplicate_track_ids` still MAKES the
     # copy's range unique -- that is what Pro Tools confirmed -- and is independent of whether this

@@ -2042,6 +2042,23 @@ claim was never about track records, it was about the narrower set that carries 
 readings are now measured — `0x261B == six kinds` 145/193, `== seven kinds` 126/193 — so neither is
 the rule, and the relation needs the set named explicitly rather than "per track".
 
+**SETTLED — `0x261B` belongs to exactly three track kinds.** The split is binary, with no partial
+cases anywhere:
+
+| kind | records | carrying a `0x261B` |
+|---|---|---|
+| audio `0x261C` | 7701 | **100%** |
+| click/aux `0x261E` | 2304 | **100%** |
+| master/bus `0x261D` | 384 | **100%** |
+| VCA `0x261F` | 328 | **0%** |
+| MIDI `0x2620` | 148 | **0%** |
+| instrument `0x2621` | 21 | **0%** |
+
+So the rule is `n(0x261B) == n(0x261C) + n(0x261E) + n(0x261D)` — **207/207 sessions** across four
+drives, 57 control and 150 external. "One `0x261B` per track" failed 58/68 not because the invariant
+was broken but because it named the wrong set: `0x261B` is the identity of a track that carries
+AUDIO, and MIDI, instrument and VCA tracks have none.
+
 **Every "per track" claim in this document must therefore say WHICH set it means**: the name-table
 rows (7 kinds), the identity-bearing records (`0x261C` and friends, no `0x261F`), or the display
 chain. `0x2015` and `0x200A` track the first; `0x261B` and `track_id_ranges` track the second.
