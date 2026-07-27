@@ -3948,3 +3948,27 @@ Deriving is only safe where the derivation has been proven exhaustive; preservin
 WRITE-LAYER IDENTITY STATUS: move_clip, rename_track, set_session_name, sync_marker_playlist_rows
 all byte-exact everywhere tested; replace_tempo_map 158/160; replace_meter_map 55/56. The three
 stragglers are uncharacterised and are the next thread here.
+
+## Write-layer identity is now clean: 160/160 tempo, 55/56 meter
+The last two tempo stragglers were the SAME lesson a third time. `+39` is the first-record flag
+in 3,245 of 3,247 real records -- but two sessions of one project carry it on record **2**. So
+even that one is not derivable, only overwhelmingly likely.
+
+FIX (and it generalises): a record that ALREADY holds its target event is left completely
+untouched. Identity replace then cannot rewrite anything by construction, and every per-record
+exception -- known (`+21`) or unknown -- survives. tempo 158/160 -> 160/160.
+
+THE REMAINING METER STRAGGLER IS NOT A DEFECT: `SYNTH_meter_4-4_to_7-8_bar3.ptx` is OUR OWN
+output (the `SYNTH_` prefix), carrying a bar number written by an older formula -- the current
+code computes 3 for a file whose own name says bar 3, and the stored value is 2. A stale
+artifact, not PT data. Worth regenerating rather than "fixing" the writer to match it.
+
+    move_clip / rename_track / set_session_name / sync_marker_playlist_rows : byte-exact
+    replace_tempo_map : 160/160        replace_meter_map : 55/56 (the one above)
+
+THE RULE THAT CAME OUT OF ALL SIX FIXES TODAY, worth applying to every future writer:
+**touch only what actually changes, and preserve everything else.** Every one of these defects
+was the code deriving a value that real sessions disagree with -- record contents, `+21`, `+39`,
+the meter trailing entry. Each derivation was measured and TRUE for 82%-99.9% of the corpus,
+which is exactly why each survived so long. A no-op edit that is byte-exact BY CONSTRUCTION does
+not depend on any of those derivations being right.

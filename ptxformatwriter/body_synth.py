@@ -2222,9 +2222,18 @@ def _rewrite_tempo_records(block: bytes, events) -> bytes:
         # `_resize_tempo_block`, so leaving +21 alone preserves each record's own value, and a
         # newly grown record inherits the template's. Its MEANING is unknown (a linear-ramp flag
         # is the obvious guess) and needs Pro Tools; preserving it does not require knowing it.
+        # Leave a record alone entirely when it ALREADY holds this event. +39 is the
+        # first-record flag in 3,245 of 3,247 real records -- but two sessions of one project
+        # carry it on record 2 instead, so even this one is not derivable, only overwhelmingly
+        # likely. Touching only records that actually change keeps every such exception intact
+        # and makes an identity replace byte-exact.
+        want_tick = (_ZERO_TICKS + int(tick)).to_bytes(5, "little")
+        want_bpm = struct.pack("<d", float(bpm))
+        if out[r + 30 : r + 35] == want_tick and out[r + 40 : r + 48] == want_bpm:
+            continue
         out[r + 39] = 1 if idx == 0 else 0
-        out[r + 30 : r + 35] = (_ZERO_TICKS + int(tick)).to_bytes(5, "little")
-        out[r + 40 : r + 48] = struct.pack("<d", float(bpm))
+        out[r + 30 : r + 35] = want_tick
+        out[r + 40 : r + 48] = want_bpm
     return bytes(out)
 
 

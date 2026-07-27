@@ -675,12 +675,19 @@ fields, in the 6-char-name template layout: **channel** at `+78`, region **GUID*
 >
 > | offset | =1 | =0 | reading |
 > |---|---|---|---|
-> | `+39` | 309 | 2,938 | **the first-record flag** — essentially every 1 is at index 0 |
+> | `+39` | 309 | 2,938 | the first-record flag in **3,245 of 3,247** records — see the caveat below |
 > | `+21` | 1,726 | 1,521 | an INDEPENDENT per-record boolean, set in 1,419 of 2,938 NON-first records |
 >
 > They disagree in 1,417 records, so `+21` cannot be derived from position. Its MEANING is
 > unknown (a linear-ramp flag is the obvious guess and needs Pro Tools), but a writer does not
-> need to know it — **preserve it per record.** `replace_tempo_map` set both from the index,
+> need to know it — **preserve it per record.**
+>
+> **AND `+39` IS NOT DERIVABLE EITHER, only overwhelmingly likely.** Two sessions of one project
+> carry it on record **2** rather than record 0. At 3,245/3,247 it is the kind of rule that looks
+> exact until the corpus widens — the third time in this file that a 99%+ pattern has had
+> exceptions. The writer therefore leaves any record that already holds its target event
+> completely untouched, which preserves such exceptions and makes an identity replace byte-exact
+> on **160 of 160** sessions. `replace_tempo_map` set both from the index,
 > silently rewriting `+21` from 1 to 0 in 1,247 records across 15 sessions, so an identity
 > replace was not byte-exact. Identity is now byte-exact on 158 of 160 corpus sessions.
 
