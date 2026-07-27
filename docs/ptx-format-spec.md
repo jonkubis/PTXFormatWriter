@@ -2749,7 +2749,7 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Notes:** Stores the two default title-block field labels ('Title', 'Composer') as length-prefixed strings, followed by a small run of f32 page-layout geometry values (Score Editor page setup). A singleton child under the 0x2023 session-settings group, immediately after a sibling 0x2434. Score-editor page-setup state PT would recompute/rewrite from the Score Setup dialog. The 'Title'/'Composer' strings make the score/print-header role certain; WHICH geometric quantity each f32 represents is inferred from context, NOT proven.
 - **Confidence:** MEDIUM. All f32 offsets, the +53 flags, both strings, and the fixed 77-byte size are CONFIRMED exact across the 7 instances. GENERALITY CAVEAT: all 7 are one project, so treat as a one-project sample — role confident, exact geometric semantics best-effort, cross-project stability untested.
 
-### 0x261F / 0x2610 / 0x2515 / 0x2514 — a seventh entry under the track list (**structure PROVEN, purpose UNKNOWN**)
+### 0x261F / 0x2610 / 0x2515 / 0x2514 — a SEVENTH TRACK-RECORD KIND (VCA-shaped)
 
 Absent from **both** corpora this project measured for most of its life (0/282 `control_files`,
 0/250 `/Volumes/Samples`) and present in 65 of 300 sampled sessions on two other drives. Found by
@@ -2775,7 +2775,24 @@ like them, contains the full per-track apparatus — `0x102D` → `0x2619` (iden
 `0x2610` 173–197, `0x2515` 357–365, each in a tight band, consistent with a name-length-driven
 record rather than a payload-driven one.
 
-**PURPOSE UNKNOWN — and one attractive hypothesis is already REFUTED.** Because `0x261F` carries
+**SOLVED (structurally) 2026-07-26 — `0x261F` IS A SEVENTH TRACK-RECORD KIND.** It satisfies the
+exact criterion by which the other six were enumerated — a direct child of the `0x2624` track list —
+in **290/290** instances, it occupies a row in the `0x2519` name table (553 of its creation names are
+entries there, and `entries == records` only balances once it is counted: `160 = 148 + 12`,
+`195 = 182 + 13`, `189 = 176 + 13`), and it carries the full per-track apparatus. It is now in
+`_TRACK_RECORD_TYPES`.
+
+That was not cosmetic. `_assert_name_table_complete` compares name entries against track records to
+refuse editing a session whose table it cannot fully parse; while this kind went uncounted the guard
+**undercounted by 12–13 rows** on such sessions and would have passed a table missing that many.
+
+**Which kind it is, is INFERRED, not proven.** Its creation names read `vDrums, vBass, vGtrs,
+vPerc, vKeys, vStrings, vBrass, vLead Vox, vBGVs, vFX, vMASTERS, MASTERS ALL` — one engineer's
+`v`-prefix convention across 130–186-track mixes — and `0x263B`, documented above as
+folder/grouping, is **absent from all 59** sessions carrying `0x261F`. VCA master is the natural
+reading; a naming convention is not a proof, and confirming it needs Pro Tools.
+
+**AND ONE ATTRACTIVE HYPOTHESIS ABOUT IT IS REFUTED.** Because `0x261F` carries
 per-track machinery and appears in sessions with more `0x210B` playlists than tracks, it looked like
 the alternate-playlist record. On the 16 sessions that surfaced during its dissection,
 `n(track records) + n(0x261F) == n(0x210B)` held **16/16** — which is exactly what that hypothesis

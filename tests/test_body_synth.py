@@ -2883,5 +2883,35 @@ class NameTablePreambleTests(unittest.TestCase):
                                 msg=f"{name} is not ours, and the normalizer must not rewrite it")
 
 
+    def test_0x261f_is_a_track_record_kind(self):
+        """`0x261F` belongs in `_TRACK_RECORD_TYPES` by the same criterion the other six were
+        enumerated with -- a DIRECT child of the `0x2624` track list that occupies a row in the
+        `0x2519` name table.
+
+        It appears in ZERO sessions of `control_files` or `/Volumes/Samples`, so it was missed
+        rather than rejected; it took two further drives to see it. The consequence was not
+        cosmetic: `_assert_name_table_complete` compares name entries against track records, so
+        while this kind went uncounted the guard undercounted by 12-13 rows on such sessions and
+        would have passed a table missing that many.
+
+        Pinned locally on the synth writer, which is reachable without an external drive: the set
+        must contain 0x261F, and the guard must be self-consistent on every session the writer
+        produces. The corpus evidence (parent 0x2624 in 290/290, `entries == records` only balancing
+        once 0x261F is counted) is recorded in the spec.
+        """
+        self.assertIn(0x261F, BS._TRACK_RECORD_TYPES,
+                      msg="0x261F is a direct child of the 0x2624 track list and holds a name row")
+        for spec in ([1, 0, 2], [1, 0, 2, 0], [1, 0, 2, 2, 1, 2]):
+            with self.subTest(spec=spec):
+                data = BS.synthesize_mixed_midi_inline(spec)
+                bl = BS._size_driven_blocks(data)
+                nt = [(z, e) for z, e, c in bl if c == 0x2519]
+                ents = len(BS._inline_name_entries(data, nt[0][0], nt[0][1], bl))
+                recs = sum(1 for _z, _e, c in bl if c in BS._TRACK_RECORD_TYPES)
+                self.assertEqual(ents, recs,
+                                 msg="name entries and track records must agree on synth output")
+                BS._assert_name_table_complete(data)   # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

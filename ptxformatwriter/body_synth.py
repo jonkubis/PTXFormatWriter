@@ -4828,14 +4828,32 @@ _TRACK_RECORD_TYPES = frozenset({
     0x261C,   # audio (mono/stereo)
     0x2620,   # MIDI
     0x261E,   # click / aux
-    0x263B,   # folder / VCA-style grouping  ("BGVS", "RT MIX TRACKS", "COMS")
+    0x263B,   # folder / grouping             ("BGVS", "RT MIX TRACKS", "COMS")
     0x2621,   # instrument                    ("Inst 1", "Inst 2", ...)
     0x261D,   # master / bus                  ("DRUMS MSTR", "MUSIC MSTR", ...)
+    0x261F,   # VCA-master-shaped             ("vDrums", "vBass", "vLead Vox", "MASTERS ALL")
 })
 # Enumerated by taking the DIRECT children of the 0x2624 track list across real sessions, rather
 # than by collecting the kinds the control corpus happened to contain. The 282-session corpus has
 # only three of these; a 22-session sample of real studio work has all six, with 0x2621 in 18
 # sessions and 0x261D in 16. All six are master-index targets.
+#
+# 0x261F ADDED 2026-07-26, by that same criterion, from two drives that were not reachable when the
+# list was written. It occurs in ZERO sessions of either corpus used until then, which is why it was
+# missed rather than rejected. What is PROVEN: its immediate parent is the 0x2624 track list in
+# 290/290 instances; it occupies a row in the 0x2519 name table (553 of its names are entries there,
+# and `entries == records` only balances once it is counted); and it carries the full per-track
+# apparatus (0x102D -> 0x2619 identity, 0x2015, 0x2434, 0x2580, 0x260A), 527/527.
+#
+# What is INFERRED, not proven: that it is specifically the VCA master. Its creation names across
+# these sessions read `vDrums, vBass, vGtrs, vPerc, vKeys, vStrings, vBrass, vLead Vox, vBGVs, vFX,
+# vMASTERS, MASTERS ALL` -- one engineer's `v`-prefix convention over 130-186-track mixes -- and
+# 0x263B, already documented as folder/grouping, is ABSENT from all 59 sessions that carry 0x261F.
+# A naming convention is not a proof; confirming it needs Pro Tools.
+#
+# WHY IT MATTERS BEYOND THE COUNT: `_assert_name_table_complete` compares name entries against track
+# records, so while 0x261F went uncounted the guard UNDERCOUNTED by 12-13 rows on these sessions and
+# would have passed a table missing that many. It is a safety check that was quietly too lenient.
 
 _TRACK_COUNT_CONTAINER = 0x1015
 
