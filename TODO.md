@@ -4772,3 +4772,31 @@ them share a single 31-session cohort with wildly varied hex values (0x7AA9, 0xD
 That is the phantom signature -- one cluster of sessions whose plugin blobs frame noise -- not 60
 real types awaiting documentation. The genuinely remaining work is much smaller than the raw
 count suggests.
+
+## Queue, batch 16: a THIRD placement chain — video
+    entries 297 -> 305, mention-only 26 -> 18
+
+**0x1053 is a VIDEO record.** Its payload opens with a length-prefixed name, and in all 9
+instances that name is `Video Jun 12, 09 03 16_DNxHD36` -- **DNxHD is a video codec**, so the
+identification is as solid as the ruler names were, and for the same reason: PT wrote the string.
+
+**0x1051's parent is ALWAYS 0x1053 and its child ALWAYS 0x104F**, which makes a third placement
+chain, structurally identical to the two already known:
+
+    audio   0x1052 ⊃ 0x1050 ⊃ 0x104F
+    MIDI    0x1057 ⊃ 0x1056 ⊃ 0x104F
+    video   0x1053 ⊃ 0x1051 ⊃ 0x104F
+
+Each is `lane/record ⊃ wrapper ⊃ placement`, differing only in the two OUTER content types; the
+0x104F placement itself -- position, region ref, timebase -- is shared by all three.
+
+CONSEQUENCE: `clip_lanes` enumerates 0x1052 only, so `clips()` sees neither MIDI nor video
+placements. The limit was already documented on `clips()` after the 0x1056 finding; this supplies
+the third chain a complete enumerator would need. Video appears in 9 of 240 sessions, which is
+why the chain went unnoticed while the audio one was mapped in detail.
+
+ALSO: **0x2105 is a SECOND 0x2103 holder** alongside 0x2104, and **0x2556/0x255C are two more
+`0x2551 ⊃ … ⊃ 0x2552` routes** alongside 0x258B. Both are the same recurring shape -- a family of
+wrappers around one shared inner record -- which now has four instances in this format (0x2037,
+0x2103, 0x2552, 0x2011). **When a type appears under several wrappers, expect MORE wrappers than
+you have found.**

@@ -2634,6 +2634,52 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x1053 / 0x1051 — the VIDEO placement chain (a third alongside audio and MIDI)
+
+- **`0x1053`** — parent **`0x1055`**, and its payload opens with a **length-prefixed name**. In
+  every instance measured that name is `Video Jun 12, 09 03 16_DNxHD36` (9/9) — **DNxHD is a
+  video codec**, so this is a VIDEO record, identified the same way the rulers were: by a string
+  Pro Tools wrote.
+- **`0x1051`** — parent **ALWAYS `0x1053`**, child **ALWAYS `0x104F`**, span 53.
+
+**So the format has THREE parallel placement chains, structurally identical:**
+
+```
+audio   0x1052  ⊃  0x1050  ⊃  0x104F
+MIDI    0x1057  ⊃  0x1056  ⊃  0x104F
+video   0x1053  ⊃  0x1051  ⊃  0x104F
+```
+
+Each is `lane/record ⊃ wrapper ⊃ placement`, differing only in the two outer content types. The
+`0x104F` placement itself — position, region ref, timebase (§5d) — is shared by all three.
+
+- **Consequence for the read layer:** `clip_lanes` enumerates `0x1052` only, so `clips()` sees
+  neither MIDI nor video placements. That limit is already documented on `clips()`; this entry
+  supplies the third chain it would need.
+- **Presence:** 9 sessions of 240 — video is rare in this corpus, which is why the chain went
+  unnoticed while the audio one was mapped in detail.
+- **Confidence:** HIGH on the chain (full instance counts) and on "video" (the codec name is
+  unambiguous); the record's own fields are undecoded.
+
+### 0x1002 / 0x1005 / 0x2105 / 0x2078 / 0x2556 / 0x255C — framing and parentage
+
+| type | span | parent | child | instances |
+|---|---|---|---|---|
+| `0x1005` | 235 | `0x1006` | leaf | 3 |
+| `0x1002` | 170 | **`0x1005`** | leaf | 3 |
+| `0x2105` | 19 | **`0x2015`** | **`0x2103`** | 3 |
+| `0x2078` | 23 | **`0x2021`** | leaf | 1 |
+| `0x2556` | 58 | **`0x2551`** | **`0x2552`** | 1 |
+| `0x255C` | 566 | **`0x2551`** | **`0x2552`** | 1 |
+
+- **`0x2105` is a second `0x2103` holder**, alongside `0x2104` — the same relationship the
+  `0x203x` family has with `0x2037`: a wrapper family sharing one inner record.
+- **`0x2556`/`0x255C` are two more `0x2551 ⊃ … ⊃ 0x2552` routes**, joining `0x258B`. Three
+  wrappers around the same child, which is the recurring shape of this format's settings area.
+- **All are rare** (1–3 instances), so these entries fix framing and parentage only; nothing here
+  rests on enough examples to say more.
+- **Confidence:** MEDIUM-HIGH on framing/parentage given the small counts; purposes UNPROVEN.
+
 ### 0x483B / 0x483D / 0x4841 / 0x1600 / 0x2042 / 0x2079 / 0x208E / 0x2583 / 0x2584 / 0x2585 — framing and parentage
 
 | type | span | parent | child | distinct payloads | note |

@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**297 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**26 are counted as "documented" only because their hex string appears somewhere in
+**305 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**18 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -44,30 +44,22 @@ mentions. The mention-only list is the honest work queue:
 | `0x1900` | 25 | 25 |
 | `0x203c` | 101 | 20 |
 | `0x0000` | 67 | 19 |
-| `0x2078` | 16 | 16 |
 | `0x2039` | 63 | 15 |
-| `0x1051` | 23 | 15 |
-| `0x1002` | 15 | 15 |
-| `0x1005` | 15 | 15 |
-| `0x2105` | 15 | 15 |
-| `0x1053` | 15 | 15 |
-| `0x2556` | 6 | 6 |
 | `0x2631` | 22 | 5 |
-| `0x255c` | 4 | 4 |
 | `0x0024` | 2 | 2 |
 | `0x0033` | 2 | 2 |
 | `0x0034` | 2 | 2 |
 | `0x0700` | 1 | 1 |
-| `0x001c` | 1 | 1 |
-| `0x2557` | 1 | 1 |
 | `0x2757` | 1 | 1 |
+| `0x2557` | 1 | 1 |
+| `0x001c` | 1 | 1 |
 
 ## Described vs settled — two different numbers
 
 **323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 190 typed sections in the spec, **49 still say the PURPOSE is unproven** —
+Of the 192 typed sections in the spec, **50 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
