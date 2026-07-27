@@ -2634,6 +2634,36 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### What the corpus CANNOT decode — a measured boundary
+
+Two systematic sweeps bound what is left. Both are negative results, and they are what makes the
+remaining work list honest rather than open-ended.
+
+**1. No remaining undocumented type carries a DERIVED COUNT.** For every type without a spec
+entry, every `u32` in the first 48 payload bytes was tested against nine measured session
+quantities — track / marker / playlist / region / clip / lane / plugin / file counts and the
+sample rate — over **140 sessions**. A match was required to hold in ≥95% of sessions **and** the
+quantity was required to take ≥5 distinct values, so that a field holding a constant cannot
+"match" a quantity that is usually the same number.
+
+> **Result: ZERO matches.**
+>
+> The naive version of this sweep (no variation requirement) reports 12 confident hits, every one
+> of them a field holding `1` matching `n_tempo` — which is 1 in **77 of 90 sessions**. That
+> failure mode is worth stating because it is not obvious: *a quantity that does not vary cannot
+> be correlated against, and will appear to confirm anything.*
+
+**2. Where a type has no embedded NAME, no meaning has ever been recovered from this corpus.**
+Fifteen types were identified purely from a length-prefixed string Pro Tools wrote (see the entry
+above). Every other semantic decode in this document — `0x2434`'s track height, `0x1028` and
+`0x1001`'s sample rates, the five ruler names — also rested on values recognisable OUTSIDE the
+format. Nothing has been decoded from opaque integers alone, across five batches of profiling.
+
+**The boundary this draws:** for the remaining types, the corpus can still establish framing,
+parentage, universality, size distributions and the empty-vs-populated split — all of which have
+been done — but not purpose. Settling those needs Pro Tools, and the experiment is always the
+same shape: *one session, saved twice, with exactly one setting changed.*
+
 ### 0x0003 / 0x2587 / 0x0F3C / 0x0F3D / 0x2701 / 0x1057 / 0x2620 / 0x2621 / 0x2423 / 0x2603 / 0x1004 / 0x2107 / 0x2633 / 0x200A / 0x203E — identified BY THEIR OWN EMBEDDED NAME
 
 > **Scope:** this entry establishes WHAT each of these fifteen types IS, from a name Pro Tools

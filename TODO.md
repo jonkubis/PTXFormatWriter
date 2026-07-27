@@ -4610,3 +4610,33 @@ combined.** The rule it applies is the one established in batch 6 -- look for va
 OUTSIDE the format -- and a length-prefixed name is its purest case, because the application has
 already written down what the thing is. Where a type has no such name, five batches of evidence
 say the corpus will not yield its meaning either.
+
+## A MEASURED BOUNDARY on what the corpus can still decode (two negative sweeps)
+Both sweeps are negative results, and together they make the remaining work list honest rather
+than open-ended.
+
+**1. No remaining undocumented type carries a DERIVED COUNT.** Every u32 in the first 48 payload
+bytes of every entry-less type, tested against nine measured session quantities over 140
+sessions, requiring the match to hold in >=95% of sessions AND the quantity to take >=5 distinct
+values. **ZERO matches.**
+
+    THE NAIVE VERSION REPORTS 12 CONFIDENT HITS AND ALL TWELVE ARE FALSE. Every one is a field
+    holding `1` matching `n_tempo` -- which is 1 in 77 of 90 sessions. **A quantity that does not
+    vary cannot be correlated against, and will appear to confirm anything.** I have now hit this
+    trap in three different forms today (the 0x2506 multiplier's coinciding candidates, the
+    0x2511/0x2595 never-changed flags, and this), so it is worth stating as a rule rather than an
+    anecdote.
+
+**2. Where a type has no embedded NAME, no meaning has ever been recovered from this corpus.**
+Fifteen types were identified purely from a length-prefixed string PT wrote. Every other semantic
+decode in the spec -- 0x2434's height, 0x1028/0x1001's sample rates, the five ruler names --
+also rested on externally recognisable values. **Nothing has been decoded from opaque integers
+alone across five batches of profiling.**
+
+WHAT THIS BOUNDS: for the remaining entry-less types the corpus can still give framing,
+parentage, universality, size distributions and the empty/populated split -- and those have been
+done. It cannot give PURPOSE. That needs Pro Tools, and the experiment is always the same shape:
+one session, saved twice, one setting changed.
+
+This is the most useful thing to know before spending more time here: the remaining queue is not
+"harder corpus work", it is a DIFFERENT KIND of work that the corpus cannot do.
