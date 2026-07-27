@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**243 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**80 are counted as "documented" only because their hex string appears somewhere in
+**258 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**65 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -35,22 +35,15 @@ mentions. The mention-only list is the honest work queue:
 
 | type | instances | sessions |
 |---|---|---|
-| `0x0003` | 832 | 832 |
-| `0x1004` | 832 | 832 |
-| `0x2603` | 832 | 832 |
-| `0x206c` | 832 | 832 |
 | `0x2505` | 832 | 832 |
 | `0x2507` | 832 | 832 |
 | `0x259c` | 832 | 832 |
-| `0x200a` | 31609 | 813 |
+| `0x206c` | 832 | 832 |
 | `0x2588` | 727 | 727 |
 | `0x2597` | 727 | 727 |
-| `0x2587` | 583 | 583 |
-| `0x0f3d` | 481 | 481 |
 | `0x0f3e` | 481 | 481 |
 | `0x270a` | 480 | 480 |
 | `0x4300` | 487 | 456 |
-| `0x2107` | 456 | 456 |
 | `0x2721` | 456 | 456 |
 | `0x4530` | 452 | 452 |
 | `0x2062` | 376 | 376 |
@@ -64,19 +57,26 @@ mentions. The mention-only list is the honest work queue:
 | `0x2567` | 285 | 285 |
 | `0x4833` | 1410 | 282 |
 | `0x4820` | 282 | 282 |
+| `0x4501` | 282 | 282 |
 | `0x4834` | 282 | 282 |
 | `0x483b` | 282 | 282 |
 | `0x483d` | 282 | 282 |
 | `0x4841` | 282 | 282 |
-| `0x4501` | 282 | 282 |
-| `0x2701` | 282 | 282 |
-| `0x0f3c` | 242 | 240 |
 | `0x4403` | 214852 | 222 |
 | `0x262f` | 13863 | 197 |
-| `0x1057` | 548 | 166 |
-| `0x2620` | 458 | 146 |
+| `0x2636` | 34532 | 113 |
+| `0x1056` | 3259 | 110 |
+| `0x208e` | 202 | 92 |
+| `0x2079` | 100 | 86 |
+| `0x1600` | 71 | 71 |
+| `0x203d` | 430 | 44 |
+| `0x2a00` | 38 | 38 |
+| `0x0c00` | 34 | 34 |
+| `0x2002` | 31 | 31 |
+| `0x0800` | 31 | 31 |
+| `0xe196` | 31 | 31 |
 
-…and 40 more.
+…and 25 more.
 
 
 ## Described vs settled — two different numbers
@@ -84,7 +84,7 @@ mentions. The mention-only list is the honest work queue:
 **323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 182 typed sections in the spec, **44 still say the PURPOSE is unproven** —
+Of the 183 typed sections in the spec, **44 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,

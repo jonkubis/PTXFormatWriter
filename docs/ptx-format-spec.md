@@ -2634,6 +2634,52 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x0003 / 0x2587 / 0x0F3C / 0x0F3D / 0x2701 / 0x1057 / 0x2620 / 0x2621 / 0x2423 / 0x2603 / 0x1004 / 0x2107 / 0x2633 / 0x200A / 0x203E — identified BY THEIR OWN EMBEDDED NAME
+
+> **Scope:** this entry establishes WHAT each of these fifteen types IS, from a name Pro Tools
+> itself wrote into the block — a stronger claim than the framing-only entries elsewhere in
+> this document, but a narrower one than a full field map. Layouts beyond the name field are
+> not decoded here.
+
+Applying the decodability rule systematically: scan every undocumented type's payload for a
+length-prefixed printable-ASCII run. A name Pro Tools wrote is externally meaningful, so where
+one exists the type identifies itself. Fifteen did.
+
+| type | instances with a name | what the names ARE | example values |
+|---|---|---|---|
+| `0x0003` | **90/90** | the Pro Tools PRODUCT string | `Pro Tools HD`, `Pro Tools Studio`, `Pro Tools Ultimate` |
+| `0x2587` | **65/65** | a default document name | `(untitled)` |
+| `0x0F3C` | **34/34** | VOLUME / disk names | `Macintosh HD`, `ABTB ROAD 1`, `Arts T1 SSD` |
+| `0x0F3D` | 34/61 | the same volume names | as above |
+| `0x2701` | **30/30** | a codec / format tag | `MPG3` |
+| `0x1057` | **34/34** | MIDI track names | `MIDI 1`, `ACCENT KICK` |
+| `0x2620` | **20/20** | MIDI track names | `MIDI 1`, `MIDI 2` |
+| `0x2621` | **14/14** | INSTRUMENT track names | `Inst 1`, `Battery.dup1` |
+| `0x2423` | **7/7** | track GROUP names | `Group-01` |
+| `0x2603` | 84/90 | I/O OUTPUT path names | `Analog 1-2`, `L-R`, `Multiple Outputs (USB) / Computer` |
+| `0x1004` | 62/90 | the audio-file table | `Audio Files`, `07 Bass Intro.wav` |
+| `0x2107` | 43/60 | track names (playlist owners) | `Audio 1`, `MIDI 1` |
+| `0x2633` | 69/81 | instrument / preset names | `Battery-224`, `JK Default Instrument-01` |
+| `0x200A` | 2,382/4,537 | CHANNEL labels | `C CH L`, `C CH R`, `R CH L` |
+| `0x203E` | 3/3 | a PLUGIN name | `ValhallaVintageVerb` |
+
+**What this settles:**
+
+- **`0x0003` is the product/version header** — the block `core.parse_version` reads. The string
+  is the edition name, which is why the version field's meaning varies by product.
+- **`0x0F3C`/`0x0F3D` are VOLUME records.** Nothing else in this format names a disk, and it
+  explains why they are among the types that differ most between machines.
+- **`0x2620` vs `0x2621`:** both carry track names, but `0x2620`'s are MIDI tracks and `0x2621`'s
+  are INSTRUMENT tracks — a distinction the earlier "MIDI variant" note could not make.
+- **`0x2423` = track GROUP names**, confirming (against an earlier guess that it was a fade type).
+- **`0x200A` carries per-CHANNEL labels** (`C CH L`/`C CH R`), which is what makes it the view
+  chain's per-channel record rather than a per-track one.
+
+**Method note:** this took one sweep and decoded more types than the preceding five batches of
+individual profiling. The rule it applies — *look for values that are meaningful outside the
+format* — is stated under `0x1028`; a length-prefixed name is the purest case of it, because the
+application has already written down what the thing is.
+
 ### 0x2718 / 0x2719 / 0x271A / 0x271B / 0x271C — the five CONDUCTOR RULERS (they name themselves)
 
 Each is TOP-LEVEL, present in 50 of 75 sessions, and holds **exactly two children: a `0x2619`

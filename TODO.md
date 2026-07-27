@@ -4574,3 +4574,39 @@ identify a member, only the content type does.** That retroactively justifies pi
 Presence note worth keeping: the rulers exist in 50 of 75 sessions, but the top-level
 0x2028/0x2029/0x2030 maps exist regardless -- the ruler is a DISPLAY WRAPPER around data that
 lives independently, which is why replace_tempo_map resizes the lane "only when present".
+
+## The embedded-name sweep: FIFTEEN types identified in one run
+    entries 243 -> 258, mention-only 80 -> 65   (the largest single gain of the whole exercise)
+
+Applied the decodability rule systematically instead of type by type: scan every UNDOCUMENTED
+type's payload for a length-prefixed printable-ASCII run. A name Pro Tools wrote is externally
+meaningful by construction, so wherever one exists the type identifies ITSELF.
+
+    0x0003  90/90   the PRODUCT string -- "Pro Tools HD" / "Studio" / "Ultimate"
+    0x2587  65/65   "(untitled)" -- a default document name
+    0x0F3C  34/34   VOLUME names -- "Macintosh HD", "ABTB ROAD 1", "Arts T1 SSD"
+    0x0F3D  34/61   the same volume names
+    0x2701  30/30   a codec/format tag -- "MPG3"
+    0x1057  34/34   MIDI track names        0x2620  20/20  MIDI track names
+    0x2621  14/14   INSTRUMENT track names  0x2423   7/7   track GROUP names
+    0x2603  84/90   I/O OUTPUT path names   0x1004  62/90  the audio-file table
+    0x2107  43/60   track names             0x2633  69/81  instrument/preset names
+    0x200A  2382/4537  per-CHANNEL labels ("C CH L", "C CH R")
+    0x203E  3/3     a PLUGIN name -- "ValhallaVintageVerb"
+
+FIVE THINGS THIS SETTLES that individual profiling had not:
+  * **0x0003 is the product/version header** -- the block core.parse_version reads. The string is
+    the EDITION name, which is why the version field's meaning varies by product.
+  * **0x0F3C/0x0F3D are VOLUME records.** Nothing else in the format names a disk, and it explains
+    why they are among the types differing most between machines.
+  * **0x2620 vs 0x2621 is MIDI vs INSTRUMENT tracks** -- a distinction the earlier "MIDI variant"
+    note could not make.
+  * **0x2423 = track GROUP names**, confirming it against an earlier guess that it was a fade type.
+  * **0x200A carries per-CHANNEL labels**, which is why it is the view chain's per-channel record
+    rather than a per-track one.
+
+METHOD: **one sweep decoded more types than the preceding five batches of individual profiling
+combined.** The rule it applies is the one established in batch 6 -- look for values meaningful
+OUTSIDE the format -- and a length-prefixed name is its purest case, because the application has
+already written down what the thing is. Where a type has no such name, five batches of evidence
+say the corpus will not yield its meaning either.
