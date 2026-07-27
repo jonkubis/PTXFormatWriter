@@ -2986,5 +2986,81 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertEqual(run([1, 2, 2, 3]), [1, 2, 3, 4])
 
 
+    def test_the_two_name_table_walks_agree(self):
+        """`_inline_name_entries` and `_name_entry_ordinal_slots` must find the SAME number of
+        entries. They did not for a long time: the slot walk resolved its start from
+        `_name_table_shift` alone while the entry walk resolves it empirically, so the slot walk
+        returned ZERO on 69 of 612 sessions and silently disabled every pass keyed on it.
+
+        That mattered twice over. It hid the ordinal renumber's base-of-1 assumption, whose
+        "300/300" evidence could only ever cover sessions this walk reached -- and when the walk was
+        widened, the renumber promptly wrote 1257 bytes into 7 untouched Pro Tools files.
+
+        Pinned on the control corpus. Measured across four drives after the fix, the two agree
+        549/549 where a table parses at all.
+        """
+        checked = agreed = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                data = _load_path(path)
+                bl = BS._size_driven_blocks(data)
+            except Exception:
+                continue
+            nt = [(z, e) for z, e, c in bl if c == 0x2519]
+            if not nt:
+                continue
+            z, e = nt[0]
+            end = min((cz for cz, _ce, _cc in bl if z < cz < e), default=e)
+            ents = BS._inline_name_entries(data, z, e, bl)
+            slots = BS._name_entry_ordinal_slots(data, z, end)
+            if not ents:
+                continue
+            checked += 1
+            with self.subTest(session=path.name):
+                self.assertEqual(len(slots), len(ents),
+                                 msg="the two name-table walks disagree -- one of them is blind here")
+                agreed += 1
+        self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
+
+    def test_locators_do_not_fail_silently(self):
+        """A locator that returns EMPTY instead of raising, behind a caller that reads empty as
+        "nothing to do", is how this project acquired four false format rules in one day --
+        `_ORD2015_ANCHOR` missing 24.1% of blocks, and the slot walk missing 11.8% of sessions,
+        being the two that reached the spec.
+
+        So the invariant is stated directly: where a locator IS applicable, it must find something.
+        Applicability has to be judged per locator, not by block presence -- an audit that used
+        "the block exists" flagged `meter_map` as the worst offender in the module when in fact
+        219 sessions declare `count=0` and an empty result is correct.
+        """
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                data = _load_path(path)
+                bl = BS._size_driven_blocks(data)
+            except Exception:
+                continue
+            checked += 1
+            with self.subTest(session=path.name):
+                # the anchor must resolve in EVERY 0x2015 -- the 18-byte form missed 24.1%
+                for z, e, c in bl:
+                    if c == 0x2015:
+                        self.assertGreaterEqual(data.find(BS._ORD2015_ANCHOR, z, e), 0,
+                                                msg=f"anchor unresolvable in 0x2015 at {z}")
+                # one id range per 0x261B, or none at all
+                n261b = sum(1 for _z, _e, cc in bl if cc == 0x261B)
+                if n261b:
+                    self.assertEqual(len(BS.track_id_ranges(data)), n261b,
+                                     msg="track_id_ranges is blind on some 0x261B")
+                # meter_map is empty ONLY when the header declares zero events
+                b29 = [(z, e) for z, e, cc in bl if cc == 0x2029]
+                if b29 and (b29[0][1] - b29[0][0]) > 24:
+                    cnt = int.from_bytes(data[b29[0][0] + 20 : b29[0][0] + 24], "little")
+                    if 0 < cnt < 1000:
+                        self.assertTrue(BS.meter_map(data),
+                                        msg=f"meter_map empty though the header declares {cnt}")
+        self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
+
+
 if __name__ == "__main__":
     unittest.main()
