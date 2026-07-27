@@ -3062,7 +3062,54 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
 
 
-    # NO REGRESSION TEST FOR THE GUID-LESS DUPLICATE, and the reason is worth recording.
+    def test_duplicate_of_a_guidless_track_takes_its_own_id_range(self):
+        """A copy whose `0x261B` carries no seeded GUID must still take a DISTINCT id range.
+
+        `_reallocate_duplicate_track_ids` locates the copy's `0x261B` by matching the FRESH GUIDs
+        that `transform` wrote. Those are seeded from the track-list entries (`0x1014`/`0x1057`/
+        `0x210B`), found by NAME -- not from `0x102D`. So when a track's `0x261B` subtree contains
+        no `2A 00 00 00` tag at all, the transform writes no fresh GUID into it, the match finds
+        nothing, and the copy was left SHARING its source's id range: the condition Pro Tools
+        crashed on. Real occurrence: ~21% of `0x102D` blocks on the PT HD 10.3/11.2 corpus carry no
+        tag, and 4 of 4 such duplicates shared a range before the structural fallback was added.
+
+        THE REPRODUCTION IS VERIFIED TO BITE. With the fallback disabled this asserts
+        `5 ranges / 4 distinct`; with it, `5 / 5`. An earlier attempt -- blanking only the tag in the
+        track's `0x102D` -- passed either way and was removed, because `gmap` is not seeded from
+        there.
+        """
+        data = _load_path(MONO_DIR / "4 mono tracks.ptx")
+        bl = BS._size_driven_blocks(data)
+        recs = [(z, e) for z, e, c in bl if c in BS._TRACK_RECORD_TYPES]
+        self.assertTrue(recs, "fixture has no track records")
+        z, e = recs[-1]
+        b261b = [(kz, ke) for kz, ke, kc in bl if kc == 0x261B and z < kz and ke <= e]
+        self.assertTrue(b261b, "last track record has no 0x261B")
+
+        # blank every identity tag inside that 0x261B (never offset 3 -- that is the SIZE field)
+        kz, ke = b261b[0]
+        sub, mod, k = data[kz:ke], bytearray(data), 0
+        while True:
+            k = sub.find(b"\x2a\x00\x00\x00", k)
+            if k < 0:
+                break
+            if k != 3:
+                mod[kz + k : kz + k + 4] = b"\x00\x00\x00\x00"
+            k += 1
+        guidless = bytes(mod)
+
+        gbl = BS._size_driven_blocks(guidless)
+        nt = [(a, b) for a, b, c in gbl if c == 0x2519][0]
+        names = [n for n, _p in BS._inline_name_entries(guidless, nt[0], nt[1], gbl)]
+        before = [v for _z, v, _l in BS.track_id_ranges(guidless)]
+        dup = BS.duplicate_track(guidless, names[-1], "ZZZZZZZ")
+        after = [v for _z, v, _l in BS.track_id_ranges(dup)]
+
+        self.assertEqual(len(after), len(before) + 1, msg="the copy must add a 0x261B")
+        self.assertEqual(len(set(after)), len(set(before)) + 1,
+                         msg="the copy must take a DISTINCT id range with no GUID to match")
+
+    # WHY THE FIRST ATTEMPT AT THE TEST ABOVE WAS REMOVED, kept because the reason generalises.
     #
     # The defect: `_reallocate_duplicate_track_ids` located the copy's 0x261B by matching the FRESH
     # GUIDs, so a track with no `2A 00 00 00` in its 0x102D left the copy SHARING its source's id

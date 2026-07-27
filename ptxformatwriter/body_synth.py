@@ -6534,6 +6534,11 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         # `c4_dense` is judged on the PRE-EDIT session: after the splice the column reads
         # [0,1,2,3,3] / [0,1,3], and judging THAT is what sank every earlier conditional renumber.
         out = _rekey_offsynth_positional(out, c4_dense=_c4_uses_dense_convention(data))
+        # ...and close the gap the removed track leaves in the 0x2015 playlist-ordinal column, the
+        # exact inverse of the repair `duplicate_track` now applies by default. Pro Tools resolves
+        # a track through this ordinal -- a session with two tracks on slot 4 crashed on close --
+        # so the column must stay a running total with no holes.
+        out = repair_playlist_ordinals_after_remove(data, out)
     return out
 
 
@@ -6895,6 +6900,14 @@ def _playlist_counts(data: bytes) -> "list[int] | None":
     n_pl = sum(1 for _z, _e, c in _size_driven_blocks(data) if c == 0x210B)
     if not ords or ords[0] != 1 or any(b <= a for a, b in zip(ords, ords[1:])):
         return None
+    if n_pl == 0:
+        # A session with NO 0x210B at all -- real Pro Tools files do this (`01 130 G Full
+        # Stereo.ptx` on /Volumes/Samples has 5 tracks, ordinals [1,2,3,4,5] and zero playlist
+        # blocks). The playlist-sum check cannot run, and tying the gate to it made this decline:
+        # the copy then kept its source's ordinal, which is the state Pro Tools crashes on.
+        # A column that is exactly 1..N is its own evidence here -- one slot per track, the
+        # degenerate case of the same rule -- so the counts are all 1.
+        return [1] * len(ords) if ords == list(range(1, len(ords) + 1)) else None
     counts = [b - a for a, b in zip(ords, ords[1:])] + [n_pl + 1 - ords[-1]]
     if any(c < 1 for c in counts) or sum(counts) != n_pl:
         return None
@@ -7573,13 +7586,25 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
                 out = _reuuid_copied_track(out, _z3, _e3)
                 break
 
-    # OPEN: the copy still inherits the source's 0x200A/0x200B/0x2015 anchor id, which is distinct
-    # across tracks in 200/200 real sessions. Allocating a fresh one POST-HOC was tried and reverted
-    # -- identifying the copy's anchors by GUID proximity also matched surviving tracks, renumbered
-    # them, and broke the duplicate->remove inverse on 19 of 19 sessions. It must be done where the
-    # copy's bytes are made (the `transform` closure), as the 0x261B fix ultimately was, not by
-    # scanning afterwards. Left inherited for now: a duplicate id is no worse than the dense
-    # renumber that preceded this change, and the PROVEN identity field (0x261B) is handled.
+    # THE 0x2015 PLAYLIST ORDINAL, REPAIRED BY DEFAULT AS OF 2026-07-27 -- Pro Tools settled it.
+    #
+    # A duplicate leaves the copy sharing its source's ordinal. Reported from Pro Tools on a file
+    # whose column read [1, 2, 3, 4, 4]: "Two tracks named Audio 4 and Pro Tools crashes on close."
+    # Every stored NAME in that file is correct and distinct -- 0x2519, 0x251A, 0x1014, 0x102D,
+    # 0x2619, 0x210B all hold exactly one `Audio 5` -- so Pro Tools is not reading a name there; it
+    # resolves the track through this ordinal, and two tracks claiming slot 4 collapse into one
+    # object. Same signature as the 0x261B id-range collision, one field along.
+    #
+    # The file Pro Tools CONFIRMED working carries [1, 2, 3, 4, 5], identical to its own
+    # `5 mono tracks.ptx`. So the repair is not a fidelity nicety -- it is the difference between a
+    # session that opens and one that crashes, and the opt-in default was wrong.
+    #
+    # This was a REGRESSION, bisected to commit 59add8f: at 388ec46 (the PT-confirmed state) a
+    # duplicate emitted [1, 2, 3, 4, 5] and afterwards [1, 2, 3, 4, 4]. It is now produced
+    # deliberately by `repair_playlist_ordinals_after_add` rather than as a side effect, so it
+    # cannot regress silently again -- `remove_track` applies the exact inverse.
+    if not _do_renumber:
+        out = repair_playlist_ordinals_after_add(data, out)
     return out
 
 

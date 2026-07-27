@@ -332,6 +332,48 @@ records, all 6 integer id ranges distinct, `duplicate -> remove` byte-exact.
 A crash there is a RESULT, not a setback: it would point straight at the remaining identity field,
 the same way "both Audio 4 tracks are selected" pointed at the two selection flags.
 
+## PT VERDICT #2: A REPEATED 0x2015 ORDINAL CRASHES PRO TOOLS (2026-07-27)
+
+Reported on `PTX_VERIFY_ORDINAL_REPAIR/A repair OFF - 4 mono duplicated.ptx`:
+
+> ugh, same issue again. Two tracks named Audio 4 and Pro Tools crashes on close
+
+**That file was the deliberate "before" case of the A/B experiment, so the crash IS the result.**
+The question the pair was staged to ask -- does Pro Tools merely never WRITE a repeated ordinal, or
+does it REJECT one -- is answered: it rejects.
+
+EVERY STORED NAME IN THAT FILE IS CORRECT AND DISTINCT. `0x2519`, `0x251A`, `0x1014`, `0x102D`,
+`0x2619`, `0x210B` each hold exactly one `Audio 5`; the name table reads
+`[Audio 1..Audio 5]`. So Pro Tools is not displaying a stored name -- it resolves the track through
+the `0x2015` ordinal, and two tracks claiming slot 4 collapse into one object. Same signature as the
+`0x261B` id-range collision, one field along.
+
+    file PT CONFIRMED working    ordinals [1, 2, 3, 4, 5]   == PT's own `5 mono tracks.ptx`
+    file that crashed            ordinals [1, 2, 3, 4, 4]
+
+**IT WAS A REGRESSION OF MINE, bisected to `59add8f`.** At `388ec46` -- the PT-confirmed state -- a
+duplicate emitted `[1,2,3,4,5]`; from `59add8f` on it emitted `[1,2,3,4,4]`. The correct value had
+been an accidental SIDE EFFECT of `_give_copy_free_track_index`, which that commit changed. It is
+now produced deliberately by `repair_playlist_ordinals_after_add`, DEFAULT ON, with the exact
+inverse in `remove_track`, so it cannot vanish silently again.
+
+**AND I TOLD YOU THE FILE WAS SAFE.** The READ ME said "A is what ships TODAY. You already confirmed
+a file built this way opens... and closes cleanly." False: the confirmed file has `[1,2,3,4,5]` and A
+has `[1,2,3,4,4]`. My own staging script printed both columns and I wrote the opposite.
+
+18 STAGED FILES CARRIED THE REPEAT, including some from 2026-07-23/24 that predate this session. The
+two that were tested and confirmed (`01_dup_4_mono`, `03_dup_3_stereo`) happen to be ones without
+it -- so a repeated ordinal was very likely the ORIGINAL crash cause too, accidentally fixed on the
+26th and re-broken the same day. All 12 regenerable staged files are now rebuilt and verified.
+
+**A SECOND GAP, found while regenerating.** `01 130 G Full Stereo.ptx` has clean ordinals and ZERO
+`0x210B` blocks. The conformance gate tied its counts to the `0x210B` total, so it declined and left
+the copy sharing -- on a session where the copy would then crash. Real PT sessions do have no
+`0x210B`. Fixed: a column that is exactly `1..N` is its own evidence, counts all 1.
+
+    repair rewriting an UNEDITED session, four corpora:  0 bytes  (control 64, Samples 60,
+                                                                  Mac-4TB 60, Hack 60 conforming)
+
 ## THE COMPLETE TRACK-IDENTITY MODEL, MEASURED (2026-07-27)
 
 The spec described the track subtree as "GUID-keyed (8B GUID in `0x102d` after `2A 00 00 00`)" with
