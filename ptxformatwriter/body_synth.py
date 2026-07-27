@@ -5891,11 +5891,34 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
         _r = _track_id_run(data[_z:_e])
         if _r is not None:
             _idr.append(_r[1])
+    # DEMOTED to `nonconforming` (2026-07-26). As an ERROR this rejected UNTOUCHED Pro Tools files:
+    # 13 of 50 sampled `/Volumes/Samples` sessions, 12 of 50 Mac-4TB, 2 of 60 controls.
+    #
+    # The detection is GENERATION-DEPENDENT, which is what disqualifies it as an error. `0x261B`
+    # has at least two layouts -- the ten-UUID identity list is present in 100% of blocks on two
+    # drives and absent from 68% on another -- and `_track_id_run` locates its id run by a signature
+    # derived from the UUID-bearing form. Collisions correlate accordingly:
+    #
+    #     0x261B WITHOUT the UUID list   collide in 13/24  = 54.2%
+    #     0x261B WITH    the UUID list   collide in  6/121 =  5.0%
+    #     mixed                          collide in  0/62  =  0.0%
+    #
+    # An 11x difference by layout says most of these are the LOCATOR misfiring on a form it was not
+    # derived from -- the same failure as `_ORD2015_ANCHOR`'s 18-byte literal (24.1% of blocks) and
+    # `_uuid_list_offset`'s hardcoded `count == 10`. The residual 5% on the UUID-bearing form may be
+    # genuine sharing; nothing here distinguishes them.
+    #
+    # This does NOT weaken the duplicate fix. `_reallocate_duplicate_track_ids` still MAKES the
+    # copy's range unique -- that is what Pro Tools confirmed -- and is independent of whether this
+    # validator REJECTS a pre-existing file for having collisions. Enforcing on what we write and
+    # refusing what PT wrote are different questions, and only the first is settled.
     _dupids = sorted({v for v in _idr if _idr.count(v) > 1})
     if _dupids:
-        err("track-id-uniqueness",
-            f"{len(_dupids)} track id range(s) used by more than one 0x261B: {_dupids[:6]} "
-            f"-- PT treats those tracks as one object and crashes on close")
+        note("track-id-uniqueness",
+             f"{len(_dupids)} track id range(s) used by more than one 0x261B: {_dupids[:6]} "
+             f"-- a duplicate that SHARES its source's range crashed PT on close, but real PT "
+             f"sessions also show collisions here (54% on the layout lacking the 0x261B UUID list, "
+             f"5% on the layout carrying it), so most are this locator misreading that form")
 
     for child, parent in ((0x2589, 0x258A), (0x1057, 0x1058), (0x210B, 0x2107),
                           (0x2620, 0x2624), (0x261C, 0x2624)):
@@ -5936,7 +5959,21 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
         # lane-major: the same ordinal list repeated once per lane
         for half in range(0, len(lv), nl):
             check("0x251A-lane-ordinals", lv[half : half + nl], None)
-        if lv[:nl] != lv[nl:]:
+        # An ODD lane count cannot be split into equal halves, and this model has nothing to say
+        # about it. Measured: 12 of 50 sampled Mac-4TB sessions carry exactly 2N+1 lanes for N
+        # tracks (145 -> 291, 190 -> 381, 176 -> 353, 122 -> 245, 136 -> 273), and `len(lanes) // 2`
+        # then compares N entries against N+1 and reports a mismatch that is not one. All 12 were
+        # hard ERRORS on untouched Pro Tools files.
+        #
+        # NOT the multi-playlist case, which was the obvious guess and was checked: all 12 are
+        # SINGLE-playlist and all 10 multi-playlist sessions in the same sample are clean. What the
+        # odd block is -- a phantom framed in data, or a real extra lane -- is UNKNOWN, so this
+        # reports rather than rejects.
+        if len(lv) % 2:
+            note("0x251A-lane-ordinals",
+                 f"{len(lv)} lanes is odd -- cannot be the same run repeated per lane; "
+                 f"the lane-major model does not describe this session")
+        elif lv[:nl] != lv[nl:]:
             err("0x251A-lane-ordinals", f"{lv} is not the same run repeated per lane")
 
     anchors = set()
@@ -5960,10 +5997,19 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     # no other value: 120/120. Comparing it to the name-entry count only ever worked because the
     # two usually coincide, and it rejected a real session with 18 entries but 54 tracks and 54
     # chains -- a file Pro Tools opens.
+    # DEMOTED to `nonconforming` (2026-07-26), for the same reason the 0x2580 check below was: as an
+    # ERROR it rejects UNTOUCHED Pro Tools files. That "120/120" was measured on the corpus reachable
+    # at the time; across 131 sessions that carry chains on four drives it holds 124/131, so a hard
+    # error fires on 7 real sessions PT itself wrote.
+    #
+    # NOT caused by `0x261F` joining `_TRACK_RECORD_TYPES`, which was the obvious suspect and was
+    # checked: counting the SEVEN kinds scores 124/131 and the six 121/131, and no session matches
+    # six-but-not-seven. The seven-kind count is the better predictor, so the remaining 7 have some
+    # other cause and the addition made this check slightly MORE accurate, not less.
     _n_trk = sum(1 for _z, _e, _c in bl if _c in _TRACK_RECORD_TYPES)
     if chains:
         if len(chains) != _n_trk:
-            err("0x2589-view-chains", f"{len(chains)} chains for {_n_trk} track records")
+            note("0x2589-view-chains", f"{len(chains)} chains for {_n_trk} track records")
         elif sorted(chains) != list(range(len(chains))):
             note("0x2589-view-chains", f"{chains[:16]} is not a permutation of range({len(chains)})")
 
