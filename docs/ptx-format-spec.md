@@ -2634,10 +2634,49 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
-### 0x2505 / 0x2507 / 0x259C / 0x206C — the remaining `0x2011`-child class members
+### 0x4808 / 0x4820 / 0x4824 / 0x4826 / 0x4828 / 0x4829 / 0x4834 / 0x4501 / 0x2567 — the `Pro Tools Studio` block family
+
+> **Scope:** this entry settles WHEN these nine types appear (a product gate), their framing, spans and parents. It does NOT settle what any of them means — every one is byte-constant, so the corpus cannot.
+
+`0x4808`, `0x4820`, `0x4824`, `0x4826`, `0x4828`, `0x4829`, `0x4834`, `0x4501` and `0x2567`
+appear in **exactly the same 30 sessions**, and the `0x0003` product string of every one of those
+sessions is **`Pro Tools Studio`** (30/30). No session of another product carries any of them.
+
+| type | span | parent | payload |
+|---|---|---|---|
+| `0x4501` | **20,901** | TOP-LEVEL | 1 distinct |
+| `0x4808` | 51 | TOP-LEVEL | 1 |
+| `0x4820` | 33 | TOP-LEVEL | 1 |
+| `0x4834` | 37 | TOP-LEVEL | 1 — **and it holds a `0x2011`**, making that class NINE |
+| `0x2567` | 22 | TOP-LEVEL | 1 |
+| `0x4826` | 16 | `0x20A2` | 1 |
+| `0x4824` | 13 | `0x4501`, `0x204B` | 1 |
+| `0x4828` | 13 | **`0x1054`** | 1 |
+| `0x4829` | 13 | **`0x1015`** | 1 |
+
+**Every one has exactly ONE distinct payload across all instances** — the entire family is
+fixture. What identifies it is not its content but *which product wrote the file*.
+
+**Three consequences:**
+
+1. **This is a version/product gate, not a feature gate.** The blocks appear whether or not the
+   session uses any particular feature; they track the writing application. `0x0003`'s product
+   string and this family agree perfectly, so either can identify the writer.
+2. **`0x4828` and `0x4829` attach to the COUNT CONTAINERS** (`0x1054` lanes, `0x1015` track
+   entries). Anything that rebuilds those containers on a Studio-written session must preserve
+   them, and anything synthesizing one for Studio must emit them.
+3. **A synthesizer targeting a different product must NOT emit them** — they are absent from
+   every non-Studio session measured, so including them would be a tell that the file was not
+   written by the product it claims.
+
+- **Confidence:** HIGH — the 30-session set is identical across all nine types and the product
+  string is unanimous. What each block MEANS is unproven and, being byte-constant, unprovable
+  from this corpus.
+
+### 0x2505 / 0x2507 / 0x259C / 0x206C — more `0x2011`-child class members
 
 All four are TOP-LEVEL, one per session (75/75 each), and hold **exactly one `0x2011`**, with
-only 2–7 distinct payloads apiece. With `0x2016`/`0x2017`/`0x2019`/`0x201A` that makes **eight
+only 2–7 distinct payloads apiece. With `0x2016`/`0x2017`/`0x2019`/`0x201A` and `0x4834` that makes **NINE
 types sharing one payload schema** — `0x2011` is the record, and the parent's content type is
 the only discriminator.
 

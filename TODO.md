@@ -4715,3 +4715,33 @@ the clearest example in the corpus of why the phantom filter exists, and it has 
 consequence: **a locator for the real 0x4300 must require TOP-LEVEL, not just the content type.**
 Worth remembering that "filter by content type" -- the advice from the rare-routes finding -- is
 necessary but NOT sufficient; type plus position is what identifies a block.
+
+## Queue, batch 14: a PRODUCT-GATED block family — nine types that identify the writer
+    entries 278 -> 287, mention-only 45 -> 36
+
+0x4808, 0x4820, 0x4824, 0x4826, 0x4828, 0x4829, 0x4834, 0x4501 and 0x2567 appear in **exactly
+the same 30 sessions**, and the 0x0003 product string of every one of those is **"Pro Tools
+Studio"** (30/30). No session of another product carries any of them. Every one has exactly ONE
+distinct payload -- the whole family is fixture, and what identifies it is not its content but
+WHICH PRODUCT WROTE THE FILE.
+
+THREE CONSEQUENCES:
+  1. **This is a version/product gate, not a feature gate.** The blocks appear regardless of what
+     the session contains. 0x0003's product string and this family agree perfectly, so either can
+     identify the writer.
+  2. **0x4828 and 0x4829 attach to the COUNT CONTAINERS** (0x1054 lanes, 0x1015 track entries).
+     Anything rebuilding those on a Studio-written session must preserve them; anything
+     synthesizing for Studio must emit them.
+  3. **A synthesizer targeting a different product must NOT emit them** -- absent from every
+     non-Studio session measured, so including them would be a tell that the file was not written
+     by the product it claims.
+
+ALSO A CORRECTION: I said last batch that the 0x2011-child class "closes at eight". **0x4834
+makes it NINE.** Corrected in the spec. The claim was one batch old and already wrong -- worth
+noting because "the class is complete" is exactly the kind of statement that should carry the
+sample it was measured on, and mine did not.
+
+METHOD NOTE: this family was found by noticing that ten unrelated-looking types all appeared in
+"25 sessions" in the profiler output. **An identical, oddly specific session count across several
+types is a signal worth chasing** -- it means they share a gate, and finding the gate explains all
+of them at once.
