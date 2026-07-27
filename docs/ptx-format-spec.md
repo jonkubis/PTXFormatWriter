@@ -2634,6 +2634,69 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x2434 — per-track display HEIGHT (fixed 18-byte leaf)
+
+- **Kind:** LEAF, **span 18 in every one of 9,677 instances**. Parent is `0x2015` (9,497 — the
+  per-track view record) or `0x2023` (180, one per session).
+- **Payload:** 9 bytes, and only **TWO distinct values across the whole survey**:
+
+  | payload | `u16` @+7 | instances |
+  |---|---|---|
+  | `04 00 00 00 00 00 00 3c 00` | **60** | 6,321 |
+  | `04 00 00 00 00 00 00 40 00` | **64** | 180 |
+
+- **Field:** the `u16` at payload+7 is the track's display height in pixels — 60 is Pro Tools'
+  default track height, 64 the "medium" step, and the 180 instances of 64 are exactly one per
+  session (the `0x2023`-parented copy), i.e. a session-level default rather than a per-track
+  value.
+- **Why this matters beyond the field:** `0x2434` is what made the `0x2015` ordinal anchor
+  16 bytes rather than 18 — the trailing `3C 00` that looked like framing is this height value.
+  See the `0x2015` entry.
+- **Confidence:** HIGH — fixed size, two values, and the 60/64 split lines up with PT's own
+  track-height steps.
+
+### 0x2625 / 0x2626 — the byte-constant scaffolding pair
+
+- **`0x2625`** — **span 18 in all 91,583 instances**, parent ALWAYS `0x2627`, child ALWAYS
+  `0x2626`, and exactly **ONE distinct payload** (`5a 01 00 02 00 00 00 26 26`) across 171
+  sessions. It is a wrapper carrying nothing but its child.
+- **`0x2626`** — **span 9 in all 100,001 instances**, payload EMPTY, one distinct form. Parent
+  `0x2625` (91,583) or `0x2615` (8,418).
+- **Reading:** pure structural scaffolding with zero information content, confirmed at scale
+  (191,584 instances, not one deviation). Emit verbatim; never attempt to derive anything from
+  them. The `0x2626` count exceeding `0x2625` by 8,418 is the `0x2615`-parented population — the
+  terminator is reused by a second family.
+- **Confidence:** HIGH (byte-constant over ~192k instances).
+
+### 0x2601 / 0x2602 — the I/O routing path entries
+
+- **`0x2602`** — 20,494 instances / 180 sessions, parent ALWAYS `0x2603` (the singleton I/O
+  table). Payload opens with a **length-prefixed path NAME** (`02 00 09 00 00 00 "VIRTUAL…"`),
+  823 distinct openings — real per-session data. Sizes 78–92.
+- **`0x2601`** — same count (20,494), parent ALWAYS `0x2602`, so the two are paired 1:1. Usually
+  a 13-byte stub (18,858/20,494) with the occasional larger form (285, 63).
+- **Reading:** `0x2603 ⊃ 0x2602 (named path) ⊃ 0x2601 (its port/connection detail)`. The 1:1
+  pairing and the `0x2601` stub majority say most paths carry no connection detail — consistent
+  with an I/O table that lists every possible path and populates only the connected ones.
+- **Confidence:** HIGH on framing/parentage/pairing/name-prefix; the `0x2601` payload layout is
+  undecoded.
+
+### 0x1015 / 0x1054 / 0x2624 — the three top-level count containers
+
+All three are TOP-LEVEL, one per session, and are the containers §5's "keep child-counts in sync"
+rule is about. Measured shapes:
+
+| type | position | span range | note |
+|---|---|---|---|
+| `0x1015` | `0x1054 → · → 0x1055` | 26…547 | tallies `0x1014` track entries |
+| `0x1054` | `0x262E`/`0x2437 → · → 0x1015` | 13…2,703 | tallies `0x1052` lanes; a SECOND copy is nested under `0x2428` (360 instances / 180 sessions) |
+| `0x2624` | `0x2604`/`0x2107 → · → 0x202B`/`0x2062` | 13…3,607 | tallies ALL per-track subtrees; also holds the display-order element list |
+
+- **Note the `0x1054` duplication:** 2 per session (one top-level, one under `0x2428`), which is
+  why a count-fixer must locate the right one rather than the first.
+- **Confidence:** HIGH on framing/position/count-role (the role is independently confirmed by the
+  end-of-stream work in §5); payload layouts beyond the count are documented per-type elsewhere.
+
 ### 0x1028 — session sample rate
 
 - **Kind:** TOP-LEVEL LEAF, one per session, 180/180. `0x2519`/`0x4808` → `0x1028` → `0x2026`.

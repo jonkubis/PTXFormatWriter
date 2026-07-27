@@ -4326,3 +4326,32 @@ framing + position + universality + the empty/populated split, with PURPOSE unpr
 not a shortfall of effort -- it is what the corpus contains. 0x1028 is the exception that proves
 it: its field is provable because an INDEPENDENT reader already decoded it and the values are
 externally meaningful (44100/48000). Where no such anchor exists, structure is the ceiling.
+
+## Queue, batch 5: the high-volume types, and a SECOND proven field
+    entries 198 -> 206, mention-only 124 -> 116
+
+Took the highest-instance-count types this time, on the reasoning that a type appearing 100,000
+times deserves an entry more than one appearing twice.
+
+  * **0x2434 = per-track display HEIGHT.** Span 18 in all 9,677 instances, and only TWO distinct
+    payloads in the entire survey: `...3c 00` (u16 = **60**) x6,321 and `...40 00` (**64**) x180.
+    60 is PT's default track height and 64 its next step; the 180 instances of 64 are exactly one
+    per session (the 0x2023-parented copy), i.e. a session default rather than a per-track value.
+    **This is also the block that forced `_ORD2015_ANCHOR` from 18 bytes to 16** -- the trailing
+    `3C 00` that looked like framing is this height. Second proven field in these batches.
+  * **0x2625 / 0x2626 = pure scaffolding, confirmed at scale.** 0x2625: span 18 in ALL 91,583
+    instances, parent always 0x2627, child always 0x2626, ONE distinct payload. 0x2626: span 9 in
+    ALL 100,001, payload EMPTY, one form. **191,584 instances, not one deviation.** The 8,418
+    excess of 0x2626 over 0x2625 is the 0x2615-parented population -- the terminator is shared by
+    a second family.
+  * **0x2602 / 0x2601 pair 1:1** (20,494 each). 0x2602's payload opens with a length-prefixed
+    PATH NAME (823 distinct); 0x2601 is a 13-byte stub in 18,858 of 20,494. So the I/O table
+    lists every possible path and populates only the connected ones -- the stub majority IS the
+    finding.
+  * **0x1054 EXISTS TWICE PER SESSION** (top-level, and nested under 0x2428). Recorded explicitly
+    because a count-fixer that takes "the first 0x1054" will sometimes take the wrong one.
+
+WHY THIS BATCH WAS BETTER: I ordered by INSTANCE COUNT rather than by session coverage. A type
+with 100,001 instances gives byte-constancy evidence no 180-instance type can, and the two most
+useful results here (0x2434's field, the 191k-instance scaffolding proof) both depended on that
+volume. Worth doing the remaining queue in that order.

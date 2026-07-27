@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**198 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**124 are counted as "documented" only because their hex string appears somewhere in
+**206 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**116 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -35,23 +35,15 @@ mentions. The mention-only list is the honest work queue:
 
 | type | instances | sessions |
 |---|---|---|
-| `0x2601` | 73387 | 832 |
-| `0x2602` | 73387 | 832 |
-| `0x2434` | 32456 | 832 |
 | `0x0003` | 832 | 832 |
 | `0x1004` | 832 | 832 |
 | `0x2603` | 832 | 832 |
-| `0x2624` | 832 | 832 |
 | `0x206c` | 832 | 832 |
 | `0x2505` | 832 | 832 |
 | `0x2507` | 832 | 832 |
 | `0x259c` | 832 | 832 |
-| `0x1054` | 1662 | 831 |
-| `0x1015` | 831 | 831 |
 | `0x251a` | 63279 | 813 |
 | `0x200a` | 31609 | 813 |
-| `0x2626` | 333641 | 773 |
-| `0x2625` | 310008 | 773 |
 | `0x2038` | 187159 | 773 |
 | `0x260c` | 74400 | 773 |
 | `0x260e` | 60373 | 773 |
@@ -75,8 +67,16 @@ mentions. The mention-only list is the honest work queue:
 | `0x2106` | 80990 | 597 |
 | `0x1033` | 80621 | 597 |
 | `0x1050` | 248865 | 596 |
+| `0x2587` | 583 | 583 |
+| `0x2506` | 1848548 | 496 |
+| `0x0f3d` | 481 | 481 |
+| `0x0f3e` | 481 | 481 |
+| `0x270a` | 480 | 480 |
+| `0x4301` | 63441 | 456 |
+| `0x4420` | 49048 | 456 |
+| `0x4300` | 487 | 456 |
 
-…and 84 more.
+…and 76 more.
 
 
 ## Described vs settled — two different numbers
@@ -84,7 +84,7 @@ mentions. The mention-only list is the honest work queue:
 **322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 158 typed sections in the spec, **36 still say the PURPOSE is unproven** —
+Of the 162 typed sections in the spec, **36 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
