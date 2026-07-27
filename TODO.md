@@ -4542,3 +4542,35 @@ whether the shape is a bug: `region_names` enumerates by type (right for "all re
 `region_list` walks a parent (right for "the index space").
 
 232 tests green.
+
+## Queue, batch 11: the rulers NAME THEMSELVES — the best decode of the whole exercise
+    entries 241 -> 243, mention-only 82 -> 80
+
+The five 0x271x containers each hold exactly two children: a `0x2619` carrying a length-prefixed
+ASCII NAME, and one content container. The names are identical across all 50 sessions each:
+
+    0x2718  "Tempo"          -> 0x2028 (tempo map)
+    0x2719  "Meter"          -> 0x2029 (meter map)
+    0x271A  "Markers"        -> 0x2030 (marker list)
+    0x271B  "Key Signature"  -> 0x2433
+    0x271C  "Chord Symbols"  -> 0x2437
+
+**This is PROVEN, not inferred** -- Pro Tools writes its own ruler labels into the file, and they
+are externally meaningful (they are the ruler names in its UI). **And it settles two previously
+unidentified content types by association: 0x2433 is Key Signature data, 0x2437 is Chord Symbols
+data** -- each the sole content child of a container that states its own name.
+
+This is exactly the property flagged in batch 6 as the predictor of decodability: a field whose
+VALUES are recognisable from outside the format. Every proven decode in this exercise has had it
+(0x2434's 60/64 px, 0x1028's 44100/48000, and now five literal ruler names); nothing without it
+has yielded a meaning.
+
+ALSO: **the 0x203x family all wrap a single 0x2037** -- 0x2038, 0x203B, 0x203D, 0x2039, 0x203E,
+0x203F, spans 19/22/21/19/63/22. So `0x203F`'s long-standing collision with `0x203B` (both size
+22 under 0x2015) is not a coincidence but the family's defining property: **size does not
+identify a member, only the content type does.** That retroactively justifies pinning the
+`3b 20` content-type bytes in the view-volume locator rather than matching on size.
+
+Presence note worth keeping: the rulers exist in 50 of 75 sessions, but the top-level
+0x2028/0x2029/0x2030 maps exist regardless -- the ruler is a DISPLAY WRAPPER around data that
+lives independently, which is why replace_tempo_map resizes the lane "only when present".

@@ -2634,6 +2634,55 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x2718 / 0x2719 / 0x271A / 0x271B / 0x271C — the five CONDUCTOR RULERS (they name themselves)
+
+Each is TOP-LEVEL, present in 50 of 75 sessions, and holds **exactly two children: a `0x2619`
+carrying a length-prefixed NAME, and one content container.** The name is Pro Tools' own ruler
+label, identical in all 50 sessions for each — so these are self-describing and the mapping is
+PROVEN, not inferred:
+
+| container | `0x2619` name | content child | sessions |
+|---|---|---|---|
+| `0x2718` | **`Tempo`** | `0x2028` (tempo map) | 50/50 |
+| `0x2719` | **`Meter`** | `0x2029` (meter map) | 50/50 |
+| `0x271A` | **`Markers`** | `0x2030` (marker list) | 50/50 |
+| `0x271B` | **`Key Signature`** | `0x2433` | 50/50 |
+| `0x271C` | **`Chord Symbols`** | `0x2437` | 50/50 |
+
+**This settles two previously unidentified content types by association:** `0x2433` is the KEY
+SIGNATURE ruler's data and `0x2437` is the CHORD SYMBOLS ruler's — each is the sole content child
+of a container that states its own name.
+
+- **Why this decode was available at all:** the label is a length-prefixed ASCII string written by
+  Pro Tools and externally meaningful (they are the ruler names in its own UI). That is the
+  property that makes a field decodable from the corpus — see the note under `0x1028`.
+- **Presence:** 50 of 75 — a session without the ruler containers still has the top-level
+  `0x2028`/`0x2029`/`0x2030` maps, so the ruler is a display wrapper around data that exists
+  independently. This is why `replace_tempo_map` resizes the lane "ONLY when present".
+- **Confidence:** HIGH throughout — framing, children and the names are all 50/50, and the names
+  are self-describing rather than inferred.
+
+### The 0x203x view-element family — every member wraps a single 0x2037
+
+Beyond `0x2038` and `0x203B`, the same shape recurs across the whole range. All are parented by
+the view records `0x2015`/`0x2589`, all hold exactly one `0x2037` terminator:
+
+| type | span | instances | sessions | parents |
+|---|---|---|---|---|
+| `0x2038` | 19 | 28,421 | 73 | `0x200A`, `0x2015` |
+| `0x203B` | 22 | 17,130 | 71 | `0x2580`, `0x2015` |
+| `0x203D` | 21 | 18 | 5 | `0x2015` |
+| `0x2039` | 19 | 15 | 3 | `0x2015`, `0x2589` |
+| `0x203E` | 63/74 | 6 | 2 | `0x2015` |
+| `0x203F` | 22 | 23 | 9 | `0x2015`, `0x2589` |
+
+- **Reading:** a family of view ELEMENTS distinguished by content type and size, not by structure
+  — every one is a thin wrapper around the same empty terminator. `0x203F`'s collision with
+  `0x203B` (both size 22 under `0x2015`) is therefore not a coincidence but the family's
+  defining property: **size does not identify a member, only the content type does.**
+- **Confidence:** HIGH on the shape; individual members' meanings UNPROVEN, and the rarest
+  (`0x203E`, 6 instances in 2 sessions) rest on very little.
+
 ### RARE SECOND ROUTES — the parents that break traversal code
 
 Swept every type's parent distribution over **240 sessions** and kept each parent holding **<5%
