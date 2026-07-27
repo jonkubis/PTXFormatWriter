@@ -1980,6 +1980,29 @@ different record rather than a different value.
 The four that hold are now backed by four drives instead of one. That still does not settle their
 PURPOSE — constant is not understood — but the denominator is honest.
 
+**Two further claim classes audited the same way, and both came back CLEAN.** Spec entries assert
+three things a narrow corpus can make look true — a fixed payload, a singleton, and a parent — and
+all three are cheap to verify wrongly on one machine.
+
+| singleton claim | controls | external | verdict |
+|---|---|---|---|
+| `0x103f`, `0x2024`, `0x2025`, `0x207b`, `0x2511` | 1 per session, 70/70 | 1 per session, 165/165 | all hold |
+
+| parent claim | measured | verdict |
+|---|---|---|
+| `0x200c` under `0x261D` | 436/436 | holds |
+| `0x2020` under `0x2013` | 235/235 | holds |
+| `0x2506` under `0x2077` | 675850/675850 | holds |
+
+`0x2506 → 0x2077` was included as a CONTROL — it had been measured directly an hour earlier, so a
+wrong answer there would have indicted the harness rather than the spec. (Worth doing: an audit
+earlier the same day reported `meter_map` as the module's worst offender when it was in fact
+correct, because its applicability test was wrong.)
+
+Containment holding matters beyond documentation: `_size_driven_blocks` and every reindex operation
+navigate by these relationships, so a false parent claim would mean code walking somewhere
+unintended, not merely a wrong sentence.
+
 ### 0x104d — Top-level ordinal + 0.5-pair leaf (**NOT fixed — 4 payloads externally**) (view-state)
 
 - **kind:** LEAF; top-level (no enclosing 0x5A; parent None in 26/26). No children (26/26). block_type (u16@z+1) = 3. Exactly one instance per session (26/26). Immediately follows 0x1040 and precedes 0x207e in every session.
