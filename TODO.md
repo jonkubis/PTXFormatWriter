@@ -3503,3 +3503,59 @@ tell you nothing.
 
 Also consistent with the 0x2015 ordinal being a PLAYLIST index (spec §12): the playlist, not the
 track, is what PT scaffolds per marker.
+
+## Hunting for VARIATION is what moves "described" to "settled"
+Several spec entries said, in effect, "this field never varies" -- and each was measured on 19-26
+control sessions. I swept **1,532 sessions** across four drives looking specifically for the
+sessions that BREAK those claims. Four broke.
+
+1. **`0x206f` is a MIDI INPUT-DEVICE LIST, not a sentinel.** The entry called the payload
+   invariant across 247 instances. It is invariant because the list is almost always EMPTY.
+   Layout: `u16 @+0 = 1`, `u16 @+2 = device count`; when non-zero a `0x208C` follows holding a
+   length-prefixed device NAME (`Alesis Vi61`, `OXYGEN 8`) wrapping a `0x208E`. Only 26 of 1,532
+   sessions have a device at all. The old entry read the first 4 bytes as one u32 = 1; in the
+   populated form they are `01 00 01 00` = 65537, which is exactly why the u32 reading looked
+   constant. It is two u16s and the second is a count.
+2. **`0x2018 +0` is not constant.** Recorded `= 1 (26/26)`; actually 1 x1411, **0 x120**,
+   16777217 x1. The control set happened to contain no zero.
+3. **`0x2435` is not one-project.** The entry flagged cross-project variance as UNPROVEN because
+   all 7 instances were one project. It appears in **28 project families**. Caveat lifted.
+4. **`0x2509`'s port pair varies** -- `(0,0)` x919, `(28283,28282)` x493, `(30,45840)`,
+   `(30,40656)`, ... The entry's own caveat ("this user's setup, not a proven default") was
+   right. The recurring `30` against a varying large value fits the port reading.
+
+STRENGTHENED, not changed: `0x203f`/`0x203b` never share an innermost parent in 1,532 sessions
+(72 vs 306,021 instances) -- alternatives in one slot, and `0x203f` is the rare setting.
+`0x2511` still shows zero deviation from `Snap1..Snap48`.
+
+THE GENERAL LESSON: "invariant across N instances" is worth very little when those N instances
+are the DEFAULT state of an optional feature. 247 empty lists say nothing about a full one. Ask
+what the field would look like if the feature were USED, then go find a session that uses it.
+
+## 0x2506: two forms, a per-playlist bit, and a hypothesis I refuted
+The spec called the 0x2506 payload constant. Over **779,382 instances in 240 sessions there are
+exactly two forms**, differing at payload+2: `FFFFFFFF` (78.4%) vs `00000000` (21.6%).
+
+Laid out as a marker x playlist matrix, every MARKER ROW is identical and the variation runs
+along the PLAYLIST axis -- so the field is a per-playlist property replicated per marker. Most
+sessions are uniform (51 all-FF, 5 all-00, 9 mixed); the 9 mixed ones carry the information.
+
+I then guessed it was the mono/stereo flag. The track names in two sessions fit beautifully
+(`Overheads`/`Room`/`Far Room` set, mono drum spots clear). Against ACTUAL channel counts it
+scored **20.8% (10/48)** and failed wholesale in both directions. Refuted and recorded, because
+the name-reading was convincing -- reading a story into a column of track names is not evidence.
+
+Also measured: `0x2077` has NO child-count field for its 0x2506 children (best candidate 1.1%
+over 5,332 markers where name length != child count, i.e. noise). So rows can be added/removed
+with only size fixes and the offset shift.
+
+## duplicate_track leaves the 0x2506 matrix a row short (open)
+Now that the multiplier is known, the defect is exact: duplicate_track ADDS A PLAYLIST but adds
+NO 0x2506 rows, so the session ends up short by exactly n(0x2077) -- confirmed on 8 real
+sessions (short by 6,7,7,7,6,7,9,9 = their marker counts). remove_track has the inverse gap.
+
+**THE UNCOMFORTABLE PART: every PT confirmation we have of duplicate_track is on a MARKERLESS
+session**, where n(0x2077)=0 and the deficit is identically zero. So this defect has never been
+in front of Pro Tools. Fixing it needs the per-playlist bit above decided (which form to emit)
+-- OR the observation that in a uniform session every row is the same byte string, which covers
+51+5 of 65 sessions. NEXT: implement for the uniform case, refuse/warn on mixed.

@@ -275,9 +275,36 @@ view/automation state: `0x261B` → { `0x260D` `(NEW)` → { `0x260A` · `0x260C
 `(NEW)` · `0x102D` → `0x2619` → `0x4301` `(NEW)` · `0x1029` `(NEW)` · `0x2627` }.
 
 **Conductor** — `0x2028`/`0x2718` tempo, `0x2029`/`0x2719` meter, `0x2030`/`0x2077` markers
-(§10). `0x2077` → `0x2506`: a **fixed 17-byte scaffold** (constant payload
-`…06 25 FF FF FF FF 00 00 00 00`), emitted **once per marker per track-like object** — *not*
+(§10). `0x2077` → `0x2506`: a 17-byte record emitted **once per marker per playlist** — *not*
 waveform data (see §5c).
+
+> **CORRECTION 2026-07-27 — the payload is NOT constant.** This entry described
+> `…06 25 FF FF FF FF 00 00 00 00` as fixed. Over **779,382 instances in 240 sessions there are
+> exactly TWO forms**, differing only in the `u32` at payload+2:
+>
+> | payload+2 | instances | share |
+> |---|---|---|
+> | `FF FF FF FF` | 610,954 | 78.4% |
+> | `00 00 00 00` | 168,428 | 21.6% |
+>
+> **The field is a per-PLAYLIST property, not a per-marker one.** Laying the records out as a
+> marker × playlist matrix, every marker row is byte-identical and the variation runs along the
+> playlist axis (all 9 mixed sessions vary *within* a marker; 7 of 9 have every marker row
+> identical). Most sessions are uniform — 51 all-`FF`, 5 all-`00`, 9 mixed — so the mixed ones
+> carry all the information.
+>
+> **What it is NOT: the mono/stereo flag.** That fit the track names in two hand-read sessions
+> (`Overheads`/`Room`/`Far Room` flagged among mono drum spots) and scored **20.8% (10/48)**
+> against actual channel counts, failing wholesale — all-set columns against mixed predictions,
+> and the reverse. Recorded because the name-reading was convincing and wrong.
+>
+> `0x2077` carries **no child-count field** for its `0x2506` children: no `u32`/`u16` anywhere in
+> its header matches the child count above 1.1% over 5,332 markers whose name length differs from
+> that count. So adding or removing rows needs no count fixup — only sizes and the offset shift.
+> Note 271 `0x2077` blocks have direct children that are not all `0x2506`.
+>
+> Settling the bit's meaning needs Pro Tools: one session saved twice with one playlist-level
+> setting changed.
 
 > **SETTLED 2026-07-27 — the multiplier is the PLAYLIST count, not the track count.**
 >
@@ -1230,8 +1257,29 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **size:** fixed 13-byte block span (block_type 0x0002, size field 6, 4-byte payload).
 - **fields:**
   - 0 u32 = 1 (constant `01 00 00 00` across ALL 247 instances; never varies).
-- **notes:** Direct parent 0x2621 (240/247) or the shorter 0x2620 variant (7/247); grandparent 0x2624 (single top-level session-wide edit container — NOT a per-track record). Immediately preceded by sibling 0x2010 (247/247). NOT master-indexed. The `enabled=1 / schema-version sentinel` interpretation is plausible but UNPROVEN (the value is invariant everywhere).
-- **confidence:** high for structure/constant; low for semantic meaning.
+- **notes:** Direct parent 0x2621 (240/247) or the shorter 0x2620 variant (7/247); grandparent 0x2624 (single top-level session-wide edit container — NOT a per-track record). Immediately preceded by sibling 0x2010 (247/247). NOT master-indexed.
+- **confidence:** high for structure; the leading `u16` count is measured (below).
+
+> **SETTLED 2026-07-27 — it is not a sentinel, and it is not a leaf. It is a MIDI input-device
+> list with a count.** The "invariant everywhere" reading came from a corpus where the list is
+> almost always EMPTY. Over **1,532 sessions** the payload takes exactly three forms: the empty
+> one 1,518×, and two populated ones 13× each.
+>
+> ```
+> u16 @+0 = 1              (form/version)
+> u16 @+2 = device count   0 -> payload ends here (the 4-byte "constant"); 1 -> one record follows
+> then, per device:  0x208C { u16, u32 namelen, name[namelen], u8, 0x208E { 8 bytes } }
+> ```
+>
+> The names are real MIDI controllers — `Alesis Vi61` (11 bytes) and `OXYGEN 8` (8 bytes) — so
+> this block records the session's MIDI input devices. The nested `0x208E` payload
+> `10 d9 12 78 00 00 00 00` is identical in both and not decoded.
+>
+> The old entry read the first four payload bytes as one `u32 = 1`. In the populated form those
+> bytes are `01 00 01 00` = 65537, so the `u32` reading is what made the field look constant:
+> it is two `u16`s, and the second is a count. **This is why "invariant across 247 instances" is
+> weak evidence** — 247 instances of an empty list say nothing about what a full one looks like.
+> Only 26 of 1,532 sessions have a device at all.
 
 ### 0x230b — I/O-Setup default name slot (`Custom N`)
 
@@ -2374,7 +2422,10 @@ form and reads garbage on another.
 - **kind:** LEAF (0 children, 26/26). Parent: top-level (None, 26/26). block_type=0x08 (all instances). prev top-level sibling = 0x2019 (26/26). next top-level sibling = 0x201a (20/26) OR 0x4300 (6/26 — the 4 DWTS variants + MANOLITO + THE WIND, where an 11-byte 0x4300 block sits between 0x2018 and 0x201a).
 - **size:** Constant. Exactly 1 per session (26/26). span=22, size_field=15 (u32@z+3), payload 13 bytes — identical across ALL 26 incl. the 7 huge Hipsters backups. Header = `5A 08 00 (block_type=8) | 0F 00 00 00 (size=15) | 18 20 (content_type)`. Payload @z+9.
 - **fields:**
-  - `+0 u32 (LE) = 1` (constant, 26/26). Labeling it a 'count' is speculative — it is followed by 9 more payload bytes, so it does not act as a byte count; treat as a constant leading u32.
+  - `+0 u32 (LE)` — **NOT constant.** Recorded as `= 1 (constant, 26/26)`; over **1,531 instances
+    in 1,532 sessions** the value is `1` ×1,411, **`0` ×120**, and `16777217` (`0x01000001`) ×1.
+    The 26-session control set simply contained no zero. Labeling it a 'count' remains
+    speculative — it is followed by 9 more payload bytes, so it does not act as a byte count.
   - `+4 u8 = 1` (constant).
   - `+5 u8 = toggle A` (boolean). Full corpus {0:18, 1:8}. (Non-huge 19-session subset: {0:11, 1:8}.)
   - `+6 u8 = toggle B` (boolean). Full corpus {0:23, 1:3}. Observed only when A=1: (A,B) combos are (0,0)×18, (1,0)×5, (1,1)×3 — (0,1) never occurs.
@@ -2790,7 +2841,16 @@ form and reads garbage on another.
   - `+17` u32 = 28282 (0x00006e7a) in bt=2, 0 in bt=3 — plausibly a peer port, NOT a latency count.
   - bt=3 adds 4 trailing zero bytes at +21..+24 (payload 25 vs 21); always `00000000`.
 - **Notes:** The sole child of a top-level 0x25c0 node record whose payload begins with an IPv4. Holds a −1 'unset ID' sentinel plus, for a real LAN peer (bt=2), a near-equal u32 pair (28283/28282 — most plausibly two port numbers, also valid as u16 ports). Zeroed for loopback/unreachable nodes (bt=3). The bt=2-vs-bt=3 split correlates 1:1 with reachability: LAN peers (192.168.x) ⇒ bt=2 with non-zero pair; loopback 127.0.0.1 and 10.0.0.13 ⇒ bt=3 with the pair zeroed. Looks like Satellite Link / network-peer state PT recomputes from the host environment. CAVEAT: the bt=2 pair is observed-constant only because 8 of 10 bt=2 instances are backups of a single project — treat 28283/28282 as this user's setup, not a proven fixed default.
-- **Confidence:** MEDIUM-HIGH (byte layout HIGH; semantics LOW). Framing/offsets verified byte-exact 19/19; the +0/+4 reserved zeros, +8 sentinel, +12=0, and bt=3 zero-pad are CERTAIN. The +13/+17 port interpretation and the constancy of the pair are INFERRED, not proven.
+- **Confidence:** MEDIUM-HIGH (byte layout HIGH; semantics LOW). Framing/offsets verified byte-exact 19/19; the +0/+4 reserved zeros, +8 sentinel, +12=0, and bt=3 zero-pad are CERTAIN.
+
+> **UPDATE 2026-07-27 — the pair VARIES; the entry's own caveat was right.** The note warned
+> that `28283/28282` was "this user's setup, not a proven fixed default" because 8 of 10 bt=2
+> instances were backups of one project. A 1,532-session sweep confirms it: the `(+13, +17)`
+> pair takes many values — `(0,0)` ×919, `(28283,28282)` ×493, then `(30, 45840)`, `(30, 40656)`,
+> `(30, 30200)`, `(30, 41592)`, … The `30` recurring in the low slot with a large, varying high
+> slot is consistent with the port reading (a fixed service port against an ephemeral one), which
+> strengthens that interpretation without proving it. What is now settled is that the pair is
+> **per-environment state, not a constant.**
 
 ### 0x2530 — Grid/Nudge time-value display cache (edit-prefs, LEAF)
 
@@ -2944,7 +3004,7 @@ form and reads garbage on another.
 ### 0x2435 — Score/print-page header field definition (LEAF)
 
 - **Kind:** LEAF (no child blocks; 0 descendants in all 7). block_type=0x0004. Parent = 0x2023 (a top-level session-settings/properties group, block_type=0x0012). Since 0x2023 is top-level, grandparent = ROOT.
-- **Size:** Fixed: span=84 bytes, declared size=77, payload=75 bytes across all 7 — byte-identical. IMPORTANT: all 7 instances belong to a SINGLE project ('Reverse Rewire', 7 sequential .bak backups); no other project family in the corpus carries 0x2435 at all, so cross-project size/value variance is UNPROVEN — a one-project observation.
+- **Size:** Fixed: span=84 bytes, declared size=77, payload=75 bytes across all 7 — byte-identical. The original entry noted all 7 instances came from a SINGLE project ('Reverse Rewire') and flagged cross-project variance as UNPROVEN. **RESOLVED 2026-07-27: a 1,532-session sweep finds `0x2435` in 28 distinct project families**, so the one-project caveat is lifted — the type is not project-specific. (Whether the *bytes* stay identical across those 28 is a separate measurement, not yet made.)
 - **Fields (offsets payload-relative = zmark+9):**
   - `+0` u32 len=5, then 'Title' (5 ASCII) → label #1 (occupies [0:9)).
   - `+9` u32 len=8, then 'Composer' (8 ASCII) → label #2 (occupies [9:21)).
@@ -3024,8 +3084,13 @@ zero instances in this project's own output, checked with `session_is_probably_o
 
 **`0x203f`** — 23 blocks in 9 sessions, **fixed size 22**, parent `0x2015` (22/23) or `0x2589` (1/23).
 Same 22 bytes and the same display-chain parents as `0x203b`, so the view chain carries (at least)
-**two** such elements. **Which display parameter each carries is UNPROVEN**; they never co-occur
-under the same parent in the sampled sessions.
+**two** such elements. **Which display parameter each carries is UNPROVEN.**
+
+The mutual-exclusion observation now rests on a much wider base: across **1,532 sessions** on
+four drives (72 `0x203f` against 306,021 `0x203b`), the two **never once share an innermost
+parent**. So they are alternatives in the same slot, not companions — which is why a
+size-22-under-`0x2015` locator would be genuinely ambiguous, and also why the rarity ratio
+(~4,250:1) makes `0x203f` a non-default setting of whatever parameter the slot holds.
 
 A locator keyed on *size 22 under `0x2015`* alone would confuse the two — but this codebase's is
 not, and was checked rather than assumed: `_view_volume_offsets` searches the 22-byte literal
