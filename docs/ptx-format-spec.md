@@ -2568,6 +2568,66 @@ form and reads garbage on another.
 - **notes:** In the top-level session-preferences region; top-level neighbors byte-for-byte constant: ...0x2050, 0x204b, [0x207b], 0x2016, 0x2017... (19/19). PT-owned session-config state PT recomputes/rewrites; not for hand-authoring. The 'timecode/SMPTE-config' role is well-grounded for the large form (direct HH:MM:SS:FF evidence) but INFERRED for the 13 small-form sessions (no timecode string). IMPLEMENTATION CAVEAT: small form payload is 9 bytes with no child / no timecode string — consumers must not read past +9. CORRECTIONS from proposal: (1) the 0x4530 child spans 97 (size_field 90), NOT 115 (115 is the 0x207b PARENT span); (2) +1 does NOT track form/child-presence — only block_type predicts child presence, +1 varies independently within both forms.
 - **confidence:** HIGH on frame, size/kind bimodality, per-session count (1), parent=top-level, neighbor order, constant +0=0 and +3=1000, block_type-predicts-child, and the byte-identical 0x4530 child + its '00:00:00:00' timecode string. MEDIUM-LOW on the meaning of the two u16 enums (+1, +7) — distributions stable but unmapped, and +1's spread is partly a backup-duplication artifact.
 
+### 0x2016 / 0x2017 / 0x2019 / 0x201A — the `0x2011`-bearing top-level view-state run
+
+- **Kind:** all four TOP-LEVEL, each holding **exactly one `0x2011` child** (180/180 sessions).
+- **Universality:** every one appears once per session in all 180 profiled (and 832 per the
+  coverage tracker).
+- **Order:** they sit in a fixed contiguous run of the top-level sequence, 180/180:
+
+  `0x207B → 0x2016 → 0x2017 → 0x2019 → 0x2018 → [0x4300] → 0x201A → 0x201B`
+
+  (`0x4300` is present on 102 of 180 — the same version-gated block the `0x2018` entry notes.)
+- **Size:** variable per type and per session — `0x2016` 214…1247, `0x2017` 70/76, `0x2019`
+  37/41, `0x201A` 37/42/43. `block_type` also varies within a type (`0x2017` is 9 or 13,
+  `0x2019` is 1 or 3), and it co-varies with the size, so these are genuinely variable-length
+  records rather than one fixed shape.
+- **Payload:** starts immediately with the framed `0x2011` child
+  (`5a 02 00 15 00 00 00 11 20 …`), so the wrapper carries no header of its own.
+- **Reading:** a run of per-window/per-view state records sharing one child schema. **The
+  purpose of each is UNPROVEN** — they are distinguished here by position and size, not by
+  meaning, and nothing in the corpus separates "which window" from "which parameter". Settling
+  them needs Pro Tools: one session saved twice with a single window moved or a single view
+  toggled.
+- **Confidence:** HIGH on framing, universality, ordering and the one-`0x2011`-child rule
+  (180/180 each); NONE on semantics.
+
+### 0x1022 — large top-level leaf between the I/O table and 0x2033
+
+- **Kind:** TOP-LEVEL LEAF (no framed children), one per session, 180/180.
+- **Position:** always `0x2603 → 0x1022 → 0x2033` — immediately after the I/O routing table.
+- **Size:** large and highly variable (3,573…7,037 bytes observed), 56 distinct payload openings
+  in 180 sessions, `block_type` 2 or 3.
+- **Payload:** opens `1e 00 00 00` then unframed binary. Being a LEAF of this size directly
+  after the I/O table makes "serialised I/O/hardware configuration blob" the natural reading,
+  but that is INFERENCE FROM POSITION, not evidence.
+- **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
+
+### 0x2027 / 0x202D — two universal 13-byte top-level stubs
+
+- **Kind:** TOP-LEVEL LEAF, one per session each, 180/180.
+- **Position:** `0x1006 → 0x2027 → 0x2025`, and `0x2072 → 0x202D → 0x202E`.
+- **Size:** predominantly span 13 with a 4-byte zero payload (`0x2027` 89/180, `0x202D`
+  118/180) — the same count-0 shape as `0x2000` — but BOTH also occur far larger in a minority
+  of sessions (`0x2027` up to 29,723 bytes; `0x202D` 95/136). So the stub is the empty case of
+  a container that can be populated, which is exactly what `0x2000` (never seen non-empty)
+  cannot yet be shown to be.
+- **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN, though the
+  empty-vs-populated split is itself the useful fact: whatever they hold is optional.
+
+### 0x2023 / 0x202B — top-level leaves with structured payloads
+
+- **Kind:** TOP-LEVEL LEAF, one per session each, 180/180.
+- **Position:** `0x2055 → 0x2023 → 0x2437` (78/180) or `→ 0x271C` (57/180); and
+  `0x2624`/`0x2062 → 0x202B → 0x2013`.
+- **Size:** `0x2023` 141/196/280 with only **5 distinct payload openings** across 180 sessions —
+  near-constant, so it is configuration rather than session content. `0x202B` is the opposite:
+  247…285 bytes with **108 distinct openings**, i.e. genuinely per-session data.
+- **Payload:** `0x202B` opens `01 00 00 00` followed by an INNER `0x5A`-framed record
+  (`5a 05 00 6f 00 00 00 2a …`) that the size-driven walk does not surface as a child, so its
+  content is length-prefixed inside the leaf rather than framed as a block.
+- **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
+
 ### 0x2000 — universal top-level 13-byte stub (count-0 / presence marker)
 
 - **Kind:** LEAF, TOP-LEVEL. Exactly **one per session in all 480 sampled** — universal.

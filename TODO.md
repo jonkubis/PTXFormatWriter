@@ -4211,3 +4211,36 @@ precisely why it was worth re-auditing rather than trusting.
 
     HONEST STATE: 146 of 482 types have a real entry; 176 need one; 160 are phantoms;
                   26 of 145 entries still say the PURPOSE is unproven.
+
+## CORRECTION to my own correction, then real progress on the queue
+I reported "146 have entries, 176 need one". **That overstated the gap by 23.** My entry
+detector only counted headings that START with `0x`, so it missed real entries titled
+`### Tempo (0x2028 map / 0x2718 lane)`, `### 0x261F / 0x2610 / ...` and similar. An over-strict
+filter is the same error as the over-generous one it replaced, just pointing the other way --
+and I made both within an hour. The detector now reads ANY heading level and any position.
+
+    reported (wrong)  146 entries / 176 mention-only
+    corrected          169 entries / 153 mention-only
+
+WORKED THE QUEUE: profiled the universal (832/832) mention-only types and wrote entries for
+nine, all from measurement over 180 sessions:
+
+  * **0x2016 / 0x2017 / 0x2019 / 0x201A** -- a FAMILY, not four unrelated types: each is
+    top-level, each holds EXACTLY ONE 0x2011 child, and they sit in a fixed contiguous run
+    `0x207B -> 0x2016 -> 0x2017 -> 0x2019 -> 0x2018 -> [0x4300] -> 0x201A -> 0x201B` in 180/180.
+    Sizes and block_type vary together, so they are variable-length records, not one shape.
+  * **0x1022** -- large top-level LEAF (3.5-7KB), always immediately after the I/O routing table
+    (`0x2603 -> 0x1022 -> 0x2033`).
+  * **0x2027 / 0x202D** -- universal 13-byte stubs with a 4-byte zero payload (the `0x2000`
+    shape) that ALSO occur far larger in a minority of sessions. That split is the useful fact:
+    they are optional containers, and their empty case is the stub -- which is what `0x2000`
+    cannot yet be shown to be, never having been seen non-empty.
+  * **0x2023 / 0x202B** -- 0x2023 has only 5 distinct payload openings across 180 sessions
+    (configuration), 0x202B has 108 (per-session data) and carries a length-prefixed inner
+    `0x5A` record the block walk does not surface as a child.
+
+    entries 169 -> 178, mention-only 153 -> 144.
+
+Every entry states its confidence honestly: framing/position/universality are HIGH (180/180),
+PURPOSE is unproven for all nine, and each says what Pro Tools experiment would settle it.
+Documenting STRUCTURE is corpus work; documenting MEANING is not.

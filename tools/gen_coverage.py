@@ -116,11 +116,13 @@ spec=open("docs/ptx-format-spec.md").read().lower()
 # 0x2000 is why this matters: 480 instances in 480 sessions, always TOP-LEVEL, and it has no
 # entry -- it was "documented" purely on four incidental mentions elsewhere.
 import re as _re2
+# ANY heading level, and the type need not START the heading: real entries are titled both
+# "### 0x2015 - ..." and "### Tempo (`0x2028` map / `0x2718` lane)". Requiring the heading to
+# begin with the hex missed 24 types that plainly have entries -- an over-strict filter is the
+# same error as the over-generous one, just in the other direction.
 _entry_types=set()
-for _m in _re2.finditer(r"(?m)^### ([^\n]*)", spec):
-    _line=_m.group(1)
-    if _line.lower().startswith("0x"):
-        _entry_types |= {int(h,16) for h in _re2.findall(r"0x[0-9a-fA-F]{4}", _line)}
+for _m in _re2.finditer(r"(?m)^#{2,4} ([^\n]*)", spec):
+    _entry_types |= {int(h,16) for h in _re2.findall(r"0x[0-9a-fA-F]{4}", _m.group(1))}
 doc={c for c in counts if ("0x%04x"%c) in spec}
 has_entry={c for c in counts if c in _entry_types}
 undoc=sorted(set(counts)-doc, key=lambda c:(-sessions[c],-counts[c]))
