@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**192 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**130 are counted as "documented" only because their hex string appears somewhere in
+**198 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**124 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -40,20 +40,14 @@ mentions. The mention-only list is the honest work queue:
 | `0x2434` | 32456 | 832 |
 | `0x0003` | 832 | 832 |
 | `0x1004` | 832 | 832 |
-| `0x2004` | 832 | 832 |
-| `0x1028` | 832 | 832 |
+| `0x2603` | 832 | 832 |
 | `0x2624` | 832 | 832 |
-| `0x2067` | 832 | 832 |
 | `0x206c` | 832 | 832 |
 | `0x2505` | 832 | 832 |
 | `0x2507` | 832 | 832 |
-| `0x2603` | 832 | 832 |
 | `0x259c` | 832 | 832 |
 | `0x1054` | 1662 | 831 |
 | `0x1015` | 831 | 831 |
-| `0x262e` | 831 | 831 |
-| `0x262a` | 831 | 831 |
-| `0x2630` | 831 | 831 |
 | `0x251a` | 63279 | 813 |
 | `0x200a` | 31609 | 813 |
 | `0x2626` | 333641 | 773 |
@@ -75,8 +69,14 @@ mentions. The mention-only list is the honest work queue:
 | `0x258a` | 1063 | 714 |
 | `0x258b` | 1063 | 714 |
 | `0x2580` | 33535 | 690 |
+| `0x2628` | 338117 | 632 |
+| `0x2629` | 335905 | 597 |
+| `0x1001` | 80991 | 597 |
+| `0x2106` | 80990 | 597 |
+| `0x1033` | 80621 | 597 |
+| `0x1050` | 248865 | 596 |
 
-…and 90 more.
+…and 84 more.
 
 
 ## Described vs settled — two different numbers
@@ -84,7 +84,7 @@ mentions. The mention-only list is the honest work queue:
 **322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 156 typed sections in the spec, **36 still say the PURPOSE is unproven** —
+Of the 158 typed sections in the spec, **36 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,

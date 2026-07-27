@@ -2634,6 +2634,57 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x1028 — session sample rate
+
+- **Kind:** TOP-LEVEL LEAF, one per session, 180/180. `0x2519`/`0x4808` → `0x1028` → `0x2026`.
+- **Field:** **`u32` LE at payload+2 (block+11) is the sample rate.** Verified against
+  `body_synth.session_sample_rate()` on 120 sessions: **120 agree, 0 disagree**; values observed
+  are 44100 (82) and 48000 (38). The payload opens `03 18 <rate:u32> …`.
+- **Size:** variable (39/125/141 observed), `block_type` 9 or 10 — so the rate field is at a
+  fixed offset inside a variable-length record; do not assume the rest of the layout.
+- **Confidence:** HIGH for the rate field (measured against an independent reader across the
+  corpus); the remainder of the payload is undecoded.
+
+### 0x2067 — session identity record (name + GUID)
+
+- **Kind:** TOP-LEVEL LEAF, one per session, 180/180. Immediately after the `0x0003` header
+  block and immediately before the `0x2519` name table.
+- **Size:** ~410–419 bytes, varying per session (46 distinct payload openings in 180), so it
+  carries per-session data rather than a constant.
+- **Payload:** opens `00 00 00 00` then the `2a 00 00 00` tag followed by a GUID — the same
+  `0x2A` tag convention used for identity elsewhere (see the track-list entries).
+- **Reading:** this is the block `body_synth.session_self_name()` reads to recover the name a
+  session was saved under, which is what the provenance filter uses to tell PT-authored files
+  from this project's own output.
+- **Confidence:** HIGH on framing/position/universality and on the name being recoverable here;
+  the full field layout is not decoded.
+
+### The `0x26xx` stub band — 0x2637 / 0x262C / 0x2632 / 0x262A / 0x2630 / 0x262E (and 0x2004)
+
+Six more universal top-level slots, and they are **contiguous**, in two runs:
+
+```
+0x204D → 0x2637 → 0x262C → 0x2632 → 0x262A → 0x2721 / 0x2504
+0x2504 → 0x2630 → 0x262E → 0x1054 / 0x1018
+```
+
+| type | usual span | populated cases | distinct payloads / 180 |
+|---|---|---|---|
+| `0x2637` | 13 (105/180) | 73, 5,915 | 50 |
+| `0x262C` | 17 (174/180) | 4,315, **74,966** | 4 |
+| `0x2632` | **13 in ALL 180** | none | **1** |
+| `0x262A` | 13 (37/180) | 577, **66,161** | 135 |
+| `0x2630` | 13 (124/180) | 4,442, 4,971 | 48 |
+| `0x262E` | 13 (176/180) | 89, 396 | 4 |
+| `0x2004` | 13 (146/180) | 30, 188 | 18 |
+
+- **Reading:** with the nine already recorded, that is **fifteen universal top-level stub slots**,
+  and the `0x26xx` ones form an adjacent band rather than being scattered — consistent with one
+  feature area (the `0x262x` family is clip/fade-adjacent elsewhere in this spec) reserving a
+  contiguous run of slots. `0x2632` is the pure case: span 13 with a single payload in every
+  session, never populated in any file seen.
+- **Confidence:** HIGH on framing/position/universality/adjacency; purposes UNPROVEN.
+
 ### 0x242E / 0x2430 — the twin 22-byte wrappers around the two region catalogs
 
 - **Kind:** TOP-LEVEL, adjacent, one of each per session, 180/180. `0x2428 → 0x242E → 0x2430 → 0x2424`.

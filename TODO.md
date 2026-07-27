@@ -4299,3 +4299,30 @@ means "feature absent", not "block missing"** -- which is directly actionable fo
 
 Batch profiling keeps paying: this batch's two best results -- the wrapper PAIR and the ninth
 slot member -- are both cross-type facts invisible when documenting one type at a time.
+
+## Queue, batch 4: nine entries, one field PROVEN, and the slot band
+    entries 192 -> 198, mention-only 130 -> 124
+
+  * **0x1028 = the session SAMPLE RATE.** `u32` LE at payload+2 (block+11). Verified against the
+    independent `session_sample_rate()` reader on 120 sessions: **120 agree, 0 disagree**; values
+    44100 (82) and 48000 (38). The block is variable-length (39/125/141, block_type 9 or 10), so
+    the rate sits at a fixed offset inside a variable record -- do not assume the rest.
+    This is the first entry in these batches with a PROVEN field rather than framing alone.
+  * **0x2067 = the session identity record** (name + `2a 00 00 00`-tagged GUID), sitting between
+    the 0x0003 header and the 0x2519 name table. It is what `session_self_name()` reads, i.e. the
+    basis of the provenance filter that tells PT-authored files from our own output.
+  * **The 0x26xx stub band** -- 0x2637 / 0x262C / 0x2632 / 0x262A / 0x2630 / 0x262E are SIX more
+    universal slots and they are CONTIGUOUS, in two runs. With the nine already recorded that is
+    **fifteen universal top-level stub slots**. `0x2632` is the pure case: span 13 with a single
+    payload in all 180 sessions, never populated in any file seen. `0x262A` reaches 66,161 bytes
+    and `0x262C` 74,966 when they are populated.
+
+THE ADJACENCY IS THE NEW PART. The slots are not scattered: the `0x262x` ones form a contiguous
+band, consistent with one feature area reserving a run of slots. That turns "why is there a
+13-byte block here" into "this is the clip/fade area's slot run, unused in this session".
+
+NOTE ON WHAT THESE BATCHES CAN AND CANNOT DO: four batches in, the entries are overwhelmingly
+framing + position + universality + the empty/populated split, with PURPOSE unproven. That is
+not a shortfall of effort -- it is what the corpus contains. 0x1028 is the exception that proves
+it: its field is provable because an INDEPENDENT reader already decoded it and the values are
+externally meaningful (44100/48000). Where no such anchor exists, structure is the ceiling.
