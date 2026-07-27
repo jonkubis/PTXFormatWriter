@@ -276,8 +276,30 @@ view/automation state: `0x261B` → { `0x260D` `(NEW)` → { `0x260A` · `0x260C
 
 **Conductor** — `0x2028`/`0x2718` tempo, `0x2029`/`0x2719` meter, `0x2030`/`0x2077` markers
 (§10). `0x2077` → `0x2506`: a **fixed 17-byte scaffold** (constant payload
-`…06 25 FF FF FF FF 00 00 00 00`), emitted **track-count** times per marker — *not*
+`…06 25 FF FF FF FF 00 00 00 00`), emitted **once per marker per track-like object** — *not*
 waveform data (see §5c).
+
+> **REFINED 2026-07-26 — the relation is EXACT; the open question is the multiplier.** Measured over
+> 145 sessions on four drives that carry both types, `n(0x2506) == n(0x2077) × M` where `M` is a
+> per-track count. Best candidates, none universal:
+>
+> | candidate for `M` | exact |
+> |---|---|
+> | `n(0x2015)` | 139/145 = 95.9% |
+> | direct children of the `0x2624` track list | 139/145 = 95.9% |
+> | track records (`_TRACK_RECORD_TYPES`) | 134/145 = 92.4% |
+> | `n(0x200A)` | 134/145 | 
+> | `n(0x261B)` 55.9%, `n(0x1014)` 41.4%, `n(0x210B)` 39.3% | refuted |
+>
+> The exceptions are **not ragged** — every one factors exactly, with a multiplier 1, 2 or 4 larger
+> than the track count: `24840 = 138 × 180` (179 records), `26048 = 148 × 176` (175),
+> `272 = 16 × 17` (16), `37800 = 280 × 135` (134). So this is one relation plus a COUNTING gap, not
+> a rule with noise — the same shape as the `0x261F` undercount, which was a missing seventh
+> track-record kind.
+>
+> Also refuted: that the marker count needs DEDUPING first (some sessions carry a duplicate `0x2030`
+> memory-locations list, so it was a fair guess). Deduped scores **worse** — 78.5% against the raw
+> count's 95.0%. Recorded so it is not retried.
 
 **View / display (PT recomputes — leave conservative)** — `0x200A`/`0x200B`/`0x2015` →
 `0x2038` `(NEW)` → `0x2037` `(NEW)`; `0x203B` view-volume signature (§ click/view fix),
