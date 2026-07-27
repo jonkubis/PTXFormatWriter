@@ -2634,6 +2634,62 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x2505 / 0x2507 / 0x259C / 0x206C — the remaining `0x2011`-child class members
+
+All four are TOP-LEVEL, one per session (75/75 each), and hold **exactly one `0x2011`**, with
+only 2–7 distinct payloads apiece. With `0x2016`/`0x2017`/`0x2019`/`0x201A` that makes **eight
+types sharing one payload schema** — `0x2011` is the record, and the parent's content type is
+the only discriminator.
+
+| type | span | position in the top-level run |
+|---|---|---|
+| `0x206C` | 36/37 | `0x209F → · → 0x258F` |
+| `0x2505` | 204–207 | `0x20A2`/`0x242F → · → 0x252A`/`0x271A` |
+| `0x2507` | 36/37 | `0x2426 → · → 0x2508` |
+| `0x259C` | 40/41 | `0x259B → · → 0x206B` |
+
+- **Confidence:** HIGH (framing, single child and universality all 75/75); purposes UNPROVEN.
+
+### 0x2523 / 0x2526 — the CROSSFADE pair, and it hangs off the REGION
+
+- **`0x2523`** — parent **ALWAYS `0x2628`** (57/57), child **ALWAYS `0x2526`** (57/57), span 95,
+  **one distinct payload**.
+- **`0x2526`** — parent **ALWAYS `0x2523`**, span 21, leaf, one distinct payload.
+- **This locates the crossfade structure precisely:** it is attached to the REGION record, not to
+  the placement or the lane. Combined with `0x262C ⊃ 0x262B ⊃ 0x2628`, a crossfade therefore both
+  *reaches* a region by its own route and *hangs* a `0x2523` pair off it.
+- **Presence:** 3 of 75 sessions — rare, and byte-constant where present, so it is fixture around
+  whatever the crossfade's real parameters are (those live in the `0x2628` geometry, §5c).
+- **Confidence:** HIGH on framing/parentage; the pair carries no varying data at all.
+
+### 0x0F3E / 0x270A / 0x4530 — byte-constant leaves with informative PARENTS
+
+Each is a leaf with exactly **one distinct payload** across all instances, so the value carries
+nothing and the parent is the whole content of the finding:
+
+| type | parent | instances | span |
+|---|---|---|---|
+| `0x0F3E` | **`0x2024`** (the counter/nudge setting) | 53/53 | 98/100 |
+| `0x270A` | **`0x2032`** | 53/53 | 42–179 |
+| `0x4530` | **`0x207B`** (the timecode/SMPTE record) | 50/50 | 97/106 |
+
+- **Reading:** fixture attached to a specific settings record. `0x4530` under the SMPTE record and
+  `0x0F3E` under the counter setting are both plausibly the "options" half of those settings, but
+  a payload that never varies cannot show it — the same limit recorded for `0x2511`/`0x2595`.
+- **Confidence:** HIGH on framing/parentage/constancy; purposes UNPROVEN.
+
+### 0x4300 — one content type, two entirely different things
+
+- **Top-level form:** span **11**, `block_type` 1, 50 sessions — the version-gated block the
+  `0x2018` entry describes sitting between `0x2018` and `0x201A`.
+- **`0x1038`-parented form:** span **59,656**, 4 instances — inside plugin state.
+- **Reading:** the second is almost certainly a PHANTOM — `0x5A` occurring inside a vendor plugin
+  blob, framed by accident (§5c's phantom signatures). The two forms share nothing but a number:
+  different size by three orders of magnitude, different parent, different block_type.
+- **Practical consequence:** a locator for the real `0x4300` must require TOP-LEVEL, not just the
+  content type. This is the clearest example in the corpus of why the phantom filter matters.
+- **Confidence:** HIGH for the top-level form; the nested form is classified as noise.
+
 ### 0x1056 / 0x4403 / 0x2636 / 0x262F / 0x2597 / 0x2588 / 0x2721 / 0x4809 / 0x4833 / 0x2062 — framing and parentage
 
 Structure for ten more types. Every ratio is the full instance count of the child.

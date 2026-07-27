@@ -4691,3 +4691,27 @@ checkable this way. The other 7 (clip_names, track_playlists, track_name_occurre
 validate_pt_invariants, clip_lanes, region_list, clips) either take extra arguments, aggregate
 several types, or are the two already corrected. A one-to-one content type is what makes the
 check possible; where there is not one, the claim cannot be verified this cheaply.
+
+## Queue, batch 13: the 0x2011 class closed at eight, and a real/phantom split inside ONE type
+    entries 268 -> 278, mention-only 55 -> 45
+
+  * **The 0x2011-child class is now complete at EIGHT members** -- 0x2016, 0x2017, 0x2019, 0x201A,
+    0x206C, 0x2505, 0x2507, 0x259C. All top-level, all one-per-session, all holding exactly one
+    0x2011. The record is 0x2011; the parent's content type is the only discriminator.
+  * **The CROSSFADE pair hangs off the REGION.** 0x2523 -> parent ALWAYS 0x2628, child ALWAYS
+    0x2526, both byte-constant. So a crossfade both REACHES a region by its own route
+    (0x262C ⊃ 0x262B ⊃ 0x2628) and HANGS a 0x2523 pair off it. Present in 3 of 75 sessions.
+  * **0x0F3E / 0x270A / 0x4530 are byte-constant leaves whose PARENT is the whole finding** --
+    0x4530 under the SMPTE record (0x207B), 0x0F3E under the counter/nudge setting (0x2024). Both
+    plausibly the "options" half of those settings, but a payload that never varies cannot show it.
+
+**0x4300 IS ONE CONTENT TYPE COVERING TWO ENTIRELY DIFFERENT THINGS:**
+
+    top-level form      span     11   block_type 1   50 sessions   -- the real block
+    0x1038-parented    span 59,656   block_type 0    4 instances   -- almost certainly a PHANTOM
+
+Different by three orders of magnitude in size, different parent, different block_type. This is
+the clearest example in the corpus of why the phantom filter exists, and it has a practical
+consequence: **a locator for the real 0x4300 must require TOP-LEVEL, not just the content type.**
+Worth remembering that "filter by content type" -- the advice from the rare-routes finding -- is
+necessary but NOT sufficient; type plus position is what identifies a block.
