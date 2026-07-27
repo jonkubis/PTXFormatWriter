@@ -332,6 +332,32 @@ records, all 6 integer id ranges distinct, `duplicate -> remove` byte-exact.
 A crash there is a RESULT, not a setback: it would point straight at the remaining identity field,
 the same way "both Audio 4 tracks are selected" pointed at the two selection flags.
 
+## WHICH IDENTITY MECHANISM APPLIES TO WHICH TRACK KIND (2026-07-27)
+
+Follows from `0x261B` belonging to exactly three kinds. A track's identity is not one thing:
+
+    kind                       0x102D GUID   0x261B id range   0x261B ten-UUID list
+    audio 0x261C                    yes           yes             yes on newer sessions
+    click/aux 0x261E                yes           yes             yes on newer sessions
+    master/bus 0x261D               yes           yes             yes on newer sessions
+    MIDI 0x2620                     yes           NONE            NONE
+    instrument 0x2621               yes           NONE            NONE
+    VCA 0x261F                      yes           NONE            NONE
+
+Verified on the duplicate path: `8 MIDI tracks.ptx` has **0 `0x261B` before and after** a duplicate,
+and `mixedmidi_4_AMSm` has 3 before and 3 after -- the MIDI copy adds none, so
+`_reallocate_duplicate_track_ids` and `_reuuid_copied_track` CANNOT act on it. That is correct, not
+a gap: there is no field to re-key.
+
+The GUID path does cover it. Both sessions' copies introduce exactly **1 new GUID** and leave every
+track GUID distinct (8 -> 9 and 4 -> 5). So a MIDI duplicate is identified by its `0x102D` GUID
+alone.
+
+**WHAT THIS BOUNDS.** Pro Tools confirmed an AUDIO duplicate (`4 mono tracks`), which exercises all
+three mechanisms at once. A MIDI duplicate exercises only the GUID. Those are different code paths,
+and only the first is PT-confirmed -- which is exactly what
+`PTX_VERIFY_2026-07-24/A_no_audio_needed/01_MIDI_duplicate_track.ptx` was staged to answer.
+
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
 Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:
