@@ -147,6 +147,14 @@ def _parent_zmarks(ptf: PTFFormat) -> dict[int, int]:
     return pm
 
 
+# The track kinds the 0x2624 display list actually indexes, derived by resolving every entry of
+# every display list in the corpus back to its block: 6,456 entries across 139 sessions, ZERO
+# unresolved. 0x261c audio (4029), 0x261e click/aux (1819), 0x261d master (274), 0x261f VCA (248),
+# 0x2620 MIDI (70), 0x2621 (15), 0x2623 (1). NOTE this is NOT `_TRACK_RECORD_TYPES`, which carries
+# 0x263b instead of 0x2623 -- a display list has never been observed to point at a 0x263b, and
+# including a type the list does not contain would make the enumeration LONGER than the list it
+# is supposed to index.
+_DISPLAY_ORDER_TYPES = frozenset({0x261C, 0x261D, 0x261E, 0x261F, 0x2620, 0x2621, 0x2623})
 _NAME_ENTRY_SUFFIX = 23        # `<6 fixed><4 tag 0x2a><8 id><ordinal:u32><1 pad>`
 _NAME_ENTRY_SUFFIX_SHORT = 21  # the same, with a 2-byte ordinal instead of 4
 # Upper bound on a name-table entry's BYTE length. Not a format constant -- a sanity bound that
@@ -2690,7 +2698,10 @@ def move_click_to_top(data: bytes) -> bytes:
 
 def track_playlist_order(data: bytes) -> list[tuple[int, int]]:
     """The track playlists in body/creation order as (zmark_offset, content_type):
-    0x261c = audio, 0x261e = click, 0x2620 = MIDI. This is the list `reorder_tracks`'s
+    0x261c audio, 0x261e click/aux, 0x261d master, 0x261f VCA, 0x2620/0x2621 MIDI, 0x2623
+    (see `_DISPLAY_ORDER_TYPES` -- the set is MEASURED from what real display lists point at,
+    and the earlier three-kind reading left the enumeration short on 54 sessions).
+    This is the list `reorder_tracks`'s
     `new_order` indexes (index 0 = the first-created track, etc.). All track kinds share
     one display-order list, so MIDI is included — its playlist is 0x2620."""
     # SIZE-DRIVEN, not the 0x5A-scan parser. The scan parser silently UNDERCOUNTS real
@@ -2700,7 +2711,7 @@ def track_playlist_order(data: bytes) -> list[tuple[int, int]]:
     # tracks and writing an index element list that omits the rest. The size-driven walk is the
     # authoritative enumeration everywhere else in this module for exactly this reason.
     return sorted(((z, c) for z, _e, c in _size_driven_blocks(data)
-                   if c in (0x261C, 0x261E, 0x2620)), key=lambda x: x[0])
+                   if c in _DISPLAY_ORDER_TYPES), key=lambda x: x[0])
 
 
 def _container_display_offsets(data: bytes) -> list[int]:
@@ -2746,8 +2757,13 @@ def reorder_tracks(data: bytes, new_order: list[int]) -> bytes:
     toff = [o for o, _t in target]
     pos_of = {o: i + 1 for i, (o, _t) in enumerate(target)}  # playlist offset -> 1-based display pos
     ref = _FI.final_index_ref(data)
-    zt, bt = _FI.block_layout(data)
-    recs = _FI.parse_records(ref.data, set(bt), set(zt))
+    # SIZE-DRIVEN sets, for the same reason as `_container_display_offsets`: `parse_records`
+    # frames a record's elements by "is this offset a live zmark", so `block_layout`'s
+    # scan-derived sets made real elements look like garbage and raised
+    # `bad element tag ... record type 0x2624` on 33 of 139 corpus sessions -- every one of them
+    # a session this function could not touch at all.
+    _bl = sorted(_raw_block_bounds(data, ref.start))
+    recs = _FI.parse_records(ref.data, {c for _z, _e, c in _bl}, {z for z, _e, _c in _bl})
     for r in recs:
         if r.content_type == 0x2624 and r.count == 1 and r.flag == 1 and len(r.elements) >= 1 + len(toff):
             for i, off in enumerate(toff):

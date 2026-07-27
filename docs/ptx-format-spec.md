@@ -1047,6 +1047,26 @@ draws); `ft1`/`ft2` are the source mtime FILETIME, `filesize` the referenced WAV
 > names are safe in practice (56 of 56 tracks named with 1–2 bytes round-trip byte-identically);
 > only synthetic names whose byte is pervasive in the payload collide.
 
+> **THE `0x2624` DISPLAY LIST INDEXES SEVEN TRACK KINDS (measured 2026-07-27).** The edit-window
+> order is the `0x2624` count==1 record's `elements[1:]`, one offset per track. Resolving every
+> entry of every display list in the corpus back to its block — **6,456 entries across 139
+> sessions, ZERO unresolved** — gives:
+>
+> | kind | entries |
+> |---|---|
+> | `0x261C` audio | 4,029 |
+> | `0x261E` click/aux | 1,819 |
+> | `0x261D` master | 274 |
+> | `0x261F` VCA | 248 |
+> | `0x2620` MIDI | 70 |
+> | `0x2621` | 15 |
+> | `0x2623` | 1 |
+>
+> Enumerating only audio/click/MIDI leaves the list short on 54 of 139 sessions, so any code that
+> INDEXES this list (a reorder, a display-position lookup) silently addresses the wrong tracks.
+> Note the set is **not** the track-record set: that one carries `0x263B`, which no display list
+> has ever been observed to point at.
+
 7. **Keep the `0x2519` name table's INLINE entry list in sync.** The name table stores, before
    its `0x5A`-framed children, a list of **inline name entries** — each `u32 name_length | name
    bytes | 23-byte trailer`, with a `0x0000002A` (u32 = 42) marker at trailer offset +6 (the

@@ -4129,3 +4129,26 @@ filter is `(0x261C, 0x261E, 0x2620)`. Extending it changes `reorder_tracks`' IND
 is a behavioural change to a PT-CONFIRMED function, so it deserves its own pass rather than
 being tacked onto a reader fix at the end of a long day. Until then those sessions simply refuse
 (a caller cannot build a valid permutation), which is a safe state, not a corrupting one.
+
+## Display-order path FIXED end to end: 139/139 identity, real reorders work
+Finished the thread I had deferred. Three changes, each measured:
+
+  1. `_DISPLAY_ORDER_TYPES` -- the `0x2624` display list indexes SEVEN track kinds, derived by
+     resolving every entry of every display list back to its block: 6,456 entries over 139
+     sessions, ZERO unresolved. 0x261c audio 4029, 0x261e click/aux 1819, 0x261d master 274,
+     0x261f VCA 248, 0x2620 MIDI 70, 0x2621 15, 0x2623 1. The old `(0x261C, 0x261E, 0x2620)`
+     filter left the enumeration short on 54 of 139 sessions. NOTE it is NOT `_TRACK_RECORD_TYPES`
+     -- that set carries 0x263b, which no display list has ever pointed at, and including a type
+     the list does not contain would make the enumeration LONGER than the list it indexes.
+  2. `_container_display_offsets` -- size-driven sets into `parse_records` (was `block_layout`).
+  3. `reorder_tracks` -- same fix; it had its own scan-derived call.
+
+    TRUE identity reorder:  85/139 with 54 mismatches and 33 hard errors  ->  139/139 byte-identical
+    real reorder (move last displayed track to top): 104/104 took effect, size unchanged,
+    zero new validator errors. 232 tests green.
+
+THE THREAD IS WORTH RE-READING AS A WHOLE, because I was wrong twice inside it and the corpus
+corrected me both times: I called the scan parser's short list an "undercount" before checking
+(it WAS one -- all 119 blocks are direct children of 0x2624), then assumed my size-driven list
+was complete when it was still missing four track kinds. Each step needed its own measurement;
+neither was deducible from the previous one.
