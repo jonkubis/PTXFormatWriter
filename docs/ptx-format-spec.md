@@ -1532,6 +1532,15 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 
 ### 0x2056 — Per-view display/zoom-state record (FIELD MAP measured; semantics still open)
 
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
+
 > **MEASURED (1170 real instances across all 282 sessions, phantom-filtered).** The record is a
 > FIXED 41-byte payload of which **33 bytes are constant**; all variation lives in eight
 > small-enum fields:
@@ -1999,6 +2008,15 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 
 ### 0x2049 — Top-level session numeric-settings leaf (**NOT fixed — 12 payloads externally**)
 
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
+
 - **Kind:** LEAF (block_type u16@z+1 = 0x0002; no children in any of 19 instances). TOP-LEVEL, not nested: span-containment enumeration finds NO containing block in all 19 — there is no explicit ROOT wrapper block that holds it. In raw stream order invariably preceded by 0x2047 and followed by 0x206e (19/19), so it sits in the global-settings cluster before the track/media region.
 - **Size:** FIXED: size field = 22, payload = 20 bytes (span = [z, z+7+22] = z..z+29). Exactly ONE per session. Byte-identical across all 19 corpus sessions (Hipsters excluded — did not load).
 - **Fields (payload-relative):**
@@ -2202,6 +2220,15 @@ form and reads garbage on another.
 
 ### 0x104d — Top-level ordinal + 0.5-pair leaf (**NOT fixed — 4 payloads externally**) (view-state)
 
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
+
 - **kind:** LEAF; top-level (no enclosing 0x5A; parent None in 26/26). No children (26/26). block_type (u16@z+1) = 3. Exactly one instance per session (26/26). Immediately follows 0x1040 and precedes 0x207e in every session.
 - **size:** Fixed: size u32@z+3 = 36 in every instance (26/26, incl. the huge Hipsters sessions). Payload = size-2 = 34 bytes (the trailing 2 bytes of a naive z+9..z+9+size read belong to the next block's 0x5A marker). Block span = [z, z+7+size]; payload@z+9.
 - **fields:**
@@ -2364,6 +2391,15 @@ form and reads garbage on another.
 
 ### 0x2020 — Selection / window-membership view-state list (child of 0x2013)
 
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
+
 - **kind:** LEAF when empty (15/19); CONTAINER of exactly one 0x2079 when populated (4/19). Parent: ALWAYS 0x2013 (19/19); always the FIRST of siblings [0x2020, 0x2021, 0x2203]. 0x2079 occurs ONLY here (0 or 1 per session).
 - **size:** Empty form: block_size=10, payload=8 bytes (all zero). Populated form: block_size=32, payload=30 bytes (one u32 count=1, one zero u32, and one 22-byte 0x2079 block).
 - **fields:**
@@ -2415,6 +2451,15 @@ form and reads garbage on another.
 
 ### 0x207b — Session timecode/SMPTE-config record (ONE form; the "second" was a phantom)
 
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
+
 > **CORRECTION (measured on all 282 corpus sessions).** This entry described "two forms". There is
 > one: a 124-byte record (9-byte header + 115-byte payload), byte-identical in **282/282**
 > sessions. The apparent second form — an 11-byte block with a 2-byte `01 00` payload, seen in a
@@ -2441,6 +2486,15 @@ form and reads garbage on another.
 - **confidence:** HIGH on frame, size/kind bimodality, per-session count (1), parent=top-level, neighbor order, constant +0=0 and +3=1000, block_type-predicts-child, and the byte-identical 0x4530 child + its '00:00:00:00' timecode string. MEDIUM-LOW on the meaning of the two u16 enums (+1, +7) — distributions stable but unmapped, and +1's spread is partly a backup-duplication artifact.
 
 ### 0x2018 — Small boolean/flags block (**NOT fixed — 5 payloads externally**) (top-level window/view-state)
+
+> **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this
+> block's first 64 payload bytes was tested for equality against 16 measured session
+> quantities — track / playlist / marker / region / clip / lane / plugin / block /
+> `0x2015` / `0x202a` / `0x2519` counts, sample rate, bit depth, tempo- and meter-event
+> counts, and its own instance count — across **440 sessions**. **No field matches any of
+> them in every session.** So these values are not a count of anything the format already
+> exposes; they are stored settings/UI state, and only Pro Tools can name them. Recorded
+> as a measured negative so the cheap hypothesis is not re-tested a third time.
 
 - **kind:** LEAF (0 children, 26/26). Parent: top-level (None, 26/26). block_type=0x08 (all instances). prev top-level sibling = 0x2019 (26/26). next top-level sibling = 0x201a (20/26) OR 0x4300 (6/26 — the 4 DWTS variants + MANOLITO + THE WIND, where an 11-byte 0x4300 block sits between 0x2018 and 0x201a).
 - **size:** Constant. Exactly 1 per session (26/26). span=22, size_field=15 (u32@z+3), payload 13 bytes — identical across ALL 26 incl. the 7 huge Hipsters backups. Header = `5A 08 00 (block_type=8) | 0F 00 00 00 (size=15) | 18 20 (content_type)`. Payload @z+9.

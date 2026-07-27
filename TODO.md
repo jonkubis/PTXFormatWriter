@@ -3678,3 +3678,27 @@ STRUCTURE and says nothing about MEANING. It settled 0x2435 completely (the open
 WAS variance) and settles nothing about 0x2715's u64 or 0x2511's names (where the open question
 is purpose). Recording which kind of question an entry is asking is what makes the difference
 between a measurement that closes it and one that just adds a bigger number.
+
+## A measured NEGATIVE: six unsettled fields are not derived counts
+Several of the still-unsettled entries speculate that a varying field is a count of something
+(0x2020's entry literally says its a/b/c/d were "tested against block-type population counts,
+only inconsistent/coincidental matches"). I made that test exhaustive rather than anecdotal.
+
+For 0x2049, 0x104d, 0x2018, 0x2020, 0x207b and 0x2056: every varying u16/u32 in the first 64
+payload bytes, tested for equality against 16 measured session quantities (track / playlist /
+marker / region / clip / lane / plugin / block / 0x2015 / 0x202a / 0x2519 counts, sample rate,
+bit depth, tempo- and meter-event counts, and the type's own instance count), across 440
+sessions. Candidate fields per type ranged 19-129.
+
+    RESULT: no field matches any known quantity in every session. Zero hits, all six types.
+
+That is worth recording precisely because it is negative: it rules out the cheapest explanation
+for all six at once, so nobody re-runs it a third time, and it moves these entries from "maybe
+corpus-answerable" to "PT-gated" on evidence rather than on my impression. These fields are
+stored settings/UI state, not anything derivable from the session's own structure.
+
+STATE OF THE UNSETTLED LIST: 28 -> 26 typed sections. What remains is dominated by window
+geometry, view/zoom state, and UI flag semantics -- questions of the form "what does this flag
+DO", which by construction need the application. The corpus can still be mined for STRUCTURE
+(and today it gave up 0x206f's device list, 0x2435's cross-family identity, 0x2715's full
+payload, and the 0x2506 relation), but it cannot assign meaning to a UI toggle nobody toggled.
