@@ -2019,7 +2019,37 @@ unintended, not merely a wrong sentence.
 payload takes **32, 38 and 56**. Any code reading a breakpoint at a hardcoded stride is right only
 on the narrow corpus.
 
-**None of the five corrected claims is load-bearing in code — checked, not assumed.** Of the twelve
+**Fifth class — COUNT RELATIONS ("1:1 with X", "one per track"). Five of six fail externally, and
+this class DOES have code behind it.**
+
+| claim | controls | external |
+|---|---|---|
+| `0x200A` 1:1 with track records | 68/68 | **165/165** holds |
+| `0x2015` 1:1 with track records | 68/68 | 160/165 |
+| `0x1033` 1:1 under `0x1003` | 68/68 | 161/165 |
+| `0x2589` == records or 0 | 68/68 | 156/165 |
+| `0x2104` == `0x261C` | 68/68 | 70/165 |
+| `0x261B` one per track | **58/68** | 95/165 |
+
+`0x261B` failing in the CONTROLS is the informative one, and the cause is structural:
+
+> **`0x261F` never has a `0x261B`.** Measured 309/309 — no `0x261F` contains one — against
+> `0x261C`'s 6955/6955 that always do. So `0x261F` is a track-list entry with a display row that
+> does **not** participate in the `0x261B` identity system at all.
+
+That is why "one `0x261B` per track" broke the moment `0x261F` joined `_TRACK_RECORD_TYPES`: the
+claim was never about track records, it was about the narrower set that carries identity. Both
+readings are now measured — `0x261B == six kinds` 145/193, `== seven kinds` 126/193 — so neither is
+the rule, and the relation needs the set named explicitly rather than "per track".
+
+**Every "per track" claim in this document must therefore say WHICH set it means**: the name-table
+rows (7 kinds), the identity-bearing records (`0x261C` and friends, no `0x261F`), or the display
+chain. `0x2015` and `0x200A` track the first; `0x261B` and `track_id_ranges` track the second.
+Conflating them is what made a true statement about one set look like a false statement about the
+format.
+
+**None of the five corrected claims from the earlier classes is load-bearing in code — checked, not
+assumed.** Of the twelve
 types across all four audited classes, exactly one is referenced by the implementation: `0x203b`,
 via the `_VIEW_VOLUME` literal in `set_waveform_view`. Its 22-byte claim **holds** — 6816 control
 blocks and 33026 external. `0x1033`, `0x203f`, `0x2506`, `0x2514`, `0x260a`, `0x2625`, `0x104d`,
