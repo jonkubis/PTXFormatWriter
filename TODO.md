@@ -62,7 +62,40 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
-## OPEN — `_name_entry_ordinal_slots` FAILS SILENTLY ON 12% OF SESSIONS (2026-07-26)
+## CLOSED — the 12% blind spot was PROTECTING a second bug (2026-07-26)
+
+Both fixed. The blind spot below was real, and closing it alone would have caused corruption,
+because two defects were cancelling:
+
+1. `_name_entry_ordinal_slots` computed its start from `_name_table_shift` alone while
+   `_inline_name_entries` resolves it EMPIRICALLY (a third preamble form exists). The slot walk
+   returned ZERO on 69/612 sessions, silently disabling `_repair_next_kind_chain` and the ordinal
+   renumber there. The shared helper `_name_table_entry_start` already existed and was not used.
+2. `_renumber_name_entry_ordinals` forced the nonzero run to start at 1, on "300/300 real sessions".
+
+Widening the walk first broke the no-op invariant -- 1257 bytes into 7 UNTOUCHED Pro Tools files.
+Reverted, then measured across the whole population:
+
+    reachable before the widening   543/543  nonzero == 1..k
+    newly reachable                  27/34   nonzero == 1..k
+    newly reachable                   7/34   distinct but starting at 2:  [2,3,4,5,6,...]
+
+**Those 300 sessions were necessarily ones the SLOT WALK COULD REACH.** The 7 files that number from
+2 were structurally excluded from the evidence that justified the rule -- so the walk's blind spot
+had been preventing the renumber from rewriting them. Neither bug was visible until the other was
+fixed.
+
+The renumber now preserves the base (`base..base+k-1` from the first nonzero present); on a session
+starting at 1 it is byte-identical to before, which covers every session the rule was measured on.
+With that in place the walk fix landed cleanly: **0 bytes changed on all four corpora**, invariant
+intact, blind spot closed.
+
+THE LESSON, and it is the sharpest instance of the recurring one: *a rule measured through a parser
+is only ever validated on what that parser can read.* "300/300" and "3379/3379 over 40 sessions"
+both sound decisive and both silently exclude the population where they fail. Before trusting a
+denominator, ask what the locator that produced it could not see.
+
+## (historical) `_name_entry_ordinal_slots` FAILS SILENTLY ON 12% OF SESSIONS
 
 Found while trying to diagnose the name-table off-by-one below. Two walks over the SAME `0x2519`
 table disagree: `_inline_name_entries` parses 175-184 entries on the affected sessions while

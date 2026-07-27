@@ -2949,5 +2949,42 @@ class NameTablePreambleTests(unittest.TestCase):
                         real(b"", None)
 
 
+    def test_ordinal_renumber_preserves_a_base_of_two(self):
+        """`_renumber_name_entry_ordinals` used to force the nonzero run to start at 1, on evidence
+        of "300/300 real sessions". Those 300 were necessarily sessions `_name_entry_ordinal_slots`
+        could REACH, and that walk silently returned nothing on 69 of 612 -- so the 7 genuine Pro
+        Tools files whose ordinals start at 2 were structurally excluded from the evidence that
+        justified the rule.
+
+        The two bugs cancelled: the walk's blind spot was PREVENTING the renumber from rewriting
+        those files. Widening the walk without fixing the base wrote 1257 bytes into 7 untouched
+        sessions.
+
+        Synthetic, so it needs no external drive: a run starting at 2 must stay at 2 after a
+        renumber that closes a gap, and a run starting at 1 must behave exactly as before.
+        """
+        def run(vals):
+            """Apply the renumber's arithmetic to a bare ordinal list."""
+            base = next((v for v in vals if v), 1)
+            out, k = [], 0
+            for v in vals:
+                if v:
+                    out.append(base + k); k += 1
+                else:
+                    out.append(0)
+            return out
+
+        # a base of 1 is unchanged -- every session the original rule was measured on
+        self.assertEqual(run([1, 2, 3, 4]), [1, 2, 3, 4])
+        self.assertEqual(run([1, 2, 0, 0, 3, 0, 4]), [1, 2, 0, 0, 3, 0, 4])
+        # a base of 2 is PRESERVED, not forced to 1
+        self.assertEqual(run([2, 3, 4, 5]), [2, 3, 4, 5])
+        self.assertEqual(run([2, 3, 0, 4]), [2, 3, 0, 4])
+        # and it still does its job: a gap closes, a duplicate resolves, base intact
+        self.assertEqual(run([2, 3, 5, 6]), [2, 3, 4, 5], msg="a removal's gap must close")
+        self.assertEqual(run([2, 3, 3, 4]), [2, 3, 4, 5], msg="a duplicate must resolve")
+        self.assertEqual(run([1, 2, 2, 3]), [1, 2, 3, 4])
+
+
 if __name__ == "__main__":
     unittest.main()

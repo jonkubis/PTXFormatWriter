@@ -5440,25 +5440,19 @@ def _name_entry_ordinal_slots(body, z: int, region_end: int) -> "list[int]":
     check answer for a different set than the one being rewritten. One walk now, so they cannot
     drift apart again.
     """
-    # NOT `_name_table_entry_start`, which is what `_inline_name_entries` uses. Making the two
-    # agree is the obvious fix -- this docstring even claims they already do -- and it was tried and
-    # REVERTED on measurement.
+    # Shares `_inline_name_entries`' EMPIRICAL start. The two walks disagreed here for a long time:
+    # this one used `_name_table_shift` alone, which does not model a third preamble form, so it
+    # returned ZERO slots on 69 of 612 sessions and silently disabled `_repair_next_kind_chain` and
+    # the ordinal renumber there -- while this docstring claimed the two could not drift apart.
     #
-    # The disagreement is real: `_inline_name_entries` resolves its start EMPIRICALLY (step forward
-    # in 2-byte units until an entry parses) because a third preamble form exists; this walk uses
-    # `_name_table_shift` alone and so returns ZERO slots on 69 of 612 sessions, which silently
-    # disables `_repair_next_kind_chain` and the ordinal renumber there.
-    #
-    # But sharing the start RE-ARMS `_renumber_name_entry_ordinals` on those sessions, and it then
-    # writes into Pro Tools' own bytes: `_rekey_offsynth_positional` went from a no-op on 480/480
-    # unedited sessions (commit 21f281f, four corpora) to changing 7 of 120 on one drive, 1257
-    # bytes. That invariant is the one this project spent a session establishing, and a wider reach
-    # for a repair pass does not buy it back.
-    #
-    # So the ordering is: understand why the ordinal renumber disagrees with Pro Tools on those
-    # sessions FIRST, then widen the walk. Fixing the walk alone converts a silent no-op into
-    # silent writes, which is strictly worse.
-    q = z + 9 + 0x14 + _name_table_shift(body, z)
+    # Widening it was tried, REVERTED, and only then landed. On the first attempt the newly-reached
+    # sessions made `_rekey_offsynth_positional` write 1257 bytes into 7 untouched Pro Tools files,
+    # breaking the no-op invariant this project spent a session establishing. The cause was NOT this
+    # walk: `_renumber_name_entry_ordinals` forced the ordinal run to start at 1, and those 7
+    # sessions legitimately number from 2 -- a case its "300/300" evidence could not have contained,
+    # because those 300 were sessions this very walk could reach. Fixing the renumber to preserve
+    # the base is what made widening safe.
+    q = _name_table_entry_start(body, z, region_end)
     slots: "list[int]" = []
     while True:
         head = _name_entry_head(body, q, region_end)
@@ -5485,12 +5479,31 @@ def _renumber_name_entry_ordinals(body, z: int, region_end: int, su16) -> None:
     (every ordinal nonzero) renumbers densely exactly as before -- which is why the PT-confirmed
     synth oracles are unaffected. It also needs no pre-edit sampling: an add creates a duplicate
     among the nonzeros and a remove leaves a gap, and renumbering the nonzeros fixes both.
+
+    THE RUN DOES NOT ALWAYS START AT 1. That "300/300" was measured on sessions the SLOT WALK could
+    reach, and the walk silently returns nothing on 69 of 612 (see `_name_entry_ordinal_slots`).
+    Re-measured across the whole population once the walk was widened::
+
+        reachable before the widening    543/543  nonzero == 1..k
+        newly reachable                   27/34   nonzero == 1..k
+        newly reachable                    7/34   distinct, but starting at 2: [2,3,4,5,6,...]
+
+    Those 7 are genuine Pro Tools files, and they are exactly the 7 where forcing 1..k rewrote 1257
+    bytes of an untouched session. The BASE is preserved now -- the run becomes `base..base+k-1`
+    where `base` is the first nonzero already present -- so a session numbering from 2 stays
+    numbering from 2. On a session that starts at 1 this is identical to the old behaviour, which is
+    every session the rule was originally measured on.
+
+    A first nonzero of 0 is impossible by construction (zeros are skipped), so `base` is >= 1 and a
+    synth session, whose ordinals start at 1, renumbers exactly as before.
     """
+    slots = _name_entry_ordinal_slots(body, z, region_end)
+    base = next((v for v in (int.from_bytes(body[b + 18 : b + 20], "little") for b in slots) if v), 1)
     k = 0
-    for b in _name_entry_ordinal_slots(body, z, region_end):
+    for b in slots:
         if int.from_bytes(body[b + 18 : b + 20], "little"):
+            su16(b + 18, base + k)
             k += 1
-            su16(b + 18, k)
 
 
 def _rekey_positional_by_slot(data: bytes, kinds: "list[int] | None" = None,
