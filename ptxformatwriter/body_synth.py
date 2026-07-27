@@ -4884,11 +4884,19 @@ def session_info(data: bytes) -> dict:
 
 
 def clips(data: bytes) -> "list[dict]":
-    """Every placed clip in the session, as dicts with: `track` (the lane's track name),
+    """Every placed AUDIO clip in the session, as dicts with: `track` (the lane's track name),
     `clip_index` (rank within the lane, as `remove_clip`/`move_clip` take), `name` (the
     region/source name), `position` (the raw `u64` timeline position), and `lane_zmark`
-    (to pass to the edit functions). The whole clip inventory in one call — combines
-    `clip_lanes`, the placement `0x104F` fields, and the 0x2629 region list."""
+    (to pass to the edit functions). Combines `clip_lanes`, the placement `0x104F` fields, and
+    the 0x2629 region list.
+
+    SCOPE — AUDIO ONLY. It reaches placements through `clip_lanes`, which enumerates `0x1052`
+    audio lanes. A MIDI clip's placement hangs off `0x1057` through a `0x1056` wrapper instead
+    (the MIDI twin of `0x1050`), so none are included. Measured: on a session with 185 `0x1056`
+    wrappers this returns 511 of the 696 `0x104F` placements present, and the 185 missing are
+    exactly the MIDI ones. That is a scope limit, not a defect — the edit functions this feeds
+    (`remove_clip`, `move_clip`) take an audio lane zmark — but it is stated here because the
+    docstring previously claimed "every placed clip in the session"."""
     bl = _size_driven_blocks(data)
     rnames = _region_list_names(data, bl)
     p104f = sorted(z for z, _e, c in bl if c == 0x104F)          # placement position records

@@ -4640,3 +4640,32 @@ one session, saved twice, one setting changed.
 
 This is the most useful thing to know before spending more time here: the remaining queue is not
 "harder corpus work", it is a DIFFERENT KIND of work that the corpus cannot do.
+
+## Queue, batch 12: ten more entries, and a scope overstatement found by applying one
+    entries 258 -> 268, mention-only 65 -> 55
+
+Ten types framed and parented at full instance counts. Three worth pulling out:
+  * **0x1056 is to MIDI what 0x1050 is to audio** -- both placement wrappers holding a single
+    0x104F, differing only in parent (0x1057 vs 0x1052).
+  * **0x4833 lives inside the Markers ruler** (0x271A) and **0x4403 inside the region wrapper**
+    (0x2629) -- both byte-constant. Their VALUE is nothing; their POSITION is the information.
+  * **0x2721 is the SIXTEENTH universal top-level stub slot** -- span 13, one payload, all 50
+    sessions, never populated (like 0x2632).
+
+APPLYING 0x1056 TO THE CODE FOUND A SECOND SCOPE OVERSTATEMENT. `clips()` claimed "Every placed
+clip in the session" but reaches placements through `clip_lanes`, which enumerates 0x1052 AUDIO
+lanes. Measured on a session with 185 MIDI placements: **clips() returns 511 of the 696 0x104F
+placements present, and the 185 missing are exactly the MIDI ones.**
+
+`clip_lanes` itself is CORRECTLY scoped and says so ("every audio-playlist lane (0x1052)"). It
+is only the aggregate reader that overstated. Docstring now states the limit with the measured
+numbers, exactly as `region_list`'s did -- and for the same reason: the edit functions it feeds
+take an audio lane zmark, so the narrow scope is right and only the claim was wrong.
+
+TWO scope overstatements found in two attempts to apply a structural finding to the code. Both
+were docstrings promising more than the function delivers, and neither was a defect. Worth
+checking the rest of the read layer's docstrings against what it actually enumerates -- that is
+a cheap, corpus-verifiable audit and it has a 2-for-2 hit rate so far.
+
+POSSIBLE FUTURE FEATURE (not a defect): a MIDI-aware clip enumerator via 0x1057 -> 0x1056 ->
+0x104F. The structure is now documented; nothing else blocks it.

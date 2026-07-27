@@ -2634,6 +2634,37 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x1056 / 0x4403 / 0x2636 / 0x262F / 0x2597 / 0x2588 / 0x2721 / 0x4809 / 0x4833 / 0x2062 — framing and parentage
+
+Structure for ten more types. Every ratio is the full instance count of the child.
+
+| type | span | parent | child | distinct payloads | note |
+|---|---|---|---|---|---|
+| `0x1056` | 53 (all 376) | **`0x1057`** | **always `0x104F`** | 16 | **the MIDI placement wrapper** |
+| `0x4403` | 37 (all 35,146) | **`0x2629`** | **always `0x1000`** | **1** | scaffolding inside the region wrapper |
+| `0x2636` | 71 (3,792 of 4,561) | **`0x2628`** | leaf | **1** prefix | fixed 14-byte signature (`f1 4e d6 f0 0f 49 41 43 …`) |
+| `0x262F` | 31/36/41 | **`0x2630`** | leaf | 156 | **the FADE record** (see §5d's fade run) |
+| `0x2597` | 281–283 | TOP-LEVEL | **always `0x2588`** | 4 | |
+| `0x2588` | 272–274 | **`0x2597`** | **always `0x2552`** | 2 | so the chain is `0x2597 ⊃ 0x2588 ⊃ 0x2552` |
+| `0x2721` | **13 (all 50)** | TOP-LEVEL | leaf | **1** | a 16th universal stub slot |
+| `0x4809` | 24 (all 100) | **`0x1021`** | leaf | **1** | |
+| `0x4833` | 14 (all 125) | **`0x271A`** | leaf | **1** | fixture inside the MARKERS ruler |
+| `0x2062` | 162 (all 25) | TOP-LEVEL | `0x2005` ×3 | **1** | holds exactly three `0x2005` |
+
+**Three things worth pulling out:**
+
+1. **`0x1056` is to MIDI what `0x1050` is to audio** — both are placement wrappers holding a
+   single `0x104F`, differing only in their parent (`0x1057` vs `0x1052`). A placement
+   enumerator keyed on `0x1052` alone sees no MIDI clips at all.
+2. **`0x4833` lives inside the Markers ruler** (`0x271A`), and `0x4403` inside the region
+   wrapper — both byte-constant, both fixture. Their VALUE is nothing; their POSITION is the
+   information.
+3. **`0x2721` is the sixteenth universal top-level stub slot**, span 13 with one payload in all
+   50 sessions — never populated in any file seen, like `0x2632`.
+
+- **Confidence:** HIGH on every framing/parentage figure (full instance counts); purposes
+  UNPROVEN, and per the boundary note above the corpus cannot supply them.
+
 ### What the corpus CANNOT decode — a measured boundary
 
 Two systematic sweeps bound what is left. Both are negative results, and they are what makes the
