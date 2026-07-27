@@ -62,6 +62,39 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
+## OPEN — `_name_entry_ordinal_slots` FAILS SILENTLY ON 12% OF SESSIONS (2026-07-26)
+
+Found while trying to diagnose the name-table off-by-one below. Two walks over the SAME `0x2519`
+table disagree: `_inline_name_entries` parses 175-184 entries on the affected sessions while
+`_name_entry_ordinal_slots` returns **zero**.
+
+    slots == entries (works)             540/612    entries 1..512
+    ZERO slots                            69/612    entries 0..210
+    slots != entries                       3/612    entries 47..54
+                                        --------
+    silent no-op                          72/612    = 11.8%
+
+WHY IT MATTERS: `_repair_next_kind_chain` guards with
+`if len(slots) < 2 or len(ents) != len(slots): return data`, so on those 72 sessions it **looks like
+it ran and repaired nothing**. Anything else keyed on those slots is equally blind there.
+
+This is the failure shape this project keeps rediscovering: a locator that returns EMPTY instead of
+raising, behind a guard that reads empty as "nothing to do". The 18-byte `_ORD2015_ANCHOR` missing
+24.1% of blocks was the same shape, and it manufactured a false format rule that sat in the spec for
+a day. Size is NOT the discriminator -- the working set spans 1..512 entries and the failing set
+0..210, so the ranges overlap and something structural distinguishes them.
+
+NOT FIXED, and deliberately not papered over. Two reasons to leave the behaviour alone until the
+cause is known: it is a REACH limitation, not corruption (the repair declines; it does not write
+wrong bytes), and making the guard raise instead would stop editing 12% of real sessions to fix a
+no-op. What it needs is a walk that either parses those tables or says why it cannot -- an
+investigation, not a patch.
+
+Related and still unexplained: the 7 sessions whose name table is short by exactly one row (see the
+guard's docstring). This is why that one is still an honest tolerance rather than a diagnosis -- the
+GUID-ownership method that would have identified the missing record needs the slot walk, and the
+slot walk is exactly what returns zero on those files.
+
 ## EVERY OBSERVED REAL CONTENT-TYPE IS NOW DOCUMENTED (2026-07-26)
 
     832 sessions, four drives   482 types   322 documented   160 phantoms   0 real undocumented
