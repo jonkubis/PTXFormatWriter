@@ -4829,3 +4829,29 @@ same shape as all the others. **A pattern's cleanest example is the most likely 
 sampling artifact**, precisely because it is the case where no counterexample has been drawn yet.
 That is the fourth completeness claim of mine revised by a wider sample today; all four
 corrections are left visible in the spec rather than edited away.
+
+## The "unproven" count WENT UP — and that is the documentation working
+Re-measured after the queue work: **unsettled sections 26 -> 53.** Nothing was un-learned. ~160
+new entries were written and **each states what it does NOT establish**; a type with no entry
+contributes 0 to that count, a type with an honest entry contributes 1. **The number rising is
+the honest-accounting mechanism doing its job**, and it is worth saying plainly because the
+obvious reading is the opposite.
+
+CLASSIFIED the 221 types those 53 sections cover, over 120 sessions:
+
+    BYTE-CONSTANT (>=10 instances, ONE payload)   50   the corpus can NEVER decode these
+    VARYING       (>=10 instances, >1 payload)   152   only with an EXTERNAL ANCHOR
+    TOO RARE      (<10 instances)                 19   not on this evidence
+
+**The 50 byte-constant types are a HARD FLOOR.** No amount of further corpus work, tooling or
+sampling can decode a field that has never taken a second value -- the information is not in the
+files. They are as documented as the corpus can make them (framing, span, parent, child,
+universality) and their purpose is permanently out of reach here.
+
+For the 152 varying types the two anchors that have ever worked are catalogued: a length-prefixed
+name PT wrote (15 types + the 5 rulers), and a value meaningful outside the format (0x2434's
+60/64 px, 0x1028/0x1001's 44100/48000). The derived-count sweep found ZERO further matches.
+
+SO THE REMAINING DOCUMENTATION WORK IS NOW FULLY CHARACTERISED: 50 types permanently opaque,
+152 needing an external anchor (in practice, Pro Tools), 19 too rare to judge, 2 with a single
+instance, and 13+61 phantoms. There is no longer a category of "corpus work I have not done".

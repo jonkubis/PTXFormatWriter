@@ -2896,6 +2896,33 @@ Structure for ten more types. Every ratio is the full instance count of the chil
 - **Confidence:** HIGH on every framing/parentage figure (full instance counts); purposes
   UNPROVEN, and per the boundary note above the corpus cannot supply them.
 
+### Why the "unproven" count WENT UP, and which types can never come down
+
+**Read the unsettled count as a measure of honesty, not of ignorance.** It moved **26 → 53
+sections** over the course of one documentation pass — not because anything was un-learned, but
+because ~160 new entries were written and each states what it does NOT establish. A type with no
+entry contributes nothing to that count; a type with an honest entry contributes one. **The
+number rising is the documentation working.**
+
+Of the 221 types covered by those 53 sections, measured over 120 sessions:
+
+| class | count | can the corpus ever settle it? |
+|---|---|---|
+| **BYTE-CONSTANT** (≥10 instances, exactly ONE payload) | **50** | **No — never.** There is no variance to correlate against. `0x2037`, `0x1033`, `0x2103`, `0x230A`, `0x242E`, `0x2071`/`0x2072` and 44 others. |
+| **VARYING** (≥10 instances, >1 payload) | **152** | Only with an EXTERNAL ANCHOR — an embedded name, a recognisable value, or Pro Tools. Every decode in this document came from one of those. |
+| **TOO RARE** (<10 instances) | 19 | Not on this evidence; a targeted sample might raise them into the second class. |
+
+**The 50 byte-constant types are the hard floor.** No amount of further corpus work, better
+tooling or wider sampling can decode a field that has never taken a second value — the
+information simply is not in the files. They are fully documented in every sense the corpus can
+supply (framing, span, parent, child, universality) and their purpose is permanently out of
+reach here.
+
+**For the 152 varying types**, the two anchors that have worked are catalogued above: a
+length-prefixed name Pro Tools wrote (fifteen types, plus the five rulers) and a value meaningful
+outside the format (`0x2434`'s 60/64 px, `0x1028`/`0x1001`'s 44100/48000). A sweep for derived
+counts found **zero** further matches. What is left needs the application.
+
 ### What the corpus CANNOT decode — a measured boundary
 
 Two systematic sweeps bound what is left. Both are negative results, and they are what makes the
