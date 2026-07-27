@@ -2003,6 +2003,30 @@ Containment holding matters beyond documentation: `_size_driven_blocks` and ever
 navigate by these relationships, so a false parent claim would mean code walking somewhere
 unintended, not merely a wrong sentence.
 
+**Fourth class — FIXED SIZE. One entry wrong, and one ambiguity in the spec's own units.**
+
+| type | spec says | control spans | external spans | verdict |
+|---|---|---|---|---|
+| `0x1033` | 9 | — | 9 (×25904) | holds |
+| `0x203b` | 22 | 22 (×6816) | 22 (×33026) | holds |
+| `0x203f` | 22 | — | 22 (×12) | holds |
+| `0x2506` | 17 | — | 17 (×627624) | holds |
+| `0x2514` | 42 | — | 42 (×328) | holds |
+| `0x260a` | 32 | span 39 | spans **39, 45, 63** | **VARIES** |
+
+`0x260a` (automation breakpoint) is documented as a fixed 32-byte record. A block spans
+`7 + declared_size`, so span 39 IS payload 32 and the control corpus agrees — but externally the
+payload takes **32, 38 and 56**. Any code reading a breakpoint at a hardcoded stride is right only
+on the narrow corpus.
+
+**THE SPEC MIXES UNITS, which is how that nearly became a second false finding.** `0x2625` ("11B
+wrapper") and `0x2626` ("2B terminator") are quoted as PAYLOAD sizes; `0x2506` ("17-byte"),
+`0x203b` ("22 B"), `0x1033` ("9B") and `0x2514` ("42 bytes") are quoted as SPANS. Measuring spans
+against payload claims flagged `0x2625` and `0x2626` as varying when both are perfectly constant
+(span 18 = 11+7, span 9 = 2+7). Since every block is `7 + size`, an unlabelled number is ambiguous
+by exactly the header width — the kind of off-by-7 that produces a locator which "works" on one
+form and reads garbage on another.
+
 ### 0x104d — Top-level ordinal + 0.5-pair leaf (**NOT fixed — 4 payloads externally**) (view-state)
 
 - **kind:** LEAF; top-level (no enclosing 0x5A; parent None in 26/26). No children (26/26). block_type (u16@z+1) = 3. Exactly one instance per session (26/26). Immediately follows 0x1040 and precedes 0x207e in every session.
