@@ -3775,3 +3775,35 @@ findings on genuine PT-authored sessions**, and the two that fire are true posit
 
 The regression test pins the CONTRACT (`name_end` advances by BYTE length) rather than the two
 call sites, because the next consumer to get this wrong will be a third site.
+
+## A track whose NAME has an accent was not editable at all (two bugs, one behind the other)
+Following my own "after a reader fix, re-audit every consumer" note found a user-visible defect
+the validator work had only hinted at. Names are UTF-8; anything that MEASURES one must count
+BYTES. Two places did not, and the second was unreachable until the first was fixed.
+
+  1. **`track_types()` returned mojibake.** It decoded names as latin1 (`_hdr_name`), so
+     `135·3BPM` came back as `135Â·3BPM` -- a string whose `.encode()` is NOT in the file. Since
+     the editors locate a track by `track_name.encode()`, **a name read from the public API could
+     not be passed back into `duplicate_track`/`remove_track`**: "cannot locate track", on 42 of
+     42 corpus sessions carrying a non-ASCII name (71 names, 0 usable).
+  2. **`duplicate_track` compared name lengths in CHARACTERS.** `len(new_name) != len(source)`
+     then `_unique_same_length_name(len(source))` -- which produces a name of exactly N BYTES. A
+     22-character/23-byte name took a 22-byte placeholder and spliced ONE BYTE SHORT, corrupting
+     the master index into "bad element tag". This only became visible after fix 1, because
+     before it the lookup failed first.
+
+THE DIAGNOSTIC THAT SEPARATED THEM: try an accented-name track and an ASCII-name track IN THE
+SAME SESSION. 28/28 sessions gave "bad element tag" for the accented one and "OK" for the ASCII
+one -- which rules out "this session is broken" and points at the name itself.
+
+FIX: `_decode_name()` (UTF-8 with a latin1 fallback, so it is a strict improvement -- valid UTF-8
+now round-trips and invalid bytes behave exactly as before) applied at `_hdr_name`; byte-length
+comparison in duplicate_track. There are still ~20 other latin1 name decodes in this module,
+listed by `grep -n '\.decode(' ptxformatwriter/body_synth.py`; they feed region/clip readers
+rather than the edit lookup, so they are a smaller (but real) follow-up.
+
+MEASURED: accented-name tracks 0/28 -> 28/28 duplicate CLEAN with no new validator errors; all
+71 non-ASCII names across 42 sessions now round-trip to bytes present in the file (was 0/71);
+edit audit dup 71 -> 72 clean, refusals 34 -> 33; rm unchanged at 105 clean. 232 tests green.
+The regression test runs entirely on a local control file (rename a track to `Café`, then
+duplicate it) and is verified to bite -- reverting `_hdr_name` alone fails it.

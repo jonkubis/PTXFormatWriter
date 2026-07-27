@@ -5089,6 +5089,26 @@ def _name_table_declared_count(data: bytes, z: int, start: int) -> int:
     return int.from_bytes(data[pos : pos + 2], "little")
 
 
+def _decode_name(raw: bytes) -> str:
+    """Decode a stored name the way Pro Tools wrote it: UTF-8, falling back to latin1.
+
+    Names in a `.ptx` are UTF-8 (see `_name_entry_head`), but almost every reader in this module
+    predates that finding and used `latin1`, which turns `135·3BPM` into `135Â·3BPM` -- a string
+    whose `.encode()` no longer matches the bytes in the file. That is not cosmetic: the editors
+    locate a track by `track_name.encode()`, so a name taken from the public `track_types()` API
+    could not be fed back into `duplicate_track`/`remove_track` at all. It failed on 42 of 42
+    corpus sessions carrying a non-ASCII name, with "cannot locate track".
+
+    The latin1 fallback keeps every byte sequence decodable, so this is a strict improvement:
+    valid UTF-8 (which all-ASCII names trivially are) now round-trips, and anything that is not
+    valid UTF-8 behaves exactly as before.
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin1", "replace")
+
+
 def _name_entry_head(data: bytes, q: int, end: int, allow_ctrl: bool = False) -> "tuple[str, int] | None":
     """`(name, name_end)` if a `<len:u32><name>` entry begins at `q`, else None.
 
@@ -7352,9 +7372,14 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     (audio AND MIDI; PT display-confirm pending), and every other block is
     byte-intact."""
     import struct
-    if len(new_name) != len(source_track):
+    # BYTES, not characters. `_unique_same_length_name` produces a name of exactly N BYTES, and
+    # the same-length path splices byte-for-byte, so a 23-byte source name that is 22 CHARACTERS
+    # long (`00 PRINT_CLIX 135·3BPM`) took a 22-byte placeholder and spliced one byte short --
+    # corrupting the master index into "bad element tag". Failed on all 28 corpus sessions with an
+    # accented track name, while an ASCII-named track in the SAME session duplicated cleanly.
+    if len(new_name.encode()) != len(source_track.encode()):
         taken = {t.name for t in track_types(data)} | {source_track, new_name}
-        placeholder = _unique_same_length_name(len(source_track), taken)
+        placeholder = _unique_same_length_name(len(source_track.encode()), taken)
         return rename_track(duplicate_track(data, source_track, placeholder),
                             placeholder, new_name)
     # the source's 0-based display row (the copy is spliced in right after it, so the copy's
@@ -7894,7 +7919,7 @@ def _track_1014_rows(data: bytes) -> "list[tuple[str, int, list[int]]]":
         if ct != 0x1014:
             continue
         nlen = int.from_bytes(data[z + 9 : z + 13], "little")
-        name = data[z + 13 : z + 13 + nlen].decode("latin1", "replace")
+        name = _decode_name(data[z + 13 : z + 13 + nlen])
         toff = z + 7                      # block content start (the 0x1014 word)
         rows.append((name, toff, track_channel_indices(data, toff)))
     return rows
@@ -8086,7 +8111,7 @@ class TrackInfo:
 def _hdr_name(data: bytes, b: Block) -> tuple[str, int]:
     """(name, namelen) for a 0x1014/0x1057 header block."""
     nlen = int.from_bytes(data[b.offset + 2 : b.offset + 6], "little")
-    name = data[b.offset + 6 : b.offset + 6 + nlen].decode("latin-1")
+    name = _decode_name(data[b.offset + 6 : b.offset + 6 + nlen])
     return name, nlen
 
 

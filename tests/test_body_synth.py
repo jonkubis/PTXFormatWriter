@@ -3311,6 +3311,44 @@ class NameTablePreambleTests(unittest.TestCase):
         # and the two lengths genuinely differ for the fixtures that caused the bug
         self.assertNotEqual(len("Butterbeans Café".encode("utf-8")), len("Butterbeans Café"))
 
+    @unittest.skipUnless(_mono_available(), "mono control files not present")
+    def test_a_track_whose_name_has_an_accent_is_still_editable(self):
+        """A name is a byte string. Everything that measures one must count BYTES.
+
+        Names are UTF-8, so a name with an accent is LONGER in the file than in Python, and two
+        separate places got that wrong — each failing differently, and the second only reachable
+        once the first was fixed:
+
+          1. `track_types()` decoded names as latin1, so `135·3BPM` came back as `135Â·3BPM` —
+             a string whose `.encode()` is NOT in the file. A name read from the public API could
+             not be passed back to the editors at all: "cannot locate track", on 42 of 42 corpus
+             sessions carrying a non-ASCII name.
+          2. `duplicate_track` then compared `len(new_name) != len(source_track)` in CHARACTERS
+             and asked for a placeholder of `len(source_track)` BYTES. A 22-character/23-byte
+             name took a 22-byte placeholder and spliced one byte short, corrupting the master
+             index into "bad element tag" — on all 28 sessions reached, while an ASCII-named
+             track in the SAME session duplicated cleanly.
+
+        This exercises the whole path on a local control file: rename to an accented name, verify
+        the bytes are really in the session, then duplicate that track. Verified to BITE — the
+        rename alone reproduces the byte/character mismatch (`Café` is 4 characters, 5 bytes)."""
+        data = _load_path(_mono_control(sorted(_mono_available())[0]))
+        first = BS.track_types(data)[0].name
+        accented = "Café"                      # 4 characters, 5 UTF-8 bytes
+        self.assertNotEqual(len(accented.encode("utf-8")), len(accented))
+
+        renamed = BS.rename_track(data, first, accented)
+        names = [t.name for t in BS.track_types(renamed)]
+        self.assertIn(accented, names, "track_types must report the name as stored, not mojibake")
+        self.assertIn(accented.encode("utf-8"), renamed,
+                      "the reported name's BYTES must actually be in the session")
+
+        out = BS.duplicate_track(renamed, accented, "ZZDUP")
+        self.assertGreater(len(out), len(renamed))
+        self.assertEqual([v for v in BS.validate_pt_invariants(out) if v["severity"] == "error"], [],
+                         "duplicating an accented-name track must not corrupt the session")
+        self.assertIn("ZZDUP", [t.name for t in BS.track_types(out)])
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 
