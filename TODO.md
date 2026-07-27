@@ -4432,3 +4432,33 @@ would be gaming if the section were thin, so the section now states its own SCOP
 it settles CONTAINMENT and nothing else, and a table row is a narrower thing than a full entry.
 Worth keeping in mind for the rest of the queue: the number is only honest while what it counts
 stays honest.
+
+## Queue, batch 9: clip/region/plugin chains settled, and TWO corrections to existing prose
+    entries 223 -> 234, mention-only 100 -> 89   (biggest single batch so far)
+
+Containment settled at full instance counts:
+
+    0x1050 -> 0x1052, child ALWAYS 0x104F   30,282/30,282
+    0x2629 -> 0x262A, child ALWAYS 0x2628   37,764/37,764
+    0x261C -> 0x2624, child ALWAYS 0x261B    2,915/2,915
+    0x200B -> 0x261C, child ALWAYS 0x200A    2,915/2,915
+    0x2104 -> 0x2015, child ALWAYS 0x2103    2,683/2,683
+
+TWO CORRECTIONS TO WHAT WAS ALREADY WRITTEN:
+  1. **The plugin chain is one level deeper than the prose said.** Measured:
+     `0x2627/0x2617 ⊃ 0x2616 ⊃ 0x2615 ⊃ {0x2613, 0x2626}`. Earlier notes had
+     `0x2616 ⊃ 0x2615 ⊃ 0x2613 ⊃ 0x1038`, which is right about the order but wrong about the
+     last link -- see (2).
+  2. **0x2613's framed 0x1038 is NOT payload-aligned.** The payload opens `ff ff` and the
+     `0x5A`-framed 0x1038 starts at payload+2, so a child-walk beginning at payload+0 reports
+     0x2613 as a LEAF. That is exactly the kind of detail that makes a plugin-aware traversal
+     silently return nothing, and it explains why the block walk never surfaced 0x1038 as a
+     child despite the prose describing it as one.
+
+ALSO: **0x2628 has a SECOND parent** -- 0x262B (57 instances), the crossfade path. A region
+enumerator keyed only on 0x2629 misses those.
+
+The batch was the largest yet (11 entries) because the clip/region/plugin area is densely
+inter-referenced: once the parentage of one member is measured the rest fall out, whereas the
+top-level stub slots each had to be profiled individually. Worth choosing DENSELY CONNECTED
+areas next rather than isolated types.

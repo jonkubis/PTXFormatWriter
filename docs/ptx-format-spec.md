@@ -2634,6 +2634,55 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x1050 / 0x2628 / 0x2629 / 0x261C / 0x200B / 0x2104 — clip, region and view containment (measured)
+
+Each relation is the full instance count of the child, so these are settled:
+
+| child | parent(s) | child's own child | instances |
+|---|---|---|---|
+| `0x1050` | `0x1052` | **always `0x104F`** | 30,282 / 30,282 |
+| `0x2629` | `0x262A` | **always `0x2628`** | 37,764 / 37,764 |
+| `0x2628` | `0x2629` 37,764, `0x262B` 57 | leaf | 37,865 |
+| `0x261C` | `0x2624` | **always `0x261B`** | 2,915 / 2,915 |
+| `0x200B` | `0x261C` | **always `0x200A`** | 2,915 / 2,915 |
+| `0x2104` | `0x2015` | **always `0x2103`** | 2,683 / 2,683 |
+
+- **The clip chain is therefore fixed at every level:**
+  `0x1054 ⊃ 0x1052 (lane) ⊃ 0x1050 ⊃ 0x104F (placement)`, and the region side is
+  `0x262A ⊃ 0x2629 ⊃ 0x2628 (region record, length-prefixed name)`.
+- **`0x261C ⊃ 0x261B` and `0x261C ⊃ 0x200B ⊃ 0x200A ⊃ 0x2015`** — the audio track record holds
+  both its detail subtree and its view chain, which is why removing a track has to splice two
+  distinct subtrees (see `remove_track`).
+- **`0x2628` has a second parent**, `0x262B` (57 instances) — the crossfade path. A region
+  enumerator keyed only on `0x2629` will miss those.
+- **Confidence:** HIGH (full instance counts).
+
+### 0x2613 / 0x2615 / 0x2616 — the plugin-instance cluster (chain corrected)
+
+Measured parentage gives the chain exactly, and it is one level deeper than earlier prose implied:
+
+```
+0x2627 (3,200) / 0x2617 (483)  ⊃  0x2616  ⊃  0x2615  ⊃  { 0x2613 , 0x2626 }
+                                              (0x2615's other parent: 0x2618, 18)
+```
+
+- **`0x2613` is where the plugin state lives** — 1,640 distinct payloads across 3,701 instances,
+  sizes 1,338…2,286. **Its framed `0x1038` is NOT payload-aligned:** the payload opens `ff ff`
+  and the `0x5A`-framed `0x1038` begins at payload+2, so a child-walk starting at payload+0 sees
+  `0x2613` as a LEAF. That is worth knowing before writing any plugin-aware traversal.
+- **`0x2615`** always carries a `0x2626` terminator alongside; **`0x2616`** always carries exactly
+  one `0x2615`.
+- **Presence:** 25 of 75 sessions — the cluster exists only where plugins are instantiated,
+  consistent with the counts scaling with plugin instances rather than track count.
+- **Confidence:** HIGH on the chain and the `0x1038` offset; the plugin state itself is vendor
+  data and out of scope.
+
+### 0x2553 — settings record under 0x258B / 0x2551
+
+- **Kind:** LEAF, 165 instances / 75 sessions. Parents `0x258B` (109) and `0x2551` (56).
+- **Size:** 149…471, 53 distinct payloads — per-session data.
+- **Confidence:** HIGH on framing/parentage; purpose UNPROVEN.
+
 ### 0x1003 / 0x1014 / 0x261B / 0x102D / 0x2627 / 0x2619 / 0x2589 / 0x258A / 0x2077 / 0x210B — PARENTAGE, measured exactly
 
 > **Scope of this entry:** it documents CONTAINMENT for these ten types and nothing else — each row is the full instance count of the child, so the parentage is settled, but payload layouts are covered (where they are known at all) in each type's own notes elsewhere. A row here is a narrower thing than a full entry; it is recorded as such rather than counted as if the type were fully described.
