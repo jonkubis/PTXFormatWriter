@@ -6636,6 +6636,8 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         # a track through this ordinal -- a session with two tracks on slot 4 crashed on close --
         # so the column must stay a running total with no holes.
         out = repair_playlist_ordinals_after_remove(data, out)
+    # ...and drop the removed playlist's 0x2506 row from every marker, the exact inverse.
+    out = _sync_marker_rows_for_playlist_delta(data, out)
     return out
 
 
@@ -7036,6 +7038,139 @@ def _write_playlist_ordinals(data: bytes, counts: "list[int]") -> bytes:
         out[pos : pos + 4] = v.to_bytes(4, "little")
         v += c
     return bytes(out)
+
+
+def _marker_scaffold_rows(data: bytes, z: int, e: int) -> "list[tuple[int, int]]":
+    """The `(zmark, end)` of every `0x2506` row inside one `0x2077` marker, in order.
+
+    The rows are a CONTIGUOUS RUN with a variable-length header before them (the marker name) and
+    a short trailer after, so neither end of the block is a safe anchor. Resynchronising forward
+    on the next `0x5A` desynchronises when that byte occurs inside the header (it reported 0 rows
+    for 6 of 388 markers on one real session); walking backward from the end hits the trailer and
+    reports 0 rows for every marker. Instead find the first FULLY-FRAMED `0x2506` -- `0x5A`,
+    declared size 10, content type `0x2506`, specific enough that header bytes will not fake it --
+    then step in exact 17-byte units while the frame holds. Verified against the count the
+    `0x2506` relation predicts: exactly right on all 3,038 markers of 94 sessions."""
+    out: "list[tuple[int, int]]" = []
+    q = z + 9
+    def framed(p: int) -> bool:
+        return (data[p] == 0x5A
+                and int.from_bytes(data[p + 3 : p + 7], "little") == 10
+                and int.from_bytes(data[p + 7 : p + 9], "little") == 0x2506)
+    while q + 17 <= e and not framed(q):
+        q += 1
+    while q + 17 <= e and framed(q):
+        out.append((q, q + 17))
+        q += 17
+    return out
+
+
+def sync_marker_playlist_rows(data: bytes, at: int, count: int) -> bytes:
+    """Add (`count` > 0) or drop (`count` < 0) `0x2506` rows at playlist index `at`, in EVERY marker.
+
+    Every `0x2077` marker carries exactly one 17-byte `0x2506` row per PLAYLIST -- the relation
+    `n(0x2506) == n(0x2077) x n_playlists` is exact on every session measured (§5c). So a track
+    edit that changes the playlist count must add or remove one row PER MARKER, which is what Pro
+    Tools itself does. A session with no markers is returned unchanged.
+
+    The row is not pure scaffold -- its `u32` at payload+2 is a per-playlist bit -- so a new
+    playlist's row is COPIED from the playlist it was duplicated from rather than invented, which
+    stays correct whichever way that bit is eventually decoded.
+
+    TWO THINGS THIS HAS TO GET RIGHT, both of which broke an earlier attempt:
+      * EVERY ancestor between a marker and its top-level block owns the size growth, not just the
+        outermost one. Markers nest `0x271A -> 0x2030 -> 0x2077`, and fixing only the top left the
+        intermediate `0x2030` 204 bytes short, so its child walk stopped early and the LAST marker
+        of each group vanished from the block stream entirely.
+      * Sizes must be written WHILE the offsets they use are still valid. Doing every insertion
+        first and then writing size fields at ORIGINAL offsets writes them into already-shifted
+        bytes; row counts came out 211,210,209,...,203 -- a cascading drift that reads like a
+        locator bug and is not one. Markers are processed right-to-left so each one's offset is
+        still correct when its size is written, and containers start below every insertion so
+        theirs never move.
+
+    Validated on 94 marker-bearing sessions: markers preserved, exactly one row added per marker,
+    exact byte growth, index resolves, no new validator errors -- and add-then-drop round-trips
+    BYTE-IDENTICAL at two different insertion indices. 46 marker-less sessions unchanged."""
+    if count == 0:
+        return data
+    bl = sorted(_raw_block_bounds(data, _FI.final_index_ref(data).start))
+    mks = [(z, e) for z, e, c in bl if c == 0x2077]
+    if not mks:
+        return data
+    step = 17 * count
+
+    def top_of(j: int):
+        best = None
+        for z, e, _c in bl:
+            if z <= j < e and (best is None or z < best[0]):
+                best = (z, e)
+        return best
+
+    groups: "dict[tuple[int, int], list[tuple[int, int]]]" = {}
+    for z, e in mks:
+        groups.setdefault(top_of(z), []).append((z, e))
+
+    reps = []
+    for (tz, te), ms in groups.items():
+        blob = bytearray(data[tz:te])
+        grow_by: "dict[tuple[int, int], int]" = {}
+        for z, e in ms:
+            for az, ae, _c in bl:
+                if az <= z and e <= ae and tz <= az and ae <= te:
+                    grow_by[(az, ae)] = grow_by.get((az, ae), 0) + step
+        for z, e in sorted(ms, reverse=True):
+            r = _marker_scaffold_rows(data, z, e)
+            if not r:
+                continue
+            if count > 0:
+                k = max(0, min(at, len(r)))
+                src = data[r[min(k, len(r) - 1)][0] : r[min(k, len(r) - 1)][1]]
+                ins = r[k][0] if k < len(r) else r[-1][1]
+                blob[ins - tz : ins - tz] = src * count
+                delta = step
+            else:
+                n = -count
+                if len(r) < n:
+                    continue
+                k = max(0, min(at, len(r) - n))
+                blob[r[k][0] - tz : r[k + n - 1][1] - tz] = b""
+                delta = -(r[k + n - 1][1] - r[k][0])
+            blob[z - tz + 3 : z - tz + 7] = ((e - z) + delta - 7).to_bytes(4, "little")
+        for (az, ae), g in sorted(grow_by.items(), key=lambda kv: kv[0][0]):
+            if (az, ae) in ms:
+                continue
+            blob[az - tz + 3 : az - tz + 7] = ((ae - az) + g - 7).to_bytes(4, "little")
+        if len(blob) != te - tz:
+            blob[3:7] = (len(blob) - 7).to_bytes(4, "little")
+            reps.append((tz, te, bytes(blob)))
+    return _splice_and_reindex(data, reps) if reps else data
+
+
+def _playlist_span_of_edit(before: bytes, after: bytes) -> "tuple[int, int] | None":
+    """`(playlist index, signed count)` of the playlist slots an edit added or removed.
+
+    Read from the repaired `0x2015` ordinal column, which is a running total, so the changed
+    track's own ordinal IS the index its playlists start at."""
+    b = [v for _p, v in _playlist_ordinal_sites(before)]
+    a = [v for _p, v in _playlist_ordinal_sites(after)]
+    if not b or not a or len(a) == len(b):
+        return None
+    cb, ca = _playlist_counts(before), _playlist_counts(after)
+    if cb is None or ca is None or sum(ca) == sum(cb):
+        return None
+    short, long_ = (b, a) if len(a) > len(b) else (a, b)
+    i = next((k for k in range(len(short)) if long_[k] != short[k]), len(short))
+    return long_[i] - 1, sum(ca) - sum(cb)
+
+
+def _sync_marker_rows_for_playlist_delta(before: bytes, after: bytes) -> bytes:
+    """Apply `sync_marker_playlist_rows` for whatever playlist delta an edit produced."""
+    span = _playlist_span_of_edit(before, after)
+    if span is None:
+        return after
+    at, n = span
+    return sync_marker_playlist_rows(after, at, n)
 
 
 def repair_playlist_ordinals_after_add(before: bytes, after: bytes,
@@ -7716,6 +7851,11 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # cannot regress silently again -- `remove_track` applies the exact inverse.
     if not _do_renumber:
         out = repair_playlist_ordinals_after_add(data, out)
+    # The copy is a new PLAYLIST, and every 0x2077 marker holds one 0x2506 row per playlist. Pro
+    # Tools adds those rows when it adds a track; we added none, leaving the matrix short by
+    # n(0x2077) on any session WITH markers. That never surfaced because every session confirmed
+    # in Pro Tools so far has NO markers, which makes this a strict no-op on all of them.
+    out = _sync_marker_rows_for_playlist_delta(data, out)
     return out
 
 

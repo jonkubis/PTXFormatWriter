@@ -3593,3 +3593,38 @@ NEXT ATTEMPT SHOULD START BY: writing the locator against a FIXTURE with a known
 asserting it round-trips, before touching duplicate_track at all. All three of my walks would
 have been caught in minutes by that. Then check whether the new playlist's 0x210B block is even
 being created -- n(0x210B) does go +1, so that part is fine.
+
+## The 0x2506 row sync LANDED (second attempt, prototyped outside the module)
+Reverted once yesterday-in-this-session; now shipped. `duplicate_track`/`remove_track` add/drop
+one 0x2506 row per marker for the playlist they add/remove, so the matrix stays exact.
+
+WHAT MADE THE DIFFERENCE, and it is the transferable part:
+  * **The settled relation became an ORACLE for the locator.** `n(0x2506) == n(0x2077) x
+    n_playlists` means every marker must hold exactly n_playlists rows -- so I could measure the
+    LOCATOR ALONE against 3,038 markers in 94 sessions before touching a write path. It came back
+    100% correct, which immediately told me the locator was never the bug. My first attempt spent
+    three rewrites on the locator because I had no way to test it in isolation.
+  * **Prototyped in scratch, not in the module.** The repo stayed green the whole time.
+
+THE TWO REAL BUGS (both in the SPLICE, both invisible without the oracle):
+  1. **Only the top-level ancestor was resized.** Markers nest `0x271A -> 0x2030 -> 0x2077`, and
+     the intermediate 0x2030 needs the growth too. Leaving it 204 bytes short made its child walk
+     stop early and the LAST marker of each group vanish from the block stream. (Same shape as the
+     0x2718-wraps-a-nested-0x2028 note in the tempo work -- an intermediate container's size.)
+  2. **Sizes were written at ORIGINAL offsets into an already-mutated buffer.** Row counts came
+     out 211,210,209,...,203 -- a cascading drift that reads exactly like a locator bug and is
+     not one. Fix: process markers right-to-left and write each marker's size WHILE its offset is
+     still valid; containers start below every insertion so theirs never move.
+
+VALIDATED: locator 3,038/3,038 markers; sync 94/94 sessions (markers preserved, +1 row per
+marker, exact byte growth, index resolves, 0 new validator errors); add-then-drop round-trips
+BYTE-IDENTICAL at two insertion indices; relation holds after duplicate_track 79/79 and after
+remove_track 80/80 (was 0/79); edit audit unchanged (dup 71 clean, rm 105 clean / 0 refusals).
+
+SAFETY PROPERTY THAT MATTERS MOST: on MARKERLESS sessions -- every shape Pro Tools has confirmed
+-- the new pass is a STRICT NO-OP, verified byte-identical on 66 duplicated sessions. So this
+cannot regress anything already confirmed. It is still PT-UNCONFIRMED on marker-bearing
+sessions, which is now the fourth thing worth putting in front of Pro Tools.
+
+The regression test uses a fixture with a bare 0x5A in the header AND a trailer after the last
+row, and is verified to BITE: both earlier locators return 0 rows on it, the shipped one 3.

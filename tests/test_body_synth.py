@@ -3246,6 +3246,42 @@ class NameTablePreambleTests(unittest.TestCase):
                           "NUL is not a name byte even permissively -- padding would parse")
         self.assertIsNone(BS._name_entry_head(buf, 0, len(buf), False))
 
+    def test_the_marker_row_locator_survives_a_header_byte_and_a_trailer(self):
+        """The `0x2506` row run has a variable-length header before it and a trailer after it.
+
+        Every `0x2077` marker holds one 17-byte `0x2506` row per PLAYLIST. The rows are neither
+        the first nor the last bytes of the block, and BOTH ends broke a locator:
+
+          * scanning forward and resynchronising on the next `0x5A` desynchronises when that byte
+            occurs inside the marker's name/header -- it found 0 rows for 6 of 388 markers that
+            each hold 140, and the caller then silently skipped those markers;
+          * walking backward from the block end lands in the trailer and finds 0 rows in EVERY
+            marker.
+
+        Both failures are SILENT -- a short row list reads as "this marker has no rows" and the
+        edit quietly does nothing. So the fixture puts a bare `0x5A` in the header (the exact byte
+        that fooled the forward scan) and a trailer after the last row, and pins the count.
+
+        Verified to BITE: with the forward-resync locator the header `0x5A` makes this return 2
+        rows instead of 3; with the backward locator it returns 0."""
+        row = bytes.fromhex("5a03000a00000006 25ffffffff00000000".replace(" ", ""))
+        self.assertEqual(len(row), 17)
+        # header carries a raw 0x5A (a name byte), then 3 rows, then a trailer
+        header = b"\x00\x01\x02\x5a\x41\x42\x43\x00"
+        trailer = b"\xff\xff\xff\xff\x00\x00\x00\x00"
+        payload = header + row * 3 + trailer
+        blk = b"\x5a\x0b\x00" + (len(payload) + 2).to_bytes(4, "little") + b"\x77\x20" + payload
+        z, e = 0, len(blk)
+        got = BS._marker_scaffold_rows(blk, z, e)
+        self.assertEqual(len(got), 3, "must find every row despite a 0x5A in the header")
+        for (a, b) in got:
+            self.assertEqual(blk[a:b], row, "each located span must BE a row")
+        self.assertEqual(got[0][0], 9 + len(header), "first row starts right after the header")
+        self.assertEqual(got[-1][1], len(blk) - len(trailer), "last row ends before the trailer")
+        # a marker with no rows at all is not mistaken for one that has them
+        empty = b"\x5a\x0b\x00" + (len(header) + 2).to_bytes(4, "little") + b"\x77\x20" + header
+        self.assertEqual(BS._marker_scaffold_rows(empty, 0, len(empty)), [])
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 
