@@ -4152,3 +4152,31 @@ corrected me both times: I called the scan parser's short list an "undercount" b
 (it WAS one -- all 119 blocks are direct children of 0x2624), then assumed my size-driven list
 was complete when it was still missing four track kinds. Each step needed its own measurement;
 neither was deducible from the previous one.
+
+## Sample-locked markers can now be WRITTEN (the last named non-PT item)
+`set_markers` emitted only the LOW 5 BYTES of the position, so the u64's TOP byte -- the one
+`markers()` decodes the timebase from (§10: 0x40 tick-locked, 0x00 sample-locked) -- came from
+whatever the template happened to be. Every marker written was therefore forced to the
+template's timebase, and a sample-locked marker could not be expressed at all. That is why the
+writer had to refuse 25 of 88 corpus sessions.
+
+FIX: `_build_marker_record` takes an ENCODED u64 position and writes all 8 bytes at both
+name_end and name_end+8; `set_markers` builds it from whichever field the caller supplied
+(`tick` -> `0x4000000000000000 + ZERO_TICKS + tick`, `sample` -> the plain count).
+
+    all tick-locked sessions      63/63 round-trip EXACT (names, ticks and samples)
+    sample-locked present         25/25 round-trip EXACT   (was: refused outright)
+
+Also fixed `markers()`' own name decode, which was still `latin1` -- the same class as the five
+readers corrected earlier. It had not surfaced because no marker in the sampled sessions has a
+non-ASCII name, which is luck rather than safety.
+
+232 tests green.
+
+THE NAMED NON-PT LIST IS NOW EMPTY:
+  * 0x2624 filter extension          DONE (commit 533210f, 139/139 identity reorders)
+  * length-mismatch shape            DONE (resolved by the same change, 54 -> 0)
+  * writing sample-locked markers    DONE (this commit)
+What remains genuinely needs Pro Tools: the 26 unsettled typed spec sections (overwhelmingly
+"what does this UI flag DO"), and the three staged experiments -- of which the regenerated
+`CURRENT 2026-07-27 - DUPLICATED 01 130 G Full Stereo.ptx` now covers two at once.

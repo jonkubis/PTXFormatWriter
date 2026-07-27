@@ -2418,19 +2418,25 @@ def replace_meter_map(data: bytes, events: "list[tuple[int, int, int]]") -> byte
 _MARKER_CT = 0x2077  # a marker record block inside the 0x2030 marker list
 
 
-def _build_marker_record(template: bytes, ordinal: int, name: str, tick: int, guid16: bytes) -> bytes:
+def _build_marker_record(template: bytes, ordinal: int, name: str, position: int, guid16: bytes) -> bytes:
     """Build one 0x2077 marker record from a template: ordinal @+9, name (length-prefixed:
-    len @+15, name @+19), position (ZERO_TICKS + tick, 5-byte LE at name_end and
-    name_end+8), and a unique GUID (16B at name_end+166). Everything else is kept from the
+    len @+15, name @+19), `position` as a u64 at name_end AND name_end+8 (the encoded value --
+    tick-locked `0x4000000000000000 + ZERO_TICKS + tick`, or a plain sample count), and a unique
+    GUID (16B at name_end+166). Everything else is kept from the
     template; the record size = base + namelen."""
     import struct
     t = bytearray(template)
     tnl = struct.unpack_from("<I", t, 15)[0]
     tend = 19 + tnl
     t[9] = ordinal & 0xFF
-    pos = (_ZERO_TICKS + int(tick)).to_bytes(5, "little")
-    t[tend:tend + 5] = pos
-    t[tend + 8:tend + 13] = pos
+    # The FULL u64, not the low 5 bytes. `markers()` decodes this field by its TOP byte -- 0x40
+    # tick-locked, 0x00 sample-locked (§10) -- and writing only 5 bytes left that byte coming
+    # from the template, so every marker written was forced to the template's timebase. A
+    # sample-locked marker could not be expressed at all, which is why `set_markers` had to
+    # refuse 25 of 88 corpus sessions. Callers pass the encoded position; `set_markers` builds it.
+    pos = int(position).to_bytes(8, "little")
+    t[tend:tend + 8] = pos
+    t[tend + 8:tend + 16] = pos
     t[tend + 166:tend + 182] = guid16
     nb = name.encode()
     out = bytearray(t[:15]) + len(nb).to_bytes(4, "little") + nb + t[19 + tnl:]
@@ -2440,7 +2446,7 @@ def _build_marker_record(template: bytes, ordinal: int, name: str, tick: int, gu
 
 def _resize_marker_block(block: bytes, markers) -> bytes:
     """Rebuild a 0x2030 marker list: count (u32 @ content[0]) + one 0x2077 record per
-    (name, tick) in `markers`, then any trailer (preserved). Records are built from the
+    (name, ENCODED position) in `markers`, then any trailer (preserved). Records are built from the
     block's first 0x2077 template; each gets ordinal i+1 and a deterministic unique GUID."""
     import struct, hashlib
     i = 13  # 0x2030 header (9) + count (4)
@@ -2454,9 +2460,9 @@ def _resize_marker_block(block: bytes, markers) -> bytes:
     template = block[recs[0][0]:recs[0][0] + recs[0][1]]
     trailer = block[i:]
     records = bytearray()
-    for k, (name, tick) in enumerate(markers):
+    for k, (name, position) in enumerate(markers):
         guid = hashlib.sha256(f"ptformat-marker-{k}".encode()).digest()[:16]
-        records += _build_marker_record(template, k + 1, name, tick, guid)
+        records += _build_marker_record(template, k + 1, name, position, guid)
     content = bytearray(b"\x00\x00\x00\x00") + records + trailer
     struct.pack_into("<I", content, 0, len(markers))
     out = bytearray(block[:9]) + content
@@ -2482,18 +2488,20 @@ def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> byt
     # composition `set_markers(d, markers(d))` raised "too many values to unpack" on every one of
     # 88 corpus sessions that has a marker. A read layer whose output its own write layer cannot
     # consume is a gap in the API, not just an inconvenience.
-    markers = [(m["name"], m["tick"]) if isinstance(m, dict) else tuple(m)[:2] for m in markers]
-    # A marker is EITHER tick-locked or SAMPLE-locked (§10: top position byte 0x40 vs 0x00), and
-    # `markers()` reports a sample-locked one as tick=None with the value in "sample". This
-    # writer only emits the tick encoding, so such a marker cannot be round-tripped -- 25 of 88
-    # corpus sessions carry one. Say that, instead of failing deep inside int() with
-    # "int() argument must be a string...", which says nothing about markers at all.
-    _untimed = [n for n, t in markers if t is None]
-    if _untimed:
-        raise ValueError(
-            f"{len(_untimed)} marker(s) are SAMPLE-locked, not tick-locked (e.g. {_untimed[0]!r}) "
-            f"-- set_markers writes only the tick encoding, so these cannot be expressed; supply "
-            f"an explicit tick for each, or leave the session's existing marker list in place")
+    # A marker is EITHER tick-locked or SAMPLE-locked (§10: the u64 position's TOP byte, 0x40 vs
+    # 0x00), and `markers()` reports a sample-locked one as tick=None with the value in "sample".
+    # Encode whichever the caller gave, so both kinds round-trip; 25 of 88 corpus sessions carry
+    # at least one sample-locked marker and used to be refused outright.
+    def _encode(m):
+        if isinstance(m, dict):
+            if m.get("tick") is not None:
+                return m["name"], 0x4000000000000000 + _ZERO_TICKS + int(m["tick"])
+            if m.get("sample") is not None:
+                return m["name"], int(m["sample"])
+            raise ValueError(f"marker {m.get('name')!r} has neither a tick nor a sample position")
+        name, tick = tuple(m)[:2]
+        return name, 0x4000000000000000 + _ZERO_TICKS + int(tick)
+    markers = [_encode(m) for m in markers]
     if markers_ref is None:
         from . import _templates as _T
         template_2030 = _T.MARKER_BLOCK_TEMPLATE
@@ -4304,7 +4312,7 @@ def markers(data: bytes) -> "list[dict]":
         ne = z + 19 + nl
         if nl > 256 or ne + 8 > len(data):
             continue
-        name = data[z + 19 : ne].decode("latin1", "replace")
+        name = _decode_name(data[z + 19 : ne])
         pos = int.from_bytes(data[ne : ne + 8], "little")
         if (name, pos) in seen:
             continue
