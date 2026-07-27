@@ -5440,6 +5440,24 @@ def _name_entry_ordinal_slots(body, z: int, region_end: int) -> "list[int]":
     check answer for a different set than the one being rewritten. One walk now, so they cannot
     drift apart again.
     """
+    # NOT `_name_table_entry_start`, which is what `_inline_name_entries` uses. Making the two
+    # agree is the obvious fix -- this docstring even claims they already do -- and it was tried and
+    # REVERTED on measurement.
+    #
+    # The disagreement is real: `_inline_name_entries` resolves its start EMPIRICALLY (step forward
+    # in 2-byte units until an entry parses) because a third preamble form exists; this walk uses
+    # `_name_table_shift` alone and so returns ZERO slots on 69 of 612 sessions, which silently
+    # disables `_repair_next_kind_chain` and the ordinal renumber there.
+    #
+    # But sharing the start RE-ARMS `_renumber_name_entry_ordinals` on those sessions, and it then
+    # writes into Pro Tools' own bytes: `_rekey_offsynth_positional` went from a no-op on 480/480
+    # unedited sessions (commit 21f281f, four corpora) to changing 7 of 120 on one drive, 1257
+    # bytes. That invariant is the one this project spent a session establishing, and a wider reach
+    # for a repair pass does not buy it back.
+    #
+    # So the ordering is: understand why the ordinal renumber disagrees with Pro Tools on those
+    # sessions FIRST, then widen the walk. Fixing the walk alone converts a silent no-op into
+    # silent writes, which is strictly worse.
     q = z + 9 + 0x14 + _name_table_shift(body, z)
     slots: "list[int]" = []
     while True:
