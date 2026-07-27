@@ -239,6 +239,17 @@ session): it is FIDELITY, not a crash. The repair rewrites SURVIVING tracks -- e
 copy shifts -- which is the exact class of change reverted four times here, so the DEFAULT stays
 where Pro Tools has confirmed it. Flipping it after one PT run is a one-line change, not a build.
 
+STAGED FOR THAT RUN: `~/Desktop/PTX_VERIFY_ORDINAL_REPAIR/` -- an A/B pair of the SAME edit
+(`4 mono tracks` + duplicate of `Audio 4`) differing in exactly this field:
+
+    A repair OFF   0x2015 ordinals [1, 2, 3, 4, 4]   what ships today
+    B repair ON    0x2015 ordinals [1, 2, 3, 4, 5]   identical to PT's own `5 mono tracks.ptx`
+
+An A/B pair rather than one file, so a crash is attributable to the FIELD under test rather than to
+the edit in general. B fine -> flip the default. B misbehaves while A is fine -> opt-in was right
+and the ordinal is not free to renumber the way PT's own files suggest. Both outcomes are useful;
+the READ ME states both so the result is interpretable without this conversation.
+
     counts[i]  = ord[i+1] - ord[i]        (last: n_0x210B + 1 - ord[last])
     add:    insert counts[src] at the copy's index, rewrite the column as prefix sums from 1
     remove: delete that entry, rewrite               <- exact inverse by construction
