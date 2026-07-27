@@ -4462,3 +4462,28 @@ The batch was the largest yet (11 entries) because the clip/region/plugin area i
 inter-referenced: once the parentage of one member is measured the rest fall out, whereas the
 top-level stub slots each had to be profiled individually. Worth choosing DENSELY CONNECTED
 areas next rather than isolated types.
+
+## Queue, batch 10: three findings that directly affect traversal code
+    entries 234 -> 241, mention-only 89 -> 82
+
+  1. **The click/aux track record MIRRORS the audio one.** `0x261E ⊃ {0x261B, 0x200D}` is exactly
+     `0x261C ⊃ {0x261B, 0x200B}` -- same shape, differing only in the view-chain type. Any
+     per-track traversal should key on the PAIR, not on 0x261C alone.
+  2. **The crossfade region path is a SECOND route to 0x2628:** `0x262C ⊃ 0x262B ⊃ 0x2628`,
+     alongside `0x262A ⊃ 0x2629 ⊃ 0x2628`. Present in only 3 of 75 sessions, which is exactly why
+     a region enumerator keyed on 0x2629 alone passes most corpora before failing.
+  3. **The plugin cluster has THREE routes**, all under 0x2627:
+         0x2627 ⊃ 0x2616                (3,200)   the common path
+         0x2627 ⊃ 0x2617 ⊃ 0x2616       (483)     17 sessions
+         0x2627 ⊃ 0x2618 ⊃ 0x2615       (18)      2 sessions -- SKIPS the 0x2616 level
+     A traversal assuming `0x2627 -> 0x2616` directly misses 501 instances. **Key on the LEAF
+     (0x2613), not on the route to it.**
+
+Also: **0x1048 is a fifth empty-terminator** (span 13, one payload, parent always 0x1049), and
+**0x2551 carries a length-prefixed default name** (`(untitled…`).
+
+ALL THREE HEADLINE FINDINGS ARE OF THE SAME KIND: a structure reachable by more than one route,
+where the rare route is the one that breaks code. The corpus is the only way to find these --
+the common route works on every session you happen to test first. Worth deliberately looking for
+SECOND PARENTS of every type already documented; two turned up in two batches (0x2628 via 0x262B,
+0x2615 via 0x2618) without being sought.

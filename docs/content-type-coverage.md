@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**234 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**89 are counted as "documented" only because their hex string appears somewhere in
+**241 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**82 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -45,7 +45,6 @@ mentions. The mention-only list is the honest work queue:
 | `0x200a` | 31609 | 813 |
 | `0x2588` | 727 | 727 |
 | `0x2597` | 727 | 727 |
-| `0x2581` | 1108 | 714 |
 | `0x2587` | 583 | 583 |
 | `0x0f3d` | 481 | 481 |
 | `0x0f3e` | 481 | 481 |
@@ -58,9 +57,6 @@ mentions. The mention-only list is the honest work queue:
 | `0x4530` | 452 | 452 |
 | `0x2062` | 376 | 376 |
 | `0x2042` | 351 | 351 |
-| `0x1038` | 23633 | 330 |
-| `0x261e` | 5483 | 302 |
-| `0x1048` | 2565 | 285 |
 | `0x4809` | 1460 | 285 |
 | `0x4828` | 570 | 285 |
 | `0x4824` | 567 | 285 |
@@ -75,8 +71,12 @@ mentions. The mention-only list is the honest work queue:
 | `0x483d` | 282 | 282 |
 | `0x4841` | 282 | 282 |
 | `0x4501` | 282 | 282 |
+| `0x2701` | 282 | 282 |
+| `0x0f3c` | 242 | 240 |
+| `0x4403` | 214852 | 222 |
+| `0x262f` | 13863 | 197 |
 
-…and 49 more.
+…and 42 more.
 
 
 ## Described vs settled — two different numbers
@@ -84,7 +84,7 @@ mentions. The mention-only list is the honest work queue:
 **323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 175 typed sections in the spec, **43 still say the PURPOSE is unproven** —
+Of the 181 typed sections in the spec, **44 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,

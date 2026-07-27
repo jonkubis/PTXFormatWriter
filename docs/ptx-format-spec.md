@@ -2634,6 +2634,65 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x261E / 0x200D — the click/aux track record MIRRORS the audio one
+
+- **`0x261E`** — parent **ALWAYS `0x2624`** (978/978), and it holds **BOTH `0x261B` and `0x200D`**
+  (978 each). That is the exact shape of the audio record: `0x261C ⊃ {0x261B, 0x200B}`.
+- **So the two track kinds are structurally parallel**, differing only in which view-chain type
+  they carry (`0x200B` for audio, `0x200D` for click/aux). Any per-track traversal should key on
+  the pair, not on `0x261C` alone.
+- **Presence:** 23 of 75 sessions — click/aux tracks are common but not universal.
+- **Confidence:** HIGH (full instance counts).
+
+### 0x262C / 0x262B — the crossfade region path
+
+- **`0x262B`** — parent **ALWAYS `0x262C`** (57/57), child **ALWAYS `0x2628`** (57/57).
+- **This is the second parent of `0x2628`** noted in the region entry: a crossfade reaches its
+  region through `0x262C ⊃ 0x262B ⊃ 0x2628` rather than through `0x262A ⊃ 0x2629 ⊃ 0x2628`.
+- **Presence:** 3 of 75 sessions — rare, which is why a region enumerator keyed only on `0x2629`
+  passes most corpora before failing.
+- **Confidence:** HIGH on the chain; the crossfade fields themselves are covered in §5d.
+
+### 0x2617 / 0x2618 — two more plugin-cluster wrapper paths
+
+The plugin cluster reaches `0x2615`/`0x2616` by more than one route, all parented by `0x2627`:
+
+```
+0x2627 ⊃ 0x2616 (3,200)                 the common path
+0x2627 ⊃ 0x2617 (483) ⊃ 0x2616          17 sessions
+0x2627 ⊃ 0x2618 (18)  ⊃ 0x2615          2 sessions, span 433, ONE payload
+```
+
+- **`0x2617`** — child ALWAYS `0x2616`; **`0x2618`** — child ALWAYS `0x2615`, i.e. it skips the
+  `0x2616` level entirely.
+- **Consequence:** a plugin traversal that assumes `0x2627 → 0x2616` directly will miss 501
+  instances. Key on the leaf (`0x2613`), not on the route to it.
+- **Confidence:** HIGH on the routes; the rarity of `0x2618` (2 sessions) means its own layout
+  rests on few examples.
+
+### 0x258B / 0x2551 / 0x2581 — the 0x258B settings triple
+
+- **`0x258B`** — parents `0x2551` (56) and `0x2016` (53); holds **BOTH `0x2552` and `0x2553`**
+  (109 each), a fixed pair rather than a list. Only 4 distinct payloads across 75 sessions.
+- **`0x2551`** — parent **ALWAYS `0x2587`** (56/56). Payload carries a length-prefixed name — the
+  observed value is `(untitled…`, i.e. a default document/preset name.
+- **`0x2581`** — parents `0x258A` (109) and `0x2583` (2); an all-zero-prefixed leaf, 35 distinct.
+- **Confidence:** HIGH on framing/parentage/the fixed pair; purposes UNPROVEN.
+
+### 0x1048 — a fifth empty-terminator
+
+- Span **13 in all 225 instances**, parent **ALWAYS `0x1049`**, payload all-zero, **ONE distinct
+  form**. Joins `0x2037`/`0x2626`/`0x4301`/`0x4420` in the empty-terminator class.
+- **Confidence:** HIGH.
+
+### 0x1038 — the plugin instance leaf
+
+- Parent **ALWAYS `0x2613`** (3,701/3,701), `block_type` 2, spans 1,137…2,085, 296 distinct
+  payloads. This is the vendor plugin state described in §5d; the entry here fixes only its
+  position in the tree, which the `0x2613` note explains is reached at payload+2 rather than
+  payload+0.
+- **Confidence:** HIGH on parentage; contents are vendor data, deliberately out of scope.
+
 ### 0x1050 / 0x2628 / 0x2629 / 0x261C / 0x200B / 0x2104 — clip, region and view containment (measured)
 
 Each relation is the full instance count of the child, so these are settled:
