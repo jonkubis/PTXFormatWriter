@@ -4514,3 +4514,31 @@ the sweep found 58 more in one run, INCLUDING two extra parents of a type I had 
 documenting. **Any statement of the form "X always lives under Y" is only as good as the sample
 it was measured on** -- the spec now says so explicitly, and every containment claim in it either
 carries a full instance count or is qualified.
+
+## I applied the rare-routes finding to the CODE — and it predicted a bug that isn't one
+The sweep says "enumerate regions by content type, never by walking one parent", and
+`region_list` walks `lists[0]` -- the first `0x262A`. That is the exact shape the finding warns
+about, so I tested it: **`region_list` returns fewer records than there are `0x2628` blocks in
+41 of 120 sessions.**
+
+Before changing anything I classified the shortfall. In EVERY short session there is exactly ONE
+`0x262A`, and the missing records are exactly the `0x2628`s reached via `0x2633`, `0x262B`
+(crossfade) and `0x262D` -- 1 to 21 per session.
+
+**So `region_list` is correct and I nearly "fixed" it.** Its purpose is the region LIST, which is
+the index space `0x104F`'s `+11` field addresses; pulling crossfade-internal regions into it
+would shift every index and break `replace_clip_region`. The narrower scope is the point.
+
+WHAT WAS ACTUALLY MISSING was the SCOPE STATEMENT. The docstring said "every audio region in the
+session", which is not what it returns. It now says exactly what it covers, quotes the 41/120
+measurement, and points at `region_names()` for the all-routes enumeration (verified to see all
+`0x2628` in 120/120 sessions).
+
+THE LESSON IS ABOUT THE ORDER OF OPERATIONS: a general finding that predicts a defect is a
+HYPOTHESIS, not a verdict. Measuring the shortfall took one script and turned "fix this function"
+into "document its scope" -- and had I skipped it, I would have shifted the region index space
+underneath a PT-confirmed editor. Two functions with the same shape can differ entirely in
+whether the shape is a bug: `region_names` enumerates by type (right for "all regions"),
+`region_list` walks a parent (right for "the index space").
+
+232 tests green.

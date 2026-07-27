@@ -4642,8 +4642,17 @@ def duplicate_audio_file(data: bytes, file_index: int, new_filename: str) -> byt
 
 
 def region_list(data: bytes) -> "list[tuple[int, str]]":
-    """Every audio region in the session as `(zmark_of_0x2629, name)`, in file order -- the same
+    """Every region IN THE REGION LIST as `(zmark_of_0x2629, name)`, in file order -- the same
     order the `0x104F` placement `+11` region INDEX refers to.
+
+    SCOPE: this is the `0x262A` list, NOT every `0x2628` in the session. The region record is
+    reachable by four routes (§5c "rare second routes"): `0x2629` inside the list, plus `0x2633`,
+    `0x262B` (crossfade) and `0x262D`. Measured over 120 sessions, this function returns fewer
+    records than there are `0x2628` blocks in 41 of them, and the shortfall is EXACTLY the
+    non-list routes -- 1 to 21 records per session. That is correct for this function's purpose:
+    the placement index addresses the list, so including crossfade-internal regions would shift
+    every index and break `replace_clip_region`. Use `region_names()` when you want every region
+    record regardless of route; it enumerates by content type and sees all of them (120/120).
 
     HANDLES ARE PER-BODY. The zmarks (and the lane zmarks from `clip_lanes`) are byte offsets into
     THIS body, so any edit that splices earlier in the file invalidates them. Re-derive them from
