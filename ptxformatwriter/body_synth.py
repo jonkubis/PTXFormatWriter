@@ -4953,9 +4953,17 @@ def _container_actual_count(data: bytes, z: int, e: int, c: int, bl=None) -> int
 def _count_field_pos(data: bytes, z: int, e: int, c: int, bl) -> "int | None":
     """Absolute position of the count `u32` for an off-payload container (`0x2107` at
     payload+9; `0x258a` just before its first `0x2589` child), or None if this instance
-    carries no such children."""
+    carries no such children -- or if the field the convention names lies outside the block.
+
+    An EMPTY `0x2107` is only 10 bytes of payload, so `payload+9` is past its own end. Writing
+    there landed 4 zero bytes on the NEXT block's header (`block_type` + half of `size`), which
+    broke the top-level chain walk, so `final_index_ref` could no longer find the master index
+    and every later pass died on `NoneType.start`. Seen on a real 25-track session
+    (`BMG17 Apollo v13AS...`), where BOTH `duplicate_track` and `remove_track` crashed. A count
+    field that does not fit inside its own block does not exist: report None rather than write
+    outside the block."""
     if _COUNT_CONTAINER_OFFSET[c] == 0x210B:
-        return z + 18
+        return z + 18 if z + 22 <= e else None
     firsts = _direct_children_of_type(data, z, e, 0x2589, bl)
     return firsts[0] - 4 if firsts else None
 
@@ -4964,16 +4972,27 @@ def _fix_container_counts(data: bytes) -> bytes:
     """Rewrite every count-prefixed container's child-count `u32` to match its actual
     children -- both the payload+0 containers (`0x1015`/`0x1054`/`0x2624`) and the two
     off-payload ones (`0x2107` payload+9, `0x258a` before-first-`0x2589`). Size-neutral (no
-    reindex needed). Called at the end of a track add/remove. Idempotent."""
+    reindex needed). Called at the end of a track add/remove. Idempotent.
+
+    Every write is bounds-checked against the block it belongs to. A count field that would
+    extend past its own block's end is not that block's field -- writing it corrupts the NEXT
+    block's header and silently breaks the top-level chain (see `_count_field_pos`)."""
     bl = _size_driven_blocks(data)
     out = bytearray(data)
     for z, e, c in bl:
         if c in _COUNT_CONTAINER_OFFSET:
             pos = _count_field_pos(data, z, e, c, bl)
-            if pos is not None:
+            # The field must lie in the block's PAYLOAD: at or after z+9 (past the 7-byte frame
+            # and the content-type word) and ending at or before e. `0x258a` derives its position
+            # from its first `0x2589` child (`firsts[0] - 4`), so a container whose first child
+            # began at the payload start would aim the write into its own header; measured at
+            # +313 minimum across 202 real containers, so this costs nothing and bounds the
+            # arithmetic rather than trusting it.
+            if pos is not None and z + 9 <= pos and pos + 4 <= e:
                 out[pos : pos + 4] = _container_actual_count(data, z, e, c, bl).to_bytes(4, "little")
         elif c in _COUNT_CONTAINER_CHILD or c in _COUNT_CONTAINER_TOTAL:
-            out[z + 9 : z + 13] = _container_actual_count(data, z, e, c).to_bytes(4, "little")
+            if z + 13 <= e:
+                out[z + 9 : z + 13] = _container_actual_count(data, z, e, c).to_bytes(4, "little")
     return bytes(out)
 
 

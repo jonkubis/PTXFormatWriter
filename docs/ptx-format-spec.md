@@ -912,6 +912,18 @@ draws); `ft1`/`ft2` are the source mtime FILETIME, `filesize` the referenced WAV
    ALL per-track subtrees — `0x261c`/`0x261e`/`0x2621`/… — i.e. the total track count; the
    real `Hipsters bak.044→045` removal drops it 142→141). Any block-add/remove edit must
    rewrite the affected counts.
+
+   Two containers keep the count **off** payload+0: `0x2107` holds it at payload+9, and
+   `0x258a` immediately before its first `0x2589` child. Both offsets are conventions about
+   where the field sits *when it exists* — neither is a guarantee that it does. **An EMPTY
+   `0x2107` is only 10 bytes of payload, so payload+9 lands past the block's own end**, on the
+   next block's `block_type`/`size` header. Writing a count there silently breaks the
+   contiguous top-level chain, which is how the master index is located at all — every
+   subsequent pass then fails to find it. Bounds-check each count write against its own
+   block's end; a field that doesn't fit inside the block is not that block's field. Rare but
+   real: 0 of 267 `0x2107` containers across 480 sampled corpus sessions are empty, and the
+   one session that has it (`BMG17 Apollo v13AS for Apollo Delivery.ptx`, 25 tracks, no
+   playlists at all) crashed both `duplicate_track` and `remove_track`.
 7. **Keep the `0x2519` name table's INLINE entry list in sync.** The name table stores, before
    its `0x5A`-framed children, a list of **inline name entries** — each `u32 name_length | name
    bytes | 23-byte trailer`, with a `0x0000002A` (u32 = 42) marker at trailer offset +6 (the

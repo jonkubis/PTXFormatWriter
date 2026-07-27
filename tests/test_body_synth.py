@@ -3139,6 +3139,36 @@ class NameTablePreambleTests(unittest.TestCase):
     # needs a real GUID-less fixture, or an understanding of where `gmap` actually comes from --
     # neither of which is available here yet.
 
+    def test_an_empty_playlist_container_has_no_count_field_to_write(self):
+        """A count field that does not fit inside its own block must not be written.
+
+        The `0x2107` count lives at payload+9, which assumes the container is big enough to hold
+        it. An EMPTY `0x2107` is 10 bytes of payload, so payload+9 lands PAST the block's end --
+        on the next block's `block_type`/`size` header. `_fix_container_counts` wrote 4 zero bytes
+        there, which broke the contiguous top-level chain walk; `final_index_ref` then returned
+        None and every later pass died on `'NoneType' object has no attribute 'start'`. BOTH
+        `duplicate_track` and `remove_track` crashed that way on a real 25-track session
+        (`BMG17 Apollo v13AS for Apollo Delivery.ptx`) -- the one `AttributeError` in each column
+        of the 105-session edit audit.
+
+        The shape is rare (0 of 267 `0x2107` containers across 480 sampled corpus sessions carry
+        it) which is exactly why it needs a test rather than a corpus sweep to defend it.
+
+        `_count_field_pos`'s `0x210B` branch reads only `z` and `e`, so this pins the arithmetic
+        directly. Verified to BITE: with the bounds check removed it returns 118 for both cases
+        and the first assertion fails."""
+        C2107 = 0x2107
+        self.assertEqual(BS._COUNT_CONTAINER_OFFSET[C2107], 0x210B)
+        # empty container: z=100, declared size 10 -> e = 100 + 7 + 10 = 117, field would be 118..122
+        self.assertIsNone(
+            BS._count_field_pos(b"", 100, 117, C2107, []),
+            "an empty 0x2107 has no count field -- writing payload+9 corrupts the NEXT block's header")
+        # a container with room keeps the documented offset
+        self.assertEqual(BS._count_field_pos(b"", 100, 200, C2107, []), 118)
+        # the exact boundary: the field must fit entirely inside the block
+        self.assertIsNone(BS._count_field_pos(b"", 100, 121, C2107, []))
+        self.assertEqual(BS._count_field_pos(b"", 100, 122, C2107, []), 118)
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 

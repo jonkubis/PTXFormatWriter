@@ -3350,3 +3350,45 @@ The RISK itself is unchanged and documented in the spec: real sessions get 2,447
 Three attempts, three reverts -- each with a different cause (wrong behaviour, wrong inference,
 wrong edit site). Recorded so the fourth starts by removing the duplication rather than working
 around it.
+
+## The one `AttributeError` in the edit audit was a real out-of-bounds WRITE (fixed)
+The 105-session edit-path audit came back with no INTRODUCED validator errors, but one session
+crashed BOTH `duplicate_track` and `remove_track` with
+`'NoneType' object has no attribute 'start'` — not a considered refusal like the `ValueError`s,
+so worth chasing. It was a genuine memory-corruption-class defect.
+
+DIAGNOSIS (the useful part — how it was found, since the symptom was six passes downstream):
+  1. The index was locatable in the SOURCE and unlocatable after the edit, so the edit destroyed
+     it — not a bad input.
+  2. Wrapped every module-level function in `body_synth`/`final_index` with a predicate
+     ("did a buffer that HAD a locatable index come out without one?") and let it name the first
+     offender. That pointed straight at `_fix_container_counts` with no bisection by hand.
+  3. Diffed the buffer: `5a 01 00 06 00 00 00` → `5a 00 00 00 00 00 00`. The payload after was
+     byte-identical, so this was an in-place 4-byte write of zero onto a block HEADER, not a
+     mis-sized splice.
+  4. Logged every write the pass makes and filtered to that address: one write, from the
+     `0x2107` at `z=190812, e=190829`, to `190830..190834` — outside its own block.
+
+ROOT CAUSE: `_count_field_pos` returns `z + 18` (payload+9) for `0x2107` unconditionally. An EMPTY
+`0x2107` has 10 bytes of payload and ends at `z+17`, so the count field it names does not exist.
+The write landed on the NEXT block's `block_type` + `size`, which broke the contiguous top-level
+chain walk that `final_index_ref` uses — so the master index became unfindable and every later
+pass died on `.start`.
+
+FIX: bounds-check both write sites in `_fix_container_counts` against the owning block's end, and
+have `_count_field_pos` return None when the field would not fit. Same class as the `0x251A`
+bounds-check in `21f281f` — that is now twice, so treat "compute an offset from a convention, then
+write it" as requiring a bounds check by default in this file.
+
+MEASURED:
+  * The failing session now edits clean both ways, 0 new validator errors, index locatable.
+  * Re-run of the audit: `AttributeError` gone from both columns. dup 57→61 clean, ValueError
+    44→41 — so the corruption was ALSO surfacing as three silent ValueError refusals, not just
+    the one crash. rm 93→94 clean. Still zero INTRODUCED rows.
+  * `_fix_container_counts` remains a no-op on 480 untouched sessions (0 bytes).
+  * The shape is rare: 0 of 267 `0x2107` containers in 480 sampled sessions are empty. The one
+    session that has it has 25 tracks and NO playlists at all.
+
+The regression test pins `_count_field_pos`'s arithmetic directly (its `0x210B` branch reads only
+`z` and `e`), so it needs no external drive. VERIFIED TO BITE: with the guard removed it returns
+118 for the empty case and the test fails.
