@@ -2570,9 +2570,9 @@ form and reads garbage on another.
 
 ### 0x2016 / 0x2017 / 0x2019 / 0x201A — the `0x2011`-bearing top-level view-state run
 
-> **THE `0x2011`-CHILD FAMILY IS WIDER THAN THESE FOUR.** `0x206C`, `0x2505` and `0x259C` follow
+> **THE `0x2011`-CHILD FAMILY IS WIDER THAN THESE FOUR.** `0x206C`, `0x2505`, `0x2507` and `0x259C` follow
 > the same rule — top-level, exactly one `0x2011` child, one per session in 180/180 — but sit
-> elsewhere in the top-level sequence. **Seven types share the schema**, so "holds a single
+> elsewhere in the top-level sequence. **Eight types share the schema**, so "holds a single
 > `0x2011`" is a structural CLASS, not a property of this run. Treat `0x2011` as the shared
 > payload record and its parent's content-type as the discriminator.
 
@@ -2632,6 +2632,58 @@ form and reads garbage on another.
 - **Payload:** `0x202B` opens `01 00 00 00` followed by an INNER `0x5A`-framed record
   (`5a 05 00 6f 00 00 00 2a …`) that the size-driven walk does not surface as a child, so its
   content is length-prefixed inside the leaf rather than framed as a block.
+- **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
+
+### 0x242E / 0x2430 — the twin 22-byte wrappers around the two region catalogs
+
+- **Kind:** TOP-LEVEL, adjacent, one of each per session, 180/180. `0x2428 → 0x242E → 0x2430 → 0x2424`.
+- **Size:** **exactly 22 bytes, both, in every session**, `block_type` 1, and each has exactly
+  **ONE distinct payload across all 180** — they are constants.
+- **Contents:** each wraps a single empty catalog stub:
+  - `0x242E` → `0x1058` (the MIDI region catalog) — `5a 01 00 06 00 00 00 58 10 00 00 00`
+  - `0x2430` → `0x1055` (the audio region catalog) — `5a 01 00 06 00 00 00 55 10 00 00 00`
+- **Reading:** this CONFIRMS and locates the "always-empty `0x2430`-wrapped stub" noted in the
+  `0x1055`/`0x1057` entries: the two wrappers are a matched pair, one per catalog kind, and the
+  session-level POPULATED catalogs are the separate top-level `0x1055`/`0x1058` blocks. The pair
+  is fixture, not data — copy verbatim.
+- **Confidence:** HIGH throughout (size, adjacency, child, byte-constancy all 180/180).
+
+### 0x230A — fixed 1,154-byte constant table
+
+- **Kind:** TOP-LEVEL LEAF, one per session, 180/180, always `0x2302 → 0x230A → 0x2305`.
+- **Size:** **1,154 bytes in every session, with exactly ONE distinct payload across all 180.**
+  A factory constant, not session content.
+- **Payload:** opens `30 00` then an inner `0x5A`-framed `0x230B` record — length-prefixed
+  inside the leaf rather than framed as a child, so the block walk does not surface it.
+- **Reading:** a canned table to copy verbatim when synthesizing. Its CONTENT is undecoded, and
+  a value that is byte-identical everywhere gives no evidence about what it means.
+- **Confidence:** HIGH on framing/position/constancy; content undecoded.
+
+### 0x2424 / 0x2426 / 0x2634 / 0x262C — four more universal top-level stub slots
+
+Each is TOP-LEVEL, LEAF, one per session in 180/180, and follows the slot pattern described
+under `0x2050`/`0x2073`/`0x202E`: a small stub with a zero payload in the large majority of
+sessions, occasionally much larger.
+
+| type | position | usual span | populated cases |
+|---|---|---|---|
+| `0x2424` | `0x2430 → · → 0x2426` | 13 (174/180) | 42, 208 |
+| `0x2426` | `0x2424 → · → 0x2507` | 13 (174/180) | 248, 868 |
+| `0x2634` | `0x2000 → · → 0x1058`/`0x2004` | 13 (149/180) | 109, 116 |
+| `0x262C` | `0x2637 → · → 0x2632` | 17 (174/180) | 4,315 and **74,966** |
+
+- **Reading:** with `0x2000`, `0x2027`, `0x202D`, `0x202E` and `0x2073`, that is **nine universal
+  top-level slots** whose payload is usually empty. The generalisation is the finding: Pro Tools
+  emits the slot unconditionally and fills it only when the corresponding feature is used, so an
+  empty stub means "feature absent", not "block missing".
+- **Confidence:** HIGH on framing/position/universality and the empty-vs-populated split;
+  purposes UNPROVEN.
+
+### 0x2510 — top-level leaf, near-constant
+
+- **Kind:** TOP-LEVEL LEAF, one per session, 180/180. `0x206D → 0x2510 → 0x1049`/`0x2083`.
+- **Size:** 549/556/570, only **4 distinct payload openings** across 180 sessions — configuration.
+- **Payload:** opens `07 00 00 00 19 80 01 00 …`.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
 ### 0x2071 / 0x2072 — an identical adjacent PAIR (one `0x2070` child each)

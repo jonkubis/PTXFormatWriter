@@ -4273,3 +4273,29 @@ TWO FINDINGS THAT ARE WORTH MORE THAN THE SIX ENTRIES:
 
 Both findings came from PROFILING A BATCH rather than one type at a time -- the pattern is only
 visible across types, and would have been missed by documenting each in isolation.
+
+## Queue, batch 3: eight entries; the slot pattern now has NINE members
+    entries 184 -> 192, mention-only 138 -> 130
+
+  * **0x242E / 0x2430 are TWIN 22-byte wrappers**, adjacent, byte-constant across all 180
+    sessions, each wrapping one empty catalog stub: 0x242E -> 0x1058 (MIDI regions),
+    0x2430 -> 0x1055 (audio regions). This CONFIRMS and locates the "always-empty 0x2430-wrapped
+    stub" that the 0x1055/0x1057 entries had noted in passing -- the two wrappers are a matched
+    pair, one per catalog kind, and the POPULATED catalogs are the separate top-level blocks.
+    Fixture, not data: copy verbatim.
+  * **0x230A** -- 1,154 bytes in every session with exactly ONE distinct payload across 180. A
+    factory constant table, carrying an inner length-prefixed 0x230B the block walk does not
+    surface. Content undecoded, and byte-constancy means the corpus can never decode it.
+  * **0x2424 / 0x2426 / 0x2634 / 0x262C** -- four more universal top-level stub slots. With
+    0x2000, 0x2027, 0x202D, 0x202E and 0x2073 that makes **NINE**. 0x262C is the extreme: span 17
+    in 174 sessions and **74,966 bytes in 2**.
+  * **0x2510** -- top-level leaf, 4 distinct payloads over 180 sessions (configuration).
+  * **0x2507** joins the 0x2011-child class, now EIGHT types.
+
+THE SLOT GENERALISATION IS NOW WORTH STATING AS A FORMAT RULE: Pro Tools emits each top-level
+slot unconditionally and fills it only when the corresponding feature is used. **An empty stub
+means "feature absent", not "block missing"** -- which is directly actionable for synthesis
+(emit the stub) and for editing (do not treat an empty slot as something to remove).
+
+Batch profiling keeps paying: this batch's two best results -- the wrapper PAIR and the ninth
+slot member -- are both cross-type facts invisible when documenting one type at a time.
