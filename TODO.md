@@ -3924,3 +3924,27 @@ STILL OPEN (characterised, not fixed):
   * 2 tempo sessions still differ; not yet characterised.
   * `+21`'s MEANING is unknown. Preserving it does not require knowing it, but decoding it needs
     PT (one session saved twice with a tempo event changed from constant to ramp).
+
+## Meter identity is byte-exact too: the trailing entry has NO single formula
+The spec recorded the 16-byte trailing entry's leading i32 as the START-RELATIVE bar
+(`bar - start_bar + 1`). Measured per event across the corpus:
+
+    matches BOTH forms (start_bar == 1, where they coincide) : 419
+    only relative : 48        only ABSOLUTE : 22        NEITHER : 20
+
+Relative fits 467/509, absolute 441. Neither is the rule, and they agree on 82% of events --
+which is exactly why one of them looked universal. So a writer must not impose either.
+
+FIX: rewrite a trailing entry ONLY when its event's bar actually changed (captured before the
+record is overwritten); otherwise leave it alone. Identity replace 46/56 -> 55/56 byte-exact,
+readback unchanged, a real meter replace still works. 232 tests green.
+
+THE PATTERN ACROSS TODAY'S THREE CONDUCTOR FIXES IS ONE RULE: **a writer should preserve every
+byte it is not deliberately setting.** Record cloning per index (tempo + meter), leaving `+21`
+alone, leaving an unchanged trailing entry alone -- three instances of the same discipline, and
+each one was a case where the code CONFIDENTLY DERIVED a value that real sessions disagreed with.
+Deriving is only safe where the derivation has been proven exhaustive; preserving is always safe.
+
+WRITE-LAYER IDENTITY STATUS: move_clip, rename_track, set_session_name, sync_marker_playlist_rows
+all byte-exact everywhere tested; replace_tempo_map 158/160; replace_meter_map 55/56. The three
+stragglers are uncharacterised and are the next thread here.

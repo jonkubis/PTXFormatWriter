@@ -2257,14 +2257,27 @@ def _rewrite_meter_records(block: bytes, events, start_bar: int) -> bytes:
     rec0 = m + len(b") Meter\x02") + 1 + 4 + 4
     n = len(events)
     bars = _meter_bar_numbers(events, start_bar)
+    # Capture each record's CURRENT bar before overwriting it, so the trailing entry below can
+    # tell "this event did not move" from "this event changed".
+    prev_bars = [int.from_bytes(out[rec0 + i * 36 + 8 : rec0 + i * 36 + 12], "little", signed=True)
+                 for i in range(n)]
     for i, (num, den, tick) in enumerate(events):
         r = rec0 + i * 36
         out[r : r + 5] = (_ZERO_TICKS + int(tick)).to_bytes(5, "little")
         out[r + 8 : r + 12] = int(bars[i]).to_bytes(4, "little", signed=True)
         out[r + 12 : r + 16] = int(num).to_bytes(4, "little")
         out[r + 16 : r + 20] = int(den).to_bytes(4, "little")
+    # The 16-byte trailing entry's leading i32 is NOT reliably `bar - start_bar + 1`. Measured
+    # per event over the corpus: that relative form fits 467 of 509, the ABSOLUTE bar fits 441,
+    # and 20 events match NEITHER -- so no formula can be imposed without rewriting real data.
+    # (Both forms coincide whenever start_bar == 1, which is why one looked universal.) Writing
+    # the relative form unconditionally rewrote a renumbered session's entry from -2 to 1 on 10
+    # corpus sessions, and `meter_map` cannot see it, so the map round-tripped while the bytes
+    # did not. Only rewrite an entry whose event actually MOVED; leave a still-correct one alone.
     trail0 = rec0 + n * 36
     for i in range(n):
+        if i < len(prev_bars) and prev_bars[i] == bars[i]:
+            continue
         out[trail0 + i * 16 : trail0 + i * 16 + 4] = (
             bars[i] - int(start_bar) + 1).to_bytes(4, "little", signed=True)
     return bytes(out)

@@ -705,6 +705,24 @@ declared block end (a real third-party session's size field is consistent).
 
 ### Meter (`0x2029` map / `0x2719` lane) — **(PT-confirmed, full map)**
 
+> **THE 16-BYTE TRAILING ENTRY HAS NO SINGLE FORMULA (measured 2026-07-27, per event).** This
+> spec recorded the entry's leading `i32` as the START-RELATIVE bar, `bar - start_bar + 1`.
+> Across the corpus, per meter event:
+>
+> | reading | events |
+> |---|---|
+> | matches BOTH forms (these are the `start_bar == 1` sessions, where they coincide) | 419 |
+> | only the relative form | 48 |
+> | only the ABSOLUTE bar | 22 |
+> | **neither** | 20 |
+>
+> So the relative form fits 467 of 509 and the absolute 441 — neither is the rule, and the two
+> agree on 82% of events, which is why one looked universal. A writer must therefore NOT impose
+> either: writing the relative form unconditionally rewrote a renumbered session's entry from
+> `-2` to `1` on 10 corpus sessions, invisibly to `meter_map`, so the map round-tripped while the
+> bytes did not. **Rewrite an entry only when its event's bar actually changed**; leave a
+> still-correct one alone. That makes an identity replace byte-exact on 55 of 56 sessions.
+
 The `0x2029` payload opens with the tag `"Meter"` (payload +0), a `u16` version, a `u32`
 `payload_len` (+7), and the event `count` as a `u32` at **payload +11**. The per-event
 records are **fixed 36 bytes** and begin at **`zmark+24`** (payload +15). `payload_len`
