@@ -3832,3 +3832,33 @@ were already fine, which is how I know the remaining latin1 decodes are not name
 The remaining `.decode("latin1")` calls in this module are WAV/RIFF chunk text, plugin-id
 FourCCs and index-record tags -- byte-oriented data where latin1 is the correct choice, not
 user-facing names.
+
+## core.py had the same bug -- and my first fix REGRESSED the parser
+`core.PTFFormat.parsestring` decoded latin1, so `regions()` and `tracks()` returned mojibake:
+2,560 and 1,930 non-ASCII names, EVERY ONE not present in the file it came from.
+
+**MY FIRST FIX BROKE THE PARSER AND I ALMOST SHIPPED IT.** Changing the decode alone made some
+sessions return ZERO regions and ZERO tracks (`M15 CHASE SONG_MIX.bak.014`: 539/462 -> 0/0). The
+cause is the lesson from two commits ago, firing again immediately: FIVE parse loops advance
+their cursor by `len(decoded_string)`, so making the decoder correct armed five latent
+byte-vs-character bugs at once.
+
+    pos += len(wavname) + 4        j += len(regionname) + 4       j += len(trackname) + 5
+    j += 4 + len(midiregionname)   j += 4 + len(regionname)
+
+Fixed by advancing with the u32 LENGTH PREFIX (`self._read4(pos)`), which is exact regardless of
+encoding and cannot drift again. Same for the version `skip` at line 463, which was also
+computing a PARSE OFFSET from a decoded string.
+
+**WHAT CAUGHT IT: a before/after comparison on real sessions, not the test suite.** All 232 tests
+passed with the broken version -- the control files are pure ASCII, so nothing exercised it.
+Running the OLD and NEW code over the same 60 sessions and diffing (region count, track count)
+is what exposed it, and it is the check to run for any change to a parser:
+
+    region/track counts differing from before: 0   (must be 0)
+    names not present in their file: before 1068 -> after 0
+
+RULE, now demonstrated three times in one session: after fixing a reader, (a) grep every
+consumer of what it returns for length arithmetic, and (b) diff old vs new behaviour over the
+corpus. A more capable parser pushes new data into old code, and a green suite proves nothing
+when the fixtures do not contain the data that got more capable.
