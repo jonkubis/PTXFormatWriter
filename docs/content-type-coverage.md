@@ -26,8 +26,8 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**220 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**103 are counted as "documented" only because their hex string appears somewhere in
+**223 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**100 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -43,15 +43,12 @@ mentions. The mention-only list is the honest work queue:
 | `0x2507` | 832 | 832 |
 | `0x259c` | 832 | 832 |
 | `0x200a` | 31609 | 813 |
-| `0x2627` | 30331 | 773 |
-| `0x1014` | 27411 | 770 |
 | `0x200b` | 23828 | 770 |
 | `0x261c` | 23828 | 770 |
 | `0x2588` | 727 | 727 |
 | `0x2597` | 727 | 727 |
 | `0x2553` | 1645 | 714 |
 | `0x2581` | 1108 | 714 |
-| `0x258a` | 1063 | 714 |
 | `0x258b` | 1063 | 714 |
 | `0x2628` | 338117 | 632 |
 | `0x2629` | 335905 | 597 |
@@ -75,8 +72,11 @@ mentions. The mention-only list is the honest work queue:
 | `0x2616` | 23546 | 330 |
 | `0x261e` | 5483 | 302 |
 | `0x1048` | 2565 | 285 |
+| `0x4809` | 1460 | 285 |
+| `0x4828` | 570 | 285 |
+| `0x4824` | 567 | 285 |
 
-…and 63 more.
+…and 60 more.
 
 
 ## Described vs settled — two different numbers
@@ -84,7 +84,7 @@ mentions. The mention-only list is the honest work queue:
 **323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 171 typed sections in the spec, **42 still say the PURPOSE is unproven** —
+Of the 172 typed sections in the spec, **42 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,

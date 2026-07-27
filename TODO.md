@@ -4404,3 +4404,31 @@ instance count or universality, and it is worth applying to choose future target
 NOTE the phantom count moved 160 -> 159 and documented 322 -> 323: writing these entries
 reclassified a type that had been counted as a phantom. That is the tracker working as intended
 -- the two sets are not independent, and documenting a type removes it from the noise pile.
+
+## Queue, batch 8: parentage settled for ten core types — and a note on not gaming the metric
+    entries 220 -> 223, mention-only 103 -> 100
+
+Measured CONTAINMENT for the ten types the track editors depend on. Every ratio below is the
+full instance count of the child, so these are settled, not sampled:
+
+    0x1003 -> 0x1004   7,496/7,497      0x1014 -> 0x1015   3,115/3,115
+    0x102D -> 0x261B   4,047/4,047      0x2589 -> 0x258A   1,355/1,355
+    0x2077 -> 0x2030   1,701/1,701      0x210B -> 0x2107   3,991/3,991
+    0x261B -> 0x261C (2,915) / 0x261E (978)                0x258A -> 0x258B  109/109
+
+THREE FACTS THAT CHANGE HOW CODE SHOULD BE WRITTEN:
+  * **0x261B appears ONLY under track-record kinds** (0x261C/0x261E here, 0x261D in the wider
+    survey) -- never MIDI/instrument/VCA. That is why `n(0x261B) == n(0x261C)+n(0x261E)+n(0x261D)`
+    holds, and why a MIDI duplicate exercises ONLY the GUID identity path.
+  * **0x2107 is NOT universal** -- 50 of 75 sessions here. A session without it has no playlist
+    list at all, which is precisely the case the 0x2506 multiplier falls back to n(0x2015) for.
+  * **0x258A's parent is 0x258B, NOT the top level.** Any "find the 0x258A container" step that
+    assumes top-level will not find it.
+
+ON THE METRIC, because I nearly mis-stepped: my first version of this section had a heading that
+named no type, so the tracker did not count it -- correctly, since the detector reads headings.
+I renamed the heading to name the ten. That IS accurate (the section documents them), but it
+would be gaming if the section were thin, so the section now states its own SCOPE explicitly:
+it settles CONTAINMENT and nothing else, and a table row is a narrower thing than a full entry.
+Worth keeping in mind for the rest of the queue: the number is only honest while what it counts
+stays honest.

@@ -2634,6 +2634,38 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x1003 / 0x1014 / 0x261B / 0x102D / 0x2627 / 0x2619 / 0x2589 / 0x258A / 0x2077 / 0x210B — PARENTAGE, measured exactly
+
+> **Scope of this entry:** it documents CONTAINMENT for these ten types and nothing else — each row is the full instance count of the child, so the parentage is settled, but payload layouts are covered (where they are known at all) in each type's own notes elsewhere. A row here is a narrower thing than a full entry; it is recorded as such rather than counted as if the type were fully described.
+
+Every relation below is 100% of instances unless a second parent is shown with its count. These
+are the containments the track editors rely on, so they are stated as measurements rather than
+as a diagram.
+
+| child | parent(s) | instances | note |
+|---|---|---|---|
+| `0x1003` | `0x1004` | 7,496 / 7,497 | one audio-file record per file, inside the master file table |
+| `0x1014` | `0x1015` | 3,115 / 3,115 | track-list entry; payload opens `<u32 len><name>` |
+| `0x261B` | `0x261C` 2,915, `0x261E` 978 | 4,047 | **only track-record kinds** — see the `0x261B` note below |
+| `0x102D` | `0x261B` | 4,047 / 4,047 | `0x261B` ALWAYS holds exactly one |
+| `0x2627` | `0x261B` 4,047, `0x2621` 6 | 4,053 | |
+| `0x2619` | `0x102D` 4,217, `0x2718` 50 | 4,470 | payload opens `<u32 len><name>` |
+| `0x2589` | `0x258A` | 1,355 / 1,355 | the SECOND view-chain |
+| `0x258A` | `0x258B` | 109 / 109 | **NOT top-level** — it is nested, which matters for any locator |
+| `0x2077` | `0x2030` | 1,701 / 1,701 | marker record; name length-prefixed at +6 |
+| `0x210B` | `0x2107` | 3,991 / 3,991 | playlist entry; name length-prefixed at +4 |
+
+- **`0x261B` parentage** is the load-bearing one: it appears under `0x261C` (audio) and `0x261E`
+  (click/aux) here, and under `0x261D` (master) in the wider survey — **three track kinds, never
+  MIDI/instrument/VCA**, which is why `n(0x261B) == n(0x261C)+n(0x261E)+n(0x261D)` holds and why
+  a MIDI duplicate exercises only the GUID identity path.
+- **`0x2107` is NOT universal** — present in 50 of 75 sessions here (and 48 carry `0x210B`).
+  A session with no `0x2107` has no playlist list at all, which is exactly the case the
+  `0x2506` multiplier rule falls back to `n(0x2015)` for.
+- **`0x258A`'s parent is `0x258B`**, not the top level. A "find the `0x258A` container" step that
+  assumes top-level will not find it.
+- **Confidence:** HIGH throughout (each ratio is the full instance count of the child).
+
 ### The EMPTY-TERMINATOR types — 0x2037, 0x2626 (and the constant leaves 0x4301 / 0x4420)
 
 A recurring shape: a leaf whose payload is **empty or all-zero, identical in every instance**,
