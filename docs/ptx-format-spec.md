@@ -2634,6 +2634,44 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### RARE SECOND ROUTES — the parents that break traversal code
+
+Swept every type's parent distribution over **240 sessions** and kept each parent holding **<5%
+of a type's instances** (minimum 10 instances). **60 such routes exist.** They matter out of all
+proportion to their frequency: the common route works on every session anyone tests first, so a
+traversal keyed on it passes review and then fails on a real file.
+
+| child | rare parent(s) | instances | of total |
+|---|---|---|---|
+| `0x2628` | `0x2633` 896, `0x262B` 247, `0x262D` 17 | 1,160 | of 163,190 |
+| `0x2037` | `0x203D` 131, `0x203C` 29, `0x2039` 27, `0x203F` 17, `0x203E` 12 | 216 | of 103,117 |
+| `0x2619` | `0x2718`/`0x2719`/`0x271A`/`0x271B`/`0x271C`, 129 each | 645 | of 12,330 |
+| `0x260A` | `0x2611` | 233 | of 62,672 |
+| `0x4420` | `0x2519` | 128 | of 18,226 |
+| `0x2011` | `0x4834` 60, `0x4841` 60 | 120 | of 6,546 |
+| `0x2615` | `0x2618` | 55 | of 9,151 |
+| `0x260D` / `0x102D` / `0x2627` | `0x2621` | 26 / 23 / 23 | the MIDI track record |
+| `0x2580` | `0x2583` | 14 | of 11,472 |
+
+**Three consequences worth acting on:**
+
+1. **`0x2628` (the region record) is reachable four ways** — `0x2629` (the region list),
+   `0x2633`, `0x262B` (crossfade) and `0x262D`. Enumerate regions by CONTENT TYPE, never by
+   walking one parent.
+2. **`0x2037` (an empty terminator) is shared by the whole `0x203x` family** — `0x2038`, `0x203B`
+   and five more. It identifies nothing about its parent, which is the general property of the
+   empty-terminator class.
+3. **`0x2621` (the MIDI track record) carries `0x260D`, `0x102D` and `0x2627`** — the same
+   per-track furniture the audio record has. So MIDI tracks are not as structurally different as
+   the `0x261B`-only-under-three-kinds rule suggests: they lack `0x261B` specifically, not the
+   rest of the subtree.
+
+**Method note:** these were found by sweeping parent distributions, not by reading. Two had
+already turned up by accident in earlier batches (`0x262B`, `0x2618`) — the sweep found 58 more,
+including two additional parents of `0x2628` that the accidental discovery had missed. Any claim
+of the form "X always lives under Y" in this document should be read as "in the sessions
+measured", unless it states a full instance count.
+
 ### 0x261E / 0x200D — the click/aux track record MIRRORS the audio one
 
 - **`0x261E`** — parent **ALWAYS `0x2624`** (978/978), and it holds **BOTH `0x261B` and `0x200D`**
@@ -2712,8 +2750,8 @@ Each relation is the full instance count of the child, so these are settled:
 - **`0x261C ⊃ 0x261B` and `0x261C ⊃ 0x200B ⊃ 0x200A ⊃ 0x2015`** — the audio track record holds
   both its detail subtree and its view chain, which is why removing a track has to splice two
   distinct subtrees (see `remove_track`).
-- **`0x2628` has a second parent**, `0x262B` (57 instances) — the crossfade path. A region
-  enumerator keyed only on `0x2629` will miss those.
+- **`0x2628` has FOUR parents, not two** — see the rare-routes table below. A region enumerator
+  keyed only on `0x2629` misses 1,160 of 163,190 instances.
 - **Confidence:** HIGH (full instance counts).
 
 ### 0x2613 / 0x2615 / 0x2616 — the plugin-instance cluster (chain corrected)

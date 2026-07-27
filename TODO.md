@@ -4487,3 +4487,30 @@ where the rare route is the one that breaks code. The corpus is the only way to 
 the common route works on every session you happen to test first. Worth deliberately looking for
 SECOND PARENTS of every type already documented; two turned up in two batches (0x2628 via 0x262B,
 0x2615 via 0x2618) without being sought.
+
+## The rare-routes sweep — 60 second parents, found systematically instead of by accident
+Two rare routes had turned up BY ACCIDENT in earlier batches (0x2628 via 0x262B, 0x2615 via
+0x2618). Rather than keep stumbling on them, I swept EVERY type's parent distribution over 240
+sessions and kept every parent holding <5% of that type's instances. **There are 60.**
+
+    0x2628   FOUR parents: 0x2629 (main), 0x2633 (896), 0x262B (247), 0x262D (17)
+    0x2037   SEVEN parents: 0x2038, 0x203B, + 0x203D/0x203C/0x2039/0x203F/0x203E
+    0x2619   also under 0x2718/0x2719/0x271A/0x271B/0x271C -- 129 each
+    0x260D / 0x102D / 0x2627   also under 0x2621 -- the MIDI track record
+    0x260A under 0x2611 (233), 0x4420 under 0x2519 (128), 0x2011 under 0x4834/0x4841 (60 each)
+
+THREE CONSEQUENCES:
+  1. **0x2628 (the region record) is reachable FOUR ways.** My own entry two batches ago said
+     "a second parent" -- corrected. Enumerate regions by CONTENT TYPE, never by walking a parent.
+  2. **0x2037 is shared across the whole 0x203x family**, so a terminator identifies nothing about
+     its parent -- the general property of the empty-terminator class, now demonstrated rather
+     than assumed.
+  3. **0x2621 (MIDI) carries 0x260D, 0x102D and 0x2627** -- the same per-track furniture audio
+     has. MIDI tracks lack 0x261B SPECIFICALLY, not the rest of the subtree. That refines the
+     "0x261B belongs to exactly three kinds" rule into something more useful for editors.
+
+THE METHOD IS THE POINT AND IT GENERALISES: I found 2 of these by accident across two batches;
+the sweep found 58 more in one run, INCLUDING two extra parents of a type I had just finished
+documenting. **Any statement of the form "X always lives under Y" is only as good as the sample
+it was measured on** -- the spec now says so explicitly, and every containment claim in it either
+carries a full instance count or is qualified.
