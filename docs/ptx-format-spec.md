@@ -2265,6 +2265,11 @@ form and reads garbage on another.
 
 ### 0x2511 — Fixed default preset-name table ('Snap1'..'Snap48')
 
+> **STRENGTHENED 2026-07-27.** A single distinct byte form across **all 1,532 sessions** on four
+> drives — not one deviates from the `Snap1`..`Snap48` defaults. The table is a factory constant
+> in practice. That still does not prove the 'Snapshot vs Memory-Location preset names' reading
+> below: a value nobody has ever changed carries no evidence about what it is FOR.
+
 - **kind:** LEAF (no children — first_child=None in all 26). Parent: none — top-level singleton (26/26). block_type u16@z+1 = 1. Flat-list neighbors: prev=0x258e (26/26), next=0x2056 (26/26).
 - **size:** Fixed. span = 484 bytes (z..z+7+size). size u32@z+3 = 477. payload = 475 bytes = size-2. Constant across all 26.
 - **fields:**
@@ -3022,7 +3027,7 @@ form and reads garbage on another.
 ### 0x2435 — Score/print-page header field definition (LEAF)
 
 - **Kind:** LEAF (no child blocks; 0 descendants in all 7). block_type=0x0004. Parent = 0x2023 (a top-level session-settings/properties group, block_type=0x0012). Since 0x2023 is top-level, grandparent = ROOT.
-- **Size:** Fixed: span=84 bytes, declared size=77, payload=75 bytes across all 7 — byte-identical. The original entry noted all 7 instances came from a SINGLE project ('Reverse Rewire') and flagged cross-project variance as UNPROVEN. **RESOLVED 2026-07-27: a 1,532-session sweep finds `0x2435` in 28 distinct project families**, so the one-project caveat is lifted — the type is not project-specific. (Whether the *bytes* stay identical across those 28 is a separate measurement, not yet made.)
+- **Size:** Fixed: span=84 bytes, declared size=77, payload=75 bytes across all 7 — byte-identical. The original entry noted all 7 instances came from a SINGLE project ('Reverse Rewire') and flagged cross-project variance as UNPROVEN. **RESOLVED 2026-07-27: a 1,532-session sweep finds `0x2435` in 28 distinct project families**, so the one-project caveat is lifted — the type is not project-specific. **And the bytes ARE identical across all of them:** 558 instances, 28 families, **exactly one distinct byte form**, span 84 throughout. Both halves of the original caveat (project-specificity and cross-project size/value variance) are now settled.
 - **Fields (offsets payload-relative = zmark+9):**
   - `+0` u32 len=5, then 'Title' (5 ASCII) → label #1 (occupies [0:9)).
   - `+9` u32 len=8, then 'Composer' (8 ASCII) → label #2 (occupies [9:21)).
@@ -3148,6 +3153,12 @@ same error as the FALSE `100%` this project's tracker once carried, pointing the
 
 ### 0x2612 — I/O routing-path entry (single output/bus signal path)
 
+> **RARITY QUANTIFIED 2026-07-27.** ZERO instances across a 1,532-session sweep of four drives.
+> The 'lives in only one project family' note understates it: this type is absent from every
+> session in the reachable corpora except that one family, so the cross-project field widths
+> cannot be settled by corpus reading at all — it needs a session that uses whatever feature
+> emits it.
+
 - **Kind:** CONTAINER (block_type u16 = 0x0003) with exactly 2 immediate children in fixed order: 0x2626 (a 2-byte empty/placeholder marker, block_type 0x0001) then 0x260e (path-detail record carrying the name, block_type 0x0001). Parent = 0x2627 (path list; sibling children there are 0x2625 ×6 and 0x2616 ×4). Grandparent = 0x261b (I/O/bus group). NOTE: the size-driven enumerator gives the two children a 1-byte overlap (0x2626 rel-end = 0x260e rel-start = 18) because they share the 0x5A frame marker.
 - **Size:** Whole 0x2612 span is 74 bytes, byte-identical across all 7 instances. The u32 size FIELD in the header is 66 (0x42); on-disk span = size+8.
 - **Fields (offsets payload-relative except header):**
@@ -3216,6 +3227,21 @@ same error as the FALSE `100%` this project's tracker once carried, pointing the
 
 - **Kind:** LEAF (child of 0x2716; 0 children of its own). The size=66 0x2716 container has exactly one immediate child, this 0x2715, and its container payload begins with u32=1 which functions as the child-count.
 - **Size:** Fixed: size=53, block_type=0x0001. Frame span = [z .. z+7+size]; content_type u16 @ z+7; payload begins at z+9 and is 51 bytes (= size−2), fully consumed by the three length-prefixed strings (leftover=0). Byte-identical across all instances.
+
+> **CONFIRMED 2026-07-27 on a much larger base.** Across **1,532 sessions on four drives, all
+> 894 instances are a SINGLE byte form** — the structure is settled, and the whole 51-byte
+> payload is exactly three length-prefixed strings with nothing left over:
+>
+> ```
+> +0   u32 21 | "sessionMetadataBase64"     key
+> +25  u32 12 | "AQAAAAAAAAA="              value (base64)
+> +41  u32  6 | "Base64"                    encoding
+> ```
+>
+> The value decodes to `01 00 00 00 00 00 00 00` = **u64 LE 1**, confirming the round-trip
+> recorded below. What stays UNPROVEN is only what that `1` MEANS (format/version vs id vs flag):
+> the corpus is monomorphic, so no amount of further reading can separate those readings — it
+> needs a session whose metadata differs.
 - **Fields (offsets payload-relative = zmark+9):**
   - `@0` u32 len=21 + 21 ASCII = 'sessionMetadataBase64' (metadata KEY).
   - `@25` u32 len=12 + 12 ASCII = 'AQAAAAAAAAA=' (VALUE; Base64 of `01 00 00 00 00 00 00 00` = u64 LE 1).

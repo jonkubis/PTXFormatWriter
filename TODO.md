@@ -3651,3 +3651,30 @@ Had I quoted the 89.5% alone I would have shipped a wrong rule with convincing e
 -- the same failure as the earlier "it fits the track names" reading, one level more subtle.
 
 STILL NEEDS PT: one session saved twice with a single playlist-level setting changed.
+
+## Closing out four "not yet measured" caveats with one sweep (1,532 sessions)
+Each of these was a spec entry that named its own missing measurement. Three are now settled and
+the fourth is settled as UNSETTLEABLE from the corpus, which is also worth knowing.
+
+  * **0x2435 -- fully resolved.** The entry flagged BOTH project-specificity and cross-project
+    size/value variance as unproven. 558 instances across 28 project families are **exactly ONE
+    distinct byte form**, span 84 throughout. I had explicitly written "whether the bytes stay
+    identical across those 28 is a separate measurement, not yet made" -- so I made it.
+  * **0x2715 -- structure settled, semantics provably not.** All 894 instances in 1,532 sessions
+    are a single byte form; the 51-byte payload is exactly three length-prefixed strings with
+    nothing left over: key `sessionMetadataBase64`, value `AQAAAAAAAAA=`, encoding `Base64`. The
+    value base64-decodes to `01 00 00 00 00 00 00 00` = u64 LE 1, confirming the recorded
+    round-trip. What the 1 MEANS cannot be settled here: the corpus is monomorphic, so every
+    reading (format/version vs id vs flag) fits equally.
+  * **0x2511 -- strengthened.** One byte form across all 1,532 sessions; nothing deviates from
+    `Snap1..Snap48`. Noted in the spec that this does NOT support the 'Snapshot preset names'
+    reading: a value nobody has ever changed carries no evidence about its purpose.
+  * **0x2612 -- rarity quantified.** ZERO instances in 1,532 sessions. The entry said "lives in
+    only one project family"; that understates it. Its field widths cannot be settled by corpus
+    reading at ALL, so it belongs on the PT list rather than the corpus list.
+
+WORTH SEPARATING, because I have now hit it twice today: "byte-identical everywhere" settles
+STRUCTURE and says nothing about MEANING. It settled 0x2435 completely (the open question there
+WAS variance) and settles nothing about 0x2715's u64 or 0x2511's names (where the open question
+is purpose). Recording which kind of question an entry is asking is what makes the difference
+between a measurement that closes it and one that just adds a bigger number.
