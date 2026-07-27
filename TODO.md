@@ -4669,3 +4669,25 @@ a cheap, corpus-verifiable audit and it has a 2-for-2 hit rate so far.
 
 POSSIBLE FUTURE FEATURE (not a defect): a MIDI-aware clip enumerator via 0x1057 -> 0x1056 ->
 0x104F. The structure is now documented; nothing else blocks it.
+
+## The docstring audit: 2-for-2 did NOT become 4-for-4 — the rest are accurate
+Eleven public readers make a totality claim ("every", "all", "each") in their first docstring
+line. Four have a clean one-to-one content type to check against, so I checked those:
+
+    playlist_names   45/45 sessions   count == n(0x210B)   ACCURATE
+    region_names    120/120 sessions  count == n(0x2628)   ACCURATE
+    clip_positions  119/119 sessions  count == n(0x104F)   ACCURATE
+    markers          69 match, 38 SHORT -- but short BY DESIGN and already documented:
+                     it de-duplicates by (name, position) because PT writes a duplicate
+                     0x2030 memory-locations list. 138 blocks -> 69 markers is exactly 2:1.
+
+So the two overstatements I found (region_list, clips) were the only two. **I expected a third
+and there wasn't one**, which is worth recording as clearly as the hits: a 2-for-2 streak is not
+evidence of a systemic problem, and saying so stops a real finding from inflating into a
+narrative about sloppy documentation.
+
+SCOPE OF THIS AUDIT, stated because it is partial: 4 of the 11 claim-making readers were
+checkable this way. The other 7 (clip_names, track_playlists, track_name_occurrences,
+validate_pt_invariants, clip_lanes, region_list, clips) either take extra arguments, aggregate
+several types, or are the two already corrected. A one-to-one content type is what makes the
+check possible; where there is not one, the claim cannot be verified this cheaply.
