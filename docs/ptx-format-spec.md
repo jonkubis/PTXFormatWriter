@@ -2019,6 +2019,16 @@ unintended, not merely a wrong sentence.
 payload takes **32, 38 and 56**. Any code reading a breakpoint at a hardcoded stride is right only
 on the narrow corpus.
 
+**None of the five corrected claims is load-bearing in code — checked, not assumed.** Of the twelve
+types across all four audited classes, exactly one is referenced by the implementation: `0x203b`,
+via the `_VIEW_VOLUME` literal in `set_waveform_view`. Its 22-byte claim **holds** — 6816 control
+blocks and 33026 external. `0x1033`, `0x203f`, `0x2506`, `0x2514`, `0x260a`, `0x2625`, `0x104d`,
+`0x2018`, `0x2049` and `0x206f` appear in comments only, so every error found was documentation-only.
+
+That is worth stating rather than leaving implied: an audit that corrects five spec claims and
+touches no behaviour has a different risk profile from one that changes a parser, and the reader
+should not have to guess which kind this was.
+
 **THE SPEC MIXES UNITS, which is how that nearly became a second false finding.** `0x2625` ("11B
 wrapper") and `0x2626` ("2B terminator") are quoted as PAYLOAD sizes; `0x2506` ("17-byte"),
 `0x203b` ("22 B"), `0x1033` ("9B") and `0x2514` ("42 bytes") are quoted as SPANS. Measuring spans
