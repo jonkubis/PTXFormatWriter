@@ -307,9 +307,19 @@ THREE HYPOTHESES TESTED AND ALL THREE REFUTED, which is why this is a measured f
     across tracks, which is the property that makes them identities at all. An over-eager scan
     produced 1231 false positives; the distinctness check is what caught it.
 
-WHAT WOULD SETTLE IT: duplicate a track in a session that LACKS the list (any `/Volumes/Samples`
-file) and open it in Pro Tools. If it opens and closes cleanly, the integer id range alone is
-sufficient and the fix is general. Nothing reachable can answer that.
+WHAT WOULD SETTLE IT, and it is now STAGED:
+`/Users/jonkubis/Desktop/PTX_VERIFY_NO_UUID_LIST/01 130 G/DUPLICATED 01 130 G Full Stereo.ptx`
+-- a `/Volumes/Samples` session with **0 of 5** `0x261B` carrying the list, `Drums` duplicated as
+`DrumZ`. The whole session folder is copied so Pro Tools can open it standalone; the original on
+`/Volumes/Samples` is untouched. Checked before staging: reloads rc=0, 6 name entries == 6 track
+records, all 6 integer id ranges distinct, `duplicate -> remove` byte-exact.
+
+    opens and closes cleanly  ->  the integer id range ALONE is sufficient; the fix is general
+    crashes, or DrumZ shows   ->  the UUID list was not the only colliding identity, and there is
+    under Drums' name             another field to find on this generation
+
+A crash there is a RESULT, not a setback: it would point straight at the remaining identity field,
+the same way "both Audio 4 tracks are selected" pointed at the two selection flags.
 
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
