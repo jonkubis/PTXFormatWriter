@@ -1950,7 +1950,15 @@ def _resize_tempo_block(block: bytes, n_records: int) -> bytes:
         i += 61
     template = block[rec0:rec0 + 61]
     trailer = block[rec0 + R * 61:]
-    new_block = bytearray(block[:rec0] + template * n_records + trailer)
+    # Clone each SURVIVING record per index; use the template only for records beyond the ones
+    # that already exist. Replicating record 0 for all N discards per-record bytes the caller
+    # never patches, so an IDENTITY replace was not byte-exact: it rewrote 19 of 160 real
+    # sessions (up to 820 bytes), with the dominant transitions all `value -> 0`. `0x2029` had
+    # exactly this bug and was already fixed the same way (`_resize_meter_safe`); `0x2028` was
+    # missed. Growing behaves as before -- new records still come from the template.
+    kept = b"".join(block[rec0 + i * 61 : rec0 + (i + 1) * 61] if i < R else template
+                    for i in range(n_records))
+    new_block = bytearray(block[:rec0] + kept + trailer)
     struct.pack_into("<I", new_block, rec0 - 8, n_records)            # count
     struct.pack_into("<I", new_block, rec0 - 12, 4 + 61 * n_records)  # length
     struct.pack_into("<I", new_block, 3, len(new_block) - 7)          # block_size
@@ -2206,9 +2214,15 @@ def _rewrite_tempo_records(block: bytes, events) -> bytes:
     if len(recs) != len(events):
         raise ValueError(f"tempo block has {len(recs)} records, expected {len(events)}")
     for idx, ((bpm, tick), r) in enumerate(zip(events, recs)):
-        flag = 1 if idx == 0 else 0
-        out[r + 21] = flag
-        out[r + 39] = flag
+        # +39 IS the first-record flag: measured over 3,247 real tempo records it is 1 in 309 of
+        # them and essentially all are index 0. +21 is NOT -- it is an independent per-record
+        # boolean, set in 1,419 of 2,938 NON-first records (~half), and the two disagree in 1,417
+        # records. Deriving +21 from the index therefore overwrote real data: an IDENTITY replace
+        # rewrote it 1->0 in 1,247 records across 15 sessions. Records are cloned per index by
+        # `_resize_tempo_block`, so leaving +21 alone preserves each record's own value, and a
+        # newly grown record inherits the template's. Its MEANING is unknown (a linear-ramp flag
+        # is the obvious guess) and needs Pro Tools; preserving it does not require knowing it.
+        out[r + 39] = 1 if idx == 0 else 0
         out[r + 30 : r + 35] = (_ZERO_TICKS + int(tick)).to_bytes(5, "little")
         out[r + 40 : r + 48] = struct.pack("<d", float(bpm))
     return bytes(out)

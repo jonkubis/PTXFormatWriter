@@ -670,6 +670,20 @@ fields, in the 6-char-name template layout: **channel** at `+78`, region **GUID*
 
 ### Tempo (`0x2028` map / `0x2718` lane) — **(PT-confirmed, full map)**
 
+> **RECORD FLAGS `+21` vs `+39` (measured 2026-07-27 over 3,247 real tempo records).** The
+> 61-byte record carries two independent booleans, and only ONE of them means "first event":
+>
+> | offset | =1 | =0 | reading |
+> |---|---|---|---|
+> | `+39` | 309 | 2,938 | **the first-record flag** — essentially every 1 is at index 0 |
+> | `+21` | 1,726 | 1,521 | an INDEPENDENT per-record boolean, set in 1,419 of 2,938 NON-first records |
+>
+> They disagree in 1,417 records, so `+21` cannot be derived from position. Its MEANING is
+> unknown (a linear-ramp flag is the obvious guess and needs Pro Tools), but a writer does not
+> need to know it — **preserve it per record.** `replace_tempo_map` set both from the index,
+> silently rewriting `+21` from 1 to 0 in 1,247 records across 15 sessions, so an identity
+> replace was not byte-exact. Identity is now byte-exact on 158 of 160 corpus sessions.
+
 The `0x2028` payload opens with the tag `"Tempo"` (payload +0), a `u16` version, a `u32`
 `payload_len` (+7, `== 4 + count*61`), and the event `count` as a `u32` at **payload +11**.
 The per-event records are **fixed 61 bytes** and begin at **`zmark+28`** (payload +19, the

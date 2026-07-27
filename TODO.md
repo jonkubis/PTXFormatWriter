@@ -3886,3 +3886,41 @@ different kind of thing" is an assertion dressed as a finding. The reflective sw
 script and answers the question for the whole API instead of the part I happened to look at --
 and it immediately contradicted me. Prefer enumerating the surface to sampling it whenever the
 property is cheap to state.
+
+## The write layer, swept the same way: identity edits must be byte-exact
+Applied the enumerate-the-surface method to the 38 public mutators. The cheap universal property
+for the in-place ones is: **an identity edit must return the input unchanged.** Two failed.
+
+    move_clip(same pos)      122/122 byte-identical
+    rename_track(X->X)       156/156
+    set_session_name(same)   160/160
+    sync_marker_rows(0)      160/160
+    replace_tempo_map(same)  141/160   <- 19 sessions rewritten, up to 820 bytes
+    replace_meter_map(same)   46/56    <- 10 sessions, 8 bytes each
+
+TEMPO, two distinct causes, both now fixed:
+  1. `_resize_tempo_block` replicated RECORD 0 as the template for all N records, discarding
+     per-record bytes. `0x2029` had had exactly this bug and was fixed long ago
+     (`_resize_meter_safe`); `0x2028` was missed. Now clones per index; template only for
+     records grown beyond the originals. (19 -> 15 sessions.)
+  2. The patch loop set BOTH `+21` and `+39` to `1 if idx==0 else 0`. Measuring 3,247 real
+     records shows only `+39` is the first-record flag (1 in 309, essentially all index 0);
+     **`+21` is an INDEPENDENT per-record boolean** -- set in 1,419 of 2,938 non-first records,
+     disagreeing with `+39` in 1,417. Deriving it from the index rewrote real data 1->0 in 1,247
+     records. Now preserved rather than derived. (15 -> 2 sessions.)
+
+    RESULT: replace_tempo_map identity 141/160 -> 158/160, readback still exact, a real
+    single-event replace still works, 232 tests green.
+
+WHY THIS MATTERS BEYOND TIDINESS: `replace_tempo_map`/`replace_meter_map` are PT-CONFIRMED write
+paths. Silently zeroing a per-record flag in a confirmed path is how a confirmed path stops being
+correct without anyone noticing -- and no test caught it, because identity-byte-exactness was
+only ever checked on the 26-session corpus, where it held.
+
+STILL OPEN (characterised, not fixed):
+  * meter identity rewrites a u32 in the 0x2029 TAIL (past the records) on 10 sessions --
+    `fe ff ff ff` (-2, a renumbered start bar) -> `01 00 00 00`. The reader does not expose it,
+    so `meter_map` round-trips while the bytes do not.
+  * 2 tempo sessions still differ; not yet characterised.
+  * `+21`'s MEANING is unknown. Preserving it does not require knowing it, but decoding it needs
+    PT (one session saved twice with a tempo event changed from constant to ramp).
