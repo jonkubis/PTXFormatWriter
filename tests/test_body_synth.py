@@ -3139,5 +3139,45 @@ class NameTablePreambleTests(unittest.TestCase):
     # needs a real GUID-less fixture, or an understanding of where `gmap` actually comes from --
     # neither of which is available here yet.
 
+    def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
+        """Everything `synthesize` can produce must satisfy the invariants the validator knows.
+
+        THIS GAP IS HOW THE CLICK DEFECT SURVIVED. Every check in this suite runs against the
+        CORPUS -- real Pro Tools sessions, or the result of editing one -- while `synthesize` makes
+        files from scratch and nothing asked whether those satisfy the same rules. So every
+        click-bearing session this writer produced carried a repeated `0x2015` ordinal, the
+        condition Pro Tools crashes on (PT-confirmed 2026-07-27), for as long as the click path has
+        existed. It surfaced only because a rule added for another reason happened to fire.
+
+        The writer is the component most likely to emit invalid bytes and was the one with no
+        systematic check. 58 shapes pass as of this commit.
+
+        WHAT THIS DOES AND DOES NOT GUARD, checked by disabling the fixes rather than assumed:
+        disabling EITHER normalizer alone leaves this test passing, because `synthesize()` routes
+        through `add_click_anyN` and either one repairs the column; with BOTH disabled it fails on
+        16 shapes. So it asserts the broad property -- the writer emits sessions the validator
+        accepts -- and NOT the specific click regression, which is guarded by the pre-existing
+        `add_click_anyN` test. Stated because a test that names a defect it cannot detect is worse
+        than no test.
+        """
+        cases = []
+        for n in (2, 3, 4, 5, 8):
+            for kinds in ([1] * n, [2] * n):
+                for click in (None, "top", "bottom"):
+                    cases.append((f"{kinds[0]}x{n} click={click}", lambda k=kinds, c=click: BS.synthesize(k, click=c)))
+        for extra in ([], [0], [2], [0, 0], [2, 1]):
+            spec = [1, 0, 2] + extra
+            cases.append((f"mixed_midi {spec}", lambda s=spec: BS.synthesize_mixed_midi_inline(s)))
+        self.assertGreater(len(cases), 30, "the parameter sweep collapsed -- it proves nothing")
+        for name, build in cases:
+            with self.subTest(shape=name):
+                data = build()
+                errs = [v for v in BS.validate_pt_invariants(data) if v["severity"] == "error"]
+                self.assertEqual(errs, [], msg=f"{name}: writer emitted a session the validator rejects")
+                col = [v for _p, v in BS._playlist_ordinal_sites(data)]
+                self.assertEqual(len(col), len(set(col)),
+                                 msg=f"{name}: repeated 0x2015 ordinal {col} -- PT crashes on close")
+
+
 if __name__ == "__main__":
     unittest.main()
