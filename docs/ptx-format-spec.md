@@ -2634,6 +2634,59 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### The EMPTY-TERMINATOR types — 0x2037, 0x2626 (and the constant leaves 0x4301 / 0x4420)
+
+A recurring shape: a leaf whose payload is **empty or all-zero, identical in every instance**,
+used to close or pad a structure. Measured:
+
+| type | span | instances | distinct payloads | parents |
+|---|---|---|---|---|
+| `0x2037` | 9 | 45,845 | **1** (empty) | `0x2038` 28,421 / `0x203B` 17,130 |
+| `0x2626` | 9 | 100,001 | **1** (empty) | `0x2625` 91,583 / `0x2615` 8,418 |
+| `0x4301` | 41 | 9,866 | **1** (all zero) | `0x2106` 5,625 / `0x2619` 4,238 |
+| `0x4420` | 11 | 8,026 | **1** (all zero) | `0x251A` 7,976 / `0x2519` 50 |
+
+- **Reading:** ~164,000 instances across four types carrying **zero information between them**.
+  Each has exactly TWO parent types, which is the useful part: the terminator is shared by two
+  families rather than being private to one, so "which terminator" does not identify the parent.
+- **For a writer:** emit verbatim. For a READER: never infer anything from these; a difference
+  here would mean a parsing error, not a session difference.
+- **Confidence:** HIGH (byte-constancy over the full instance count of each).
+
+### 0x203B — fixed 22-byte wrapper (one 0x2037), the `0x2015` sibling of 0x2038
+
+- **Kind:** span **22 in all 17,130 instances**, `block_type` 1, child **ALWAYS `0x2037`**, only
+  2 distinct payloads.
+- **Parents:** `0x2580` (10,394) and `0x2015` (3,652).
+- **Relation to `0x2038`:** the two are near-twins — both fixed-size wrappers around a single
+  `0x2037`, both parented by view-chain records. `0x2038` is span 19 under `0x200A`/`0x2015`;
+  `0x203B` is span 22 under `0x2580`/`0x2015`. **This is also the size-22-under-`0x2015` shape
+  that `0x203F` collides with** — see that entry: a locator keyed on size alone cannot separate
+  them, which is why this codebase's pins the `3b 20` content-type bytes.
+- **Confidence:** HIGH; purpose UNPROVEN.
+
+### 0x2013 — top-level singleton holding one 0x2020 and one 0x2021
+
+- **Kind:** TOP-LEVEL, exactly one per session (75/75), `block_type` 3, span 52/53/74, only 4
+  distinct payloads.
+- **Children:** **exactly one `0x2020` and one `0x2021`** in every session — a fixed pair, not a
+  list.
+- **Confidence:** HIGH on framing/children/universality; purpose UNPROVEN (see the `0x2020`
+  entry, whose a/b/c/d fields were measured and match no known session quantity).
+
+### 0x1052 / 0x251A — the two length-prefixed NAME carriers
+
+Both hold a length-prefixed name and are central to any name-based edit (§5's rename note lists
+all fifteen name sites; these are the two highest-volume).
+
+- **`0x1052`** — the track LANE. Parent **ALWAYS `0x1054`** (5,311/5,311). Payload opens
+  `<u32 len><name>`; 1,662 distinct payloads. Spans 27/28 when empty, larger when it holds
+  placements.
+- **`0x251A`** — the name-table DETAIL record. Parent `0x2519` (8,440) — the 4 under `0xE196`
+  are the phantom parent documented in §5c. Payload is `00 00 <u32 len><name>…`, 1,145 distinct.
+- **Confidence:** HIGH on framing/parentage/the name field; the trailing bytes of each are
+  documented per-operation elsewhere (see `remove_track`'s inline-entry handling).
+
 ### 0x2506 — the marker × playlist scaffold row (settled)
 
 - **Kind:** LEAF. **Span 17 in all 215,024 instances**, `block_type` 3, **parent ALWAYS `0x2077`**

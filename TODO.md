@@ -4381,3 +4381,26 @@ file rate) all share one property -- **an externally meaningful value** (60/64 p
 Where a field's values are recognisable from outside the format, the corpus can settle it; where
 they are opaque integers, it cannot. That is a better predictor of "can I decode this" than
 instance count or universality, and it is worth applying to choose future targets.
+
+## Queue, batch 7: eight entries, and a whole CLASS named
+    entries 216 -> 220, mention-only 106 -> 103   (documented 322 -> 323, phantoms 160 -> 159)
+
+  * **THE EMPTY-TERMINATOR CLASS.** Four types -- 0x2037, 0x2626, 0x4301, 0x4420 -- share one
+    shape: a leaf whose payload is empty or all-zero and IDENTICAL in every instance.
+    **~164,000 instances between them carrying zero information.** Each has exactly TWO parent
+    types, which is the useful part: a terminator is shared by two families, so "which
+    terminator" does NOT identify the parent. Emit verbatim; a difference here would mean a
+    parsing error, not a session difference.
+  * **0x203B is 0x2038's near-twin** -- both fixed-size wrappers around a single 0x2037, both
+    parented by view-chain records (0x2038 span 19 under 0x200A/0x2015; 0x203B span 22 under
+    0x2580/0x2015). **0x203B is also the size-22-under-0x2015 shape that 0x203F collides with**,
+    which is exactly why this codebase's locator pins the `3b 20` content-type bytes rather than
+    the size. The collision now has both sides documented.
+  * **0x2013** holds EXACTLY ONE 0x2020 and ONE 0x2021 in every session -- a fixed pair, not a
+    list.
+  * **0x1052 / 0x251A** are the two highest-volume length-prefixed NAME carriers (lane name and
+    name-table detail), now entered with their parentage proven 1:1 to 0x1054 and 0x2519.
+
+NOTE the phantom count moved 160 -> 159 and documented 322 -> 323: writing these entries
+reclassified a type that had been counted as a phantom. That is the tracker working as intended
+-- the two sets are not independent, and documenting a type removes it from the noise pile.

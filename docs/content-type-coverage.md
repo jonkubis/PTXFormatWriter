@@ -22,12 +22,12 @@ content-types than all 282 control files.
 Also excluded: ~2 files under `/Volumes/Hack 2TB SSD Old` that are NVIDIA CUDA PTX
 assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
-**322/482 content-types have a spec entry = 66.8%**, covering 99.93% of block instances.
+**323/482 content-types have a spec entry = 67.0%**, covering 99.93% of block instances.
 
 ## Three standards, not one — mentioned, entered, settled
 
-**216 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**106 are counted as "documented" only because their hex string appears somewhere in
+**220 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**103 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
@@ -42,10 +42,8 @@ mentions. The mention-only list is the honest work queue:
 | `0x2505` | 832 | 832 |
 | `0x2507` | 832 | 832 |
 | `0x259c` | 832 | 832 |
-| `0x251a` | 63279 | 813 |
 | `0x200a` | 31609 | 813 |
 | `0x2627` | 30331 | 773 |
-| `0x1052` | 42424 | 770 |
 | `0x1014` | 27411 | 770 |
 | `0x200b` | 23828 | 770 |
 | `0x261c` | 23828 | 770 |
@@ -62,8 +60,6 @@ mentions. The mention-only list is the honest work queue:
 | `0x0f3d` | 481 | 481 |
 | `0x0f3e` | 481 | 481 |
 | `0x270a` | 480 | 480 |
-| `0x4301` | 63441 | 456 |
-| `0x4420` | 49048 | 456 |
 | `0x4300` | 487 | 456 |
 | `0x2107` | 456 | 456 |
 | `0x271b` | 456 | 456 |
@@ -75,16 +71,20 @@ mentions. The mention-only list is the honest work queue:
 | `0x2042` | 351 | 351 |
 | `0x2613` | 23633 | 330 |
 | `0x2615` | 23633 | 330 |
+| `0x1038` | 23633 | 330 |
+| `0x2616` | 23546 | 330 |
+| `0x261e` | 5483 | 302 |
+| `0x1048` | 2565 | 285 |
 
-…and 66 more.
+…and 63 more.
 
 
 ## Described vs settled — two different numbers
 
-**322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
+**323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 168 typed sections in the spec, **40 still say the PURPOSE is unproven** —
+Of the 171 typed sections in the spec, **42 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
@@ -112,7 +112,7 @@ fix is to state exactly what was measured and what was not.
 
 `0x5A` is `'Z'` and occurs freely inside leaf payloads and binary id fields, so the
 size-driven walk frames
-noise there. **160 of the 160 undocumented types are phantoms** by one of two measured
+noise there. **159 of the 159 undocumented types are phantoms** by one of two measured
 signatures: ≥50%% of instances nested inside a leaf payload (`0x1038` plug-in state,
 `0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`), or a type whose low byte is
 `0x00` that the master index never references — the `256 × k` arithmetic of a string
@@ -191,10 +191,10 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 | `0xdafa` | 31 | 31 | 0 |
 | `0x4b00` | 31 | 31 | 0 |
 
-…and 100 more (long tail, each in <32 sessions).
+…and 99 more (long tail, each in <32 sessions).
 
 
 ## Documented types
 
-322 types are covered by `ptx-format-spec.md`, accounting for 99.93% of block instances.
+323 types are covered by `ptx-format-spec.md`, accounting for 99.93% of block instances.
 
