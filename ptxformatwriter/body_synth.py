@@ -5995,6 +5995,23 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
     # copy's range unique -- that is what Pro Tools confirmed -- and is independent of whether this
     # validator REJECTS a pre-existing file for having collisions. Enforcing on what we write and
     # refusing what PT wrote are different questions, and only the first is settled.
+    # MARKER SCAFFOLD MATRIX: every 0x2077 carries one 17-byte 0x2506 row per PLAYLIST (§5c).
+    # A track add/remove that does not add/drop the row leaves the matrix inconsistent, which is
+    # exactly the defect `sync_marker_playlist_rows` fixes. NOTE, not error: 1 of 386 real PT
+    # sessions is legitimately RAGGED (`2 BUSS for Jon.ptx` has two 0x2030 lists whose markers
+    # hold 69 and 1 rows), so an error here would reject a file Pro Tools wrote. Report the shape
+    # and let the caller judge.
+    _mk = [(z, e) for z, e, c in bl if c == 0x2077]
+    if _mk:
+        _npl = sum(1 for _z, _e, c in bl if c == 0x210B) or sum(1 for _z, _e, c in bl if c == 0x2015)
+        _rc = sorted({len(_marker_scaffold_rows(data, z, e)) for z, e in _mk})
+        if _npl and _rc != [_npl]:
+            note("marker-scaffold-matrix",
+                 f"markers hold {_rc} 0x2506 rows but the session has {_npl} playlists -- each "
+                 f"marker should carry exactly one row per playlist; a track add/remove that "
+                 f"skipped the row leaves it short. (1 of 386 real sessions is legitimately "
+                 f"ragged, so this is a note rather than an error)")
+
     _dupids = sorted({v for v in _idr if _idr.count(v) > 1})
     if _dupids:
         note("track-id-uniqueness",

@@ -3702,3 +3702,40 @@ geometry, view/zoom state, and UI flag semantics -- questions of the form "what 
 DO", which by construction need the application. The corpus can still be mined for STRUCTURE
 (and today it gave up 0x206f's device list, 0x2435's cross-family identity, 0x2715's full
 payload, and the 0x2506 relation), but it cannot assign meaning to a UI toggle nobody toggled.
+
+## CORRECTION: the 0x2506 rule is PER MARKER; my aggregate form was overstated
+I committed `n(0x2506) == n(0x2077) * n_playlists` as settled on "296/296 and 361/361, zero
+exceptions". A third sweep with a different seed found a counterexample in the first 386 sessions.
+
+`2 BUSS for Jon.ptx` carries TWO 0x2030 marker lists whose markers DISAGREE: 8 markers hold 69
+rows (its 69 playlists) and 8 hold 1 (its single track). Total 560, against the 1,104 the product
+predicts.
+
+The robust statement is the PER-MARKER one, and it is exact:
+
+    rows(marker) == n_playlists,  for every 0x2077     385/386 sessions, no exception WITHIN them
+
+The aggregate follows only when every marker agrees. TWO lessons, both mine:
+  * **"N/N exact" on a random sample is not universality.** Two clean samples of ~300 sessions
+    missed this; a third with a different seed hit it immediately. Vary the seed before writing
+    "no exclusions".
+  * **Stating a per-object rule in aggregate form hides which object it belongs to**, and breaks
+    the moment two populations of that object coexist in one file. The per-marker form would have
+    survived unchanged.
+
+## marker-scaffold-matrix added to validate_pt_invariants (NOTE, not error)
+Checks that every 0x2077 holds exactly n_playlists 0x2506 rows -- the defect the row sync fixes.
+NOTE severity deliberately: 1 of 386 real PT sessions is legitimately ragged (above), so an error
+would reject a file Pro Tools wrote. Silent on all 440 untouched sessions; verified to BITE
+(drop one row per marker -> fires, naming "markers hold [4] rows but the session has 5
+playlists").
+
+## NOTICED, NOT YET ACTED ON: 0x2519-entry-ordinals errors on files PT itself wrote
+Across 440 untouched sessions the only ERROR-severity findings are `0x2519-entry-ordinals` (23)
+and `per-track-subtree-ordinal` (2). The validator's docstring says "error" means "PT is known to
+REJECT these", so an error firing on 23 sessions Pro Tools authored contradicts that contract --
+the same shape that got `track-id-uniqueness` and `0x2589-view-chains` demoted to notes earlier.
+NOT changing it now: it may be calibrated against a real PT verdict, and I already made one hasty
+change today that had to be reverted. Investigate before demoting: does the 23 come from the
+locator misreading a second layout (as with track-id-uniqueness), or is the ordinal genuinely
+non-conforming in those files?

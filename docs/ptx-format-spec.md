@@ -324,15 +324,26 @@ waveform data (see §5c).
 > Settling the bit's meaning needs Pro Tools: one session saved twice with one playlist-level
 > setting changed.
 
-> **SETTLED 2026-07-27 — the multiplier is the PLAYLIST count, not the track count.**
+> **SETTLED 2026-07-27 — the rule is PER MARKER, and the unit is the PLAYLIST, not the track.**
 >
 > ```
-> n(0x2506) == n(0x2077) × n_playlists
+> rows(marker) == n_playlists          for every 0x2077
 >     where n_playlists = n(0x210B) if the session carries a 0x210B list, else n(0x2015)
 > ```
 >
-> **296/296 and 361/361 exact** on two independent samples across four drives, with **zero**
-> sessions showing a non-integer ratio — the relation holds everywhere, no exclusions.
+> Every marker carries the same row count and it equals the playlist count: **385 of 386
+> marker-bearing sessions**, no exceptions inside those sessions.
+>
+> **CORRECTION — the aggregate form is NOT universal.** This entry first stated the rule as
+> `n(0x2506) == n(0x2077) × n_playlists` and called it exact on 296/296 and 361/361 across two
+> independent samples. That aggregate follows from the per-marker rule ONLY when every marker
+> agrees, and one session in 386 is RAGGED: `2 BUSS for Jon.ptx` carries **two** `0x2030` lists
+> whose markers differ — 8 markers hold 69 rows (its 69 playlists) and 8 hold 1 (its single
+> track) — totalling 560, against the 1,104 the product predicts. Two clean samples of ~300
+> sessions each had missed it; a third with a different seed found it immediately. **"N/N exact"
+> on a random sample is not universality**, and the aggregate form is the fragile way to state a
+> per-object rule: it hides which object the invariant belongs to and fails the moment two
+> populations of that object coexist. Use the per-marker form.
 >
 > This resolves the earlier table, whose candidates were all shadows of the true one. Most
 > sessions give every track exactly one playlist, so the track count *equals* the playlist count
