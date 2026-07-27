@@ -7527,14 +7527,27 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     if not _do_renumber and _src_id_first is not None and _new_id_first is not None and _src_id_len:
         _newg = set(gmap.values())
         _o = bytearray(out)
-        for _z, _e, _c in _size_driven_blocks(out):
-            if _c != 0x261B or not any(_g in out[_z:_e] for _g in _newg):
-                continue
+        _b261b = [(_z, _e) for _z, _e, _c in _size_driven_blocks(out) if _c == 0x261B]
+        _hit = next((i for i, (_z, _e) in enumerate(_b261b)
+                     if any(_g in out[_z:_e] for _g in _newg)), None)
+        if _hit is None:
+            # NOT EVERY TRACK HAS A GUID. `0x102D` is universal (9945/9945 records on four drives)
+            # but the `2A 00 00 00` tag inside it is not: 376 of 476 blocks on the PT HD 10.3/11.2
+            # corpus carry it, so ~21% of tracks there have none. With no fresh GUID to match, this
+            # loop found no block and silently left the copy SHARING its source's id range -- the
+            # exact condition Pro Tools crashed on. Measured before the fallback: 4 of 4 such
+            # duplicates produced a shared range (5 ranges/5 distinct -> 6 ranges/5 distinct).
+            #
+            # Fall back to the structural identification `_deselect_copied_track` already uses: the
+            # block whose removal turns the post-edit run back into the pre-edit run, taking the
+            # LATER position when the copy is still byte-identical to its source.
+            _hit = _added_block_index(data, out, 0x261B)
+        if _hit is not None and _hit < len(_b261b):
+            _z, _e = _b261b[_hit]
             for _p in range(_z, _e - 3):
                 _v = int.from_bytes(_o[_p : _p + 4], "little")
                 if _src_id_first <= _v < _src_id_first + _src_id_len:
                     _o[_p : _p + 4] = (_new_id_first + (_v - _src_id_first)).to_bytes(4, "little")
-            break
         out = bytes(_o)
 
     # ...and FRESH UUIDs for the copy. The integer id range alone was not enough: Pro Tools still
