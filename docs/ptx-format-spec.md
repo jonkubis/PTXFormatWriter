@@ -2796,12 +2796,16 @@ The last types left after phantom filtering across 832 sessions on four drives. 
 zero instances in this project's own output, checked with `session_is_probably_ours`.
 
 **`0x203f`** — 23 blocks in 9 sessions, **fixed size 22**, parent `0x2015` (22/23) or `0x2589` (1/23).
-That is exactly `0x203b`'s signature: same 22 bytes, same display-chain parents. So the view chain
-carries (at least) **two** such elements, and `_view_volume_offsets`' discriminator — "a view VOLUME's
-immediate parent is its display chain, an automation VOLUME's is its `0x2580` lane" — separates
-`0x203b` from automation but does *not* distinguish `0x203b` from `0x203f`. Any code that locates a
-view element by size-22-under-`0x2015` alone can match the wrong one. **Which display parameter each
-carries is UNPROVEN**; they never co-occur under the same parent in the sampled sessions.
+Same 22 bytes and the same display-chain parents as `0x203b`, so the view chain carries (at least)
+**two** such elements. **Which display parameter each carries is UNPROVEN**; they never co-occur
+under the same parent in the sampled sessions.
+
+A locator keyed on *size 22 under `0x2015`* alone would confuse the two — but this codebase's is
+not, and was checked rather than assumed: `_view_volume_offsets` searches the 22-byte literal
+`_VIEW_VOLUME`, whose bytes `3b 20` pin `content_type == 0x203b`, so it cannot match a `0x203f`.
+Verified on 9 sessions that contain `0x203f`: **0 matched**. `set_waveform_view` is unaffected.
+The parent-based rule in that function's docstring separates a *view* VOLUME from a `0x2580`
+*automation* VOLUME, which is a different question and remains correct.
 
 **`0x2631`** — 22 blocks in 5 sessions, parent `0x2632` in 22/22, sizes 250–382 (variable, so
 name- or list-driven). `0x2632` is itself sparse here. Purpose UNKNOWN; its position next to the
