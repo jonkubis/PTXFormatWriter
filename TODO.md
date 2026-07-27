@@ -4006,3 +4006,32 @@ THE REAL WIN IS THE SPEC FINDING: a track's length-prefixed name legitimately ap
 0x2628, 0x207a, 0x4501, 0x4702, 0x4809** -- notably 0x261f (the VCA-shaped seventh track-record
 kind documented today) and 0x2628 (a REGION named after its track). Any future name-based edit
 must expect all of them; the shorter list is what an eight-type sample looks like.
+
+## The staged PT experiments were STALE — regenerated (this is the one that mattered)
+The PT queue is the binding constraint on this project, so a stale staged file wastes the
+scarcest resource there is: the user actually sitting in front of Pro Tools.
+
+CHECKED all pending experiments against current code:
+  * `PTX_VERIFY_2026-07-24/A_no_audio_needed/*.ptx` (8 files, the MIDI + mixed set) -- all
+    MARKERLESS, so today's 0x2506 row sync is a no-op on them. Still current, 0 validator
+    errors each. Leave them.
+  * `PTX_VERIFY_NO_UUID_LIST/.../DUPLICATED 01 130 G Full Stereo.ptx` -- **STALE**. Built 26 July,
+    it carries 35 of the 42 0x2506 records its shape requires: short by exactly 7, one per
+    marker. Testing it would have told us about code that no longer exists.
+  * `PTX_VERIFY_ORDINAL_REPAIR` -- already ANSWERED (the crash was the answer); optional.
+
+REGENERATED with current code as `CURRENT 2026-07-27 - DUPLICATED 01 130 G Full Stereo.ptx`;
+the stale file is left beside it for comparison, clearly marked do-not-test in the READ ME.
+
+A USEFUL CONSOLIDATION: `01 130 G Full Stereo` has 7 markers AND lacks the 0x261B UUID list, so
+this ONE file now covers BOTH open experiments -- the no-UUID-list identity path and the
+marker-bearing duplication that today's row sync fixed. That drops the PT queue from four items
+to three, without dropping any coverage.
+
+VERIFIED BEFORE STAGING: markers 7->7, scaffold 35->42, playlists 5->6, the markers x playlists
+relation exact, ordinal column [1,2,3,4,5,6] with no repeat, zero new validator errors,
+re-encrypts and reloads byte-identically.
+
+GENERAL POINT WORTH KEEPING: **re-verify staged artifacts after every code change that could
+touch them.** Ten commits landed today; one of them silently invalidated a file that had been
+sitting on the Desktop waiting to be tested. Staging is a snapshot, and snapshots go stale.
