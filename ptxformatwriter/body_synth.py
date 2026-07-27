@@ -3723,7 +3723,11 @@ def synthesize_mixed_midi(
     # spec like [1,0,2,0] emitted `Audio 2 -> MIDI 2` as 0x0000. Repaired here, in the builder both
     # the inline and control-file donor paths share, so all three routes stay byte-identical.
     out = _reallocate_duplicate_track_ids(_repair_next_kind_chain(out))
-    return set_waveform_view(out)
+    # ...and put the playlist ordinals in BLOCK order. They were assigned in CREATION order, so a
+    # spec like [1,0,2,0] emitted [1,2,4,3] -- the grown MIDI took 4 while the stereo kept 3. Pro
+    # Tools never writes that: the value is the index of the track's FIRST PLAYLIST, so the column
+    # is a running total and strictly increasing by construction. No-op when already correct.
+    return _normalize_one_playlist_ordinals(set_waveform_view(out))
 
 
 def synthesize_mixed_midi_inline(spec: "list[int]", *, unique: bool = True) -> bytes:
@@ -6702,6 +6706,42 @@ def _selection_flag_offsets(data: bytes) -> "list[tuple[str, int]]":
             continue
         sites.append((anchor, delta))
     return sites
+
+
+def _normalize_one_playlist_ordinals(data: bytes) -> bytes:
+    """Put the `0x2015` playlist ordinals in BLOCK order when every track owns one playlist.
+
+    The synth writer numbered them in CREATION order, so growing a session by adding MIDI tracks
+    produced a column that is a permutation of `1..N` but not sorted::
+
+        spec [1,0,2]        ->  [1, 2, 3]        correct
+        spec [1,0,2,0]      ->  [1, 2, 4, 3]     the added MIDI took 4, the stereo kept 3
+        spec [1,0,2,0,0]    ->  [1, 2, 4, 5, 3]
+
+    Pro Tools never writes that: the value is the index of the track's FIRST PLAYLIST, so the column
+    is a running total and is strictly increasing by construction (250/250 real sessions). It is
+    also the exact shape of the sessions this project has been carrying as broken fixtures --
+    `mixedmidi_5_AMSmM` reads `[1,2,5,3,4]`, `mixedmidi_6_noextfiles` `[1,2,5,3,4,6]` -- so this was
+    still a LIVE defect, not the historical artefact the notes claimed. Only the `next_kind` half of
+    that old finding had been fixed.
+
+    The edit path already renumbered these positionally (`_rekey_positional_by_slot` writes `s+1`),
+    so synth and duplicate disagreed about the same field; this makes them agree.
+
+    Guarded twice, because the field's meaning was mis-documented twice: it acts only when the
+    `0x210B` count equals the `0x2015` count (one playlist per track, so `1..N` IS the running
+    total) and only when the current values are already a permutation of `1..N` (a pure reordering,
+    never an invention). Anything else is returned untouched.
+    """
+    sites = _playlist_ordinal_sites(data)
+    if not sites:
+        return data
+    n_pl = sum(1 for _z, _e, c in _size_driven_blocks(data) if c == 0x210B)
+    vals = [v for _p, v in sites]
+    want = list(range(1, len(sites) + 1))
+    if n_pl != len(sites) or vals == want or sorted(vals) != want:
+        return data
+    return _write_playlist_ordinals(data, [1] * len(sites))
 
 
 def _playlist_ordinal_sites(data: bytes) -> "list[tuple[int, int]]":

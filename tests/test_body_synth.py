@@ -2832,5 +2832,56 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(fixed, 100, "no session conformed -- the gate has probably broken")
 
 
+    def test_synth_playlist_ordinals_are_in_block_order(self):
+        """The synth writer numbered the `0x2015` playlist ordinals in CREATION order, so growing a
+        session with MIDI tracks emitted a permutation of `1..N` that was not sorted::
+
+            [1,0,2]      -> [1, 2, 3]        correct
+            [1,0,2,0]    -> [1, 2, 4, 3]     the grown MIDI took 4, the stereo kept 3
+            [1,0,2,0,0]  -> [1, 2, 4, 5, 3]
+
+        Pro Tools never writes that: the value is the index of the track's FIRST PLAYLIST, so the
+        column is a running total and is strictly increasing by construction. It is also the exact
+        shape of the `mixedmidi_*` fixtures this project carried as "historical" broken output --
+        `mixedmidi_5_AMSmM` reads `[1,2,5,3,4]` -- which means the defect was still LIVE. Only the
+        `next_kind` half of that old finding had actually been fixed.
+
+        The edit path already renumbered these positionally, so synth and duplicate disagreed about
+        one field; this pins that they agree.
+        """
+        for spec in ([1, 0, 2], [1, 0, 2, 0], [1, 0, 2, 0, 0],
+                     [1, 0, 2, 2, 1, 2], [1, 0, 2, 0, 2, 0]):
+            with self.subTest(spec=spec):
+                data = BS.synthesize_mixed_midi_inline(spec)
+                col = [v for _p, v in BS._playlist_ordinal_sites(data)]
+                self.assertEqual(col, list(range(1, len(col) + 1)),
+                                 msg="synth ordinals must be 1..N in BLOCK order")
+                self.assertIsNotNone(BS._playlist_counts(data),
+                                     msg="synth output must satisfy the playlist-ordinal convention")
+
+    def test_the_ordinal_normalizer_never_touches_a_real_session(self):
+        """It reorders; it must never invent. Guarded on the `0x210B` count matching the `0x2015`
+        count (so `1..N` genuinely IS the running total) and on the values already being a
+        permutation of `1..N`. Across the PT-authored controls it must be a strict no-op, and the
+        only files it may rewrite are ones this project produced.
+        """
+        touched, checked = [], 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            checked += 1
+            if BS._normalize_one_playlist_ordinals(data) != data:
+                touched.append(path.name)
+        self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
+        siblings = {q.name for q in ROOT.glob("control_files/**/*.ptx")}
+        for name in touched:
+            path = next(iter(ROOT.glob("control_files/**/" + name)))
+            with self.subTest(session=name):
+                self.assertTrue(BS.session_is_probably_ours(_load_path(path), path, siblings),
+                                msg=f"{name} is not ours, and the normalizer must not rewrite it")
+
+
 if __name__ == "__main__":
     unittest.main()

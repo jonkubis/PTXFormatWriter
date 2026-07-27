@@ -1045,6 +1045,17 @@ The 12 staged files were all built from that broken set. So **our SYNTH WRITER e
 duplicate failures were duplicates OF ALREADY-INVALID SESSIONS. That does not prove the add path is
 sound, but it does mean the previous experiment could not have told us either way.
 
+> **UPDATE 2026-07-26 -- HALF of this was fixed and half was still LIVE, and I nearly closed it as
+> stale.** Re-tested against the current writer: the `next_kind` chain is CLEAN on every spec tried
+> (`[1,0,2]`, `[1,0,2,0]`, `[1,0,2,0,0]`, `[1,0,2,2,1,2]`, `[1,0,2,0,2,0]`), so that half is genuinely
+> fixed. But the same runs showed the `0x2015` PLAYLIST ORDINALS still wrong -- `[1,0,2,0]` emitted
+> `[1,2,4,3]`, `[1,0,2,0,2,0]` emitted `[1,2,4,6,3,5]` -- numbered in CREATION order where Pro Tools'
+> is a running total and strictly increasing. That is the exact shape of the fixtures below
+> (`mixedmidi_5_AMSmM` = `[1,2,5,3,4]`), so the writer was STILL PRODUCING THEM. Fixed at the source
+> in `synthesize_mixed_midi`; all five specs now conform. **The lesson: "I tested the thing the note
+> names and it is fine" is not the same as "the note is stale."** The note named one symptom of a
+> two-part defect.
+
 PT's own re-saves confirm the direction: `Session File Backups/mixedmidi_click_bottom.bak.00{0,1}`
 are PT-generated and chain-CLEAN, while our `mixedmidi_click_bottom.ptx` with the same six track
 names is chain-BROKEN.
