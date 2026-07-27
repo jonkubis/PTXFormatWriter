@@ -4355,3 +4355,29 @@ WHY THIS BATCH WAS BETTER: I ordered by INSTANCE COUNT rather than by session co
 with 100,001 instances gives byte-constancy evidence no 180-instance type can, and the two most
 useful results here (0x2434's field, the 191k-instance scaffolding proof) both depended on that
 volume. Worth doing the remaining queue in that order.
+
+## Queue, batch 6: eleven entries, a THIRD proven field, and 0x2506 finally has one
+    entries 206 -> 216, mention-only 116 -> 106
+
+  * **0x2506 has an entry at last.** 1.8M instances corpus-wide and it was the single biggest
+    thing I settled today, yet it had no section -- the settled count rule, the two payload forms,
+    the per-playlist bit and the refuted mono/stereo reading are now all in one place instead of
+    scattered across a §5c note and a TODO.
+  * **0x1001 carries a PER-FILE sample rate**, `u32` @payload+0. Values 48000/44100, equal to the
+    SESSION rate in **9,182 of 9,183 instances**. Third proven field in these batches -- and note
+    the ONE exception is the interesting datum: a file whose rate differs from its session's.
+  * **0x1033 / 0x2106 are the constant companions of every 0x1003.** One each per audio-file
+    record. 0x1033: span 9, EMPTY payload, one form in all 7,496. 0x2106: ONE distinct payload
+    (all zeros) but VARIABLE span 144-254 -- **the size carries information even though the
+    content does not**, which is worth flagging as a shape to expect elsewhere.
+  * **The per-track routing sub-tree measured exactly:** `0x261B ⊃ 0x260D ⊃ {0x1029 (1:1, always),
+    0x260C (2:1), 0x260E (split with 0x2613)}`.
+  * **0x2038** -- span 19 in all 28,421, child always 0x2037, 3 distinct payloads.
+  * **0x2580** -- the type that dominated the accidental length-prefixed name matches in the
+    rename investigation; now documented as the dense-binary automation record it is.
+
+PATTERN ACROSS BATCHES 5 AND 6: the proven fields (0x2434 height, 0x1028 session rate, 0x1001
+file rate) all share one property -- **an externally meaningful value** (60/64 px, 44100/48000 Hz).
+Where a field's values are recognisable from outside the format, the corpus can settle it; where
+they are opaque integers, it cannot. That is a better predictor of "can I decode this" than
+instance count or universality, and it is worth applying to choose future targets.

@@ -2634,6 +2634,81 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x2506 — the marker × playlist scaffold row (settled)
+
+- **Kind:** LEAF. **Span 17 in all 215,024 instances**, `block_type` 3, **parent ALWAYS `0x2077`**
+  (215,024/215,024) — it exists only inside a marker.
+- **Count rule (settled, see §5c):** `rows(marker) == n_playlists` for every `0x2077`, holding in
+  385 of 386 marker-bearing sessions with no exception inside any of them. The one ragged session
+  carries two `0x2030` lists whose markers disagree.
+- **Payload — exactly TWO forms** across the survey, differing only in the `u32` at payload+2:
+  `FF FF FF FF` (78.4%) and `00 00 00 00` (21.6%). That `u32` is a **per-PLAYLIST** property,
+  identical down every marker and varying across playlists. Its meaning is UNPROVEN — mono/stereo
+  was tested and refuted (89.5% on mixed-bit sessions but 48.4% overall, a selection effect).
+- **Editing:** a track add/remove changes the playlist count, so it must add/drop one row per
+  marker. `body_synth.sync_marker_playlist_rows()` does this; `0x2077` has NO child-count field
+  (measured over 5,332 markers), so only sizes and the offset shift need fixing.
+- **Confidence:** HIGH on framing, parentage, the count rule and the two-form payload; the bit's
+  MEANING needs Pro Tools.
+
+### 0x1001 — per-audio-file descriptor (carries its own sample rate)
+
+- **Kind:** LEAF, parent **ALWAYS `0x1003`** (7,497/7,497), one per audio file.
+- **Field:** **`u32` LE at payload+0 is the file's sample rate.** Values 48000 (6,963) and 44100
+  (2,220), and it equals the SESSION rate in **9,182 of 9,183 instances (100.0%)** — the single
+  exception is the interesting case, a file whose rate differs from its session's.
+- **Size:** 40 (`block_type` 2) or 24 (`block_type` 1) — two forms.
+- **Confidence:** HIGH for the rate field (measured against `session_sample_rate()` across the
+  corpus); the remaining bytes are undecoded.
+
+### 0x1033 / 0x2106 — the two constant companions of every 0x1003
+
+Both have parent **ALWAYS `0x1003`** and appear once per audio file (7,496 and 7,497 against
+`0x1001`'s 7,497), so each `0x1003` file record carries exactly one of each.
+
+- **`0x1033`** — **span 9 in all 7,496 instances, payload EMPTY, ONE distinct form.** Pure
+  scaffolding, like `0x2626`.
+- **`0x2106`** — variable span (144…254) but **ONE distinct payload prefix, all zeros**. A
+  zero-filled reserved area whose LENGTH varies, which is unusual enough to note: the size
+  carries information even though the content does not.
+- **Confidence:** HIGH (byte-constancy at scale); purposes UNPROVEN.
+
+### 0x2038 — fixed 19-byte wrapper around a single 0x2037
+
+- **Kind:** span **19 in all 28,421 instances**, `block_type` 1, child **ALWAYS `0x2037`**, only
+  3 distinct payloads.
+- **Parents:** `0x200A` (13,528) and `0x2015` (8,277) — i.e. it appears in both the view-chain
+  container and the per-track view record.
+- **Confidence:** HIGH; purpose UNPROVEN.
+
+### 0x260D / 0x1029 / 0x260C / 0x260E — the per-track routing sub-tree
+
+Measured parentage makes the shape unambiguous:
+
+```
+0x261B  ⊃  0x260D  ⊃  0x1029      (5,161 — one per 0x260D, ALWAYS its child)
+                   ⊃  0x260C      (10,322 — parent ALWAYS 0x260D)
+                   ⊃  0x260E      (5,090 of 8,791; the other 3,701 are under 0x2613)
+```
+
+- **`0x260D`** — parent `0x261B` (5,155) or `0x2621` (6), always holding one `0x1029`. Spans
+  ~620–653, 290 distinct payloads: real per-track data.
+- **`0x1029`** — span 288 (`block_type` 13) or 164 (7); 446 distinct payloads.
+- **`0x260C`** — 2 per `0x260D` on average (10,322 vs 5,161), spans 62/23/68, only 28 distinct
+  payloads: near-constant, so mostly fixture with a few variants.
+- **`0x260E`** — split between `0x260D` (routing) and `0x2613` (the plugin cluster), 654 distinct
+  payloads.
+- **Confidence:** HIGH on the containment shape and the 1:1/2:1 ratios; field layouts undecoded.
+
+### 0x2580 — automation-lane value record
+
+- **Kind:** LEAF. Parents `0x2015` (3,988) and `0x2589` (1,355) — both view-chain records.
+- **Size:** 68 (5,081), 42 (232), 64 (20); only **3 distinct payload prefixes**, opening with a
+  nested `0x203B` framed inside the leaf.
+- **Note:** this is the type that dominated the ACCIDENTAL length-prefixed name matches when a
+  1-character track name was searched for (see §5's rename note) — its payload is dense binary.
+- **Confidence:** HIGH on framing/parentage; purpose UNPROVEN.
+
 ### 0x2434 — per-track display HEIGHT (fixed 18-byte leaf)
 
 - **Kind:** LEAF, **span 18 in every one of 9,677 instances**. Parent is `0x2015` (9,497 — the
