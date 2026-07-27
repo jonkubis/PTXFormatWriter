@@ -1034,6 +1034,19 @@ draws); `ft1`/`ft2` are the source mtime FILETIME, `filesize` the referenced WAV
    real: 0 of 267 `0x2107` containers across 480 sampled corpus sessions are empty, and the
    one session that has it (`BMG17 Apollo v13AS for Apollo Delivery.ptx`, 25 tracks, no
    playlists at all) crashed both `duplicate_track` and `remove_track`.
+> **WHERE A TRACK'S NAME ACTUALLY APPEARS (measured 2026-07-27).** A rename must find every
+> length-prefixed copy. Sampling one track per session suggests eight block types — `0x1014`,
+> `0x1052`, `0x1057`, `0x2015`, `0x2519`, `0x251A`, `0x210B`, `0x2619` — and that list is
+> INCOMPLETE. Across a wider sweep names also appear in **`0x202a`, `0x261f`, `0x2628`, `0x207a`,
+> `0x4501`, `0x4702`, `0x4809`**; `0x261f` is the VCA-shaped seventh track-record kind, and
+> `0x2628` is a REGION that was named after its track. A locator built on the eight-type list
+> refused 6 of 138 legitimate renames.
+>
+> Matching is by LENGTH-PREFIXED occurrence, which is strong but not absolute: for a
+> one-character name, `01 00 00 00 <byte>` arises by chance inside binary payloads. Real short
+> names are safe in practice (56 of 56 tracks named with 1–2 bytes round-trip byte-identically);
+> only synthetic names whose byte is pervasive in the payload collide.
+
 7. **Keep the `0x2519` name table's INLINE entry list in sync.** The name table stores, before
    its `0x5A`-framed children, a list of **inline name entries** — each `u32 name_length | name
    bytes | 23-byte trailer`, with a `0x0000002A` (u32 = 42) marker at trailer offset +6 (the

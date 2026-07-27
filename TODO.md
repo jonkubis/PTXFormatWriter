@@ -3972,3 +3972,37 @@ was the code deriving a value that real sessions disagree with -- record content
 the meter trailing entry. Each derivation was measured and TRUE for 82%-99.9% of the corpus,
 which is exactly why each survived so long. A no-op edit that is byte-exact BY CONSTRUCTION does
 not depend on any of those derivations being right.
+
+## rename_track: NO defect, a guard I tried and rejected, and a real spec finding
+Tested the inverse property `rename(A->B); rename(B->A) == original` across the corpus.
+
+    LONGER name   138/138 byte-identical
+    same length   137/138
+    SHORTER        128/138
+
+The 10+1 failures looked alarming (one round-trip grew the file by 1,518 bytes). They are an
+ARTIFACT OF MY TEST NAMES. `rename_track` matches LENGTH-PREFIXED occurrences, which is strong,
+but for a 1-character name `01 00 00 00 <byte>` occurs by chance in binary payloads: after
+renaming a track to `Z`, the session contained 83,096 raw `Z` bytes and some carried a matching
+length prefix, so renaming BACK hit unrelated data.
+
+**REAL short names are fine: 56/56 tracks whose name is 1-2 bytes (`OH`, `TC`, ...) round-trip
+BYTE-IDENTICALLY.** So there is no user-facing defect, and I did not ship a fix for one.
+
+TWO GUARDS TRIED AND REJECTED, both on measurement:
+  * **Block-type allowlist** (accept an occurrence only inside known name-bearing types). The
+    8-type list I measured separated real from accidental sites with ZERO overlap on 98
+    sessions -- and then refused 6 of 138 LEGITIMATE renames, because track names also appear in
+    `0x202a`, `0x261f`, `0x2628`, `0x4501`, `0x4702`, `0x4809`, `0x207a`. My sample used only each
+    session's FIRST track name and under-sampled the sites. Same trap as the 0x2506 multiplier
+    and the meter trailing entry: a rule that is perfectly clean on the sample I drew.
+  * **Minimum name length** (refuse renaming from a name < 3 bytes). Would refuse 100 real
+    tracks, and those demonstrably work.
+
+A guard that blocks legitimate work to prevent a failure nobody can hit is worse than no guard.
+
+THE REAL WIN IS THE SPEC FINDING: a track's length-prefixed name legitimately appears in
+**0x1014, 0x1052, 0x1057, 0x2015, 0x2519, 0x251A, 0x210B, 0x2619** *and also* **0x202a, 0x261f,
+0x2628, 0x207a, 0x4501, 0x4702, 0x4809** -- notably 0x261f (the VCA-shaped seventh track-record
+kind documented today) and 0x2628 (a REGION named after its track). Any future name-based edit
+must expect all of them; the shorter list is what an eight-type sample looks like.
