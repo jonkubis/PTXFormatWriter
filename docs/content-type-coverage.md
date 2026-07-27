@@ -29,7 +29,7 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 **322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 144 typed sections in the spec, **28 still say the PURPOSE is unproven** —
+Of the 144 typed sections in the spec, **26 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
