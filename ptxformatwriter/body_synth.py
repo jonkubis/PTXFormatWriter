@@ -2693,9 +2693,14 @@ def track_playlist_order(data: bytes) -> list[tuple[int, int]]:
     0x261c = audio, 0x261e = click, 0x2620 = MIDI. This is the list `reorder_tracks`'s
     `new_order` indexes (index 0 = the first-created track, etc.). All track kinds share
     one display-order list, so MIDI is included — its playlist is 0x2620."""
-    fb = flat_blocks(parse(data))
-    return sorted(((b.offset - 7, b.content_type) for b in fb
-                   if b.content_type in (0x261C, 0x261E, 0x2620)), key=lambda x: x[0])
+    # SIZE-DRIVEN, not the 0x5A-scan parser. The scan parser silently UNDERCOUNTS real
+    # sessions -- 37 playlists where there are 119, 29 where there are 104 -- on 31 of 140
+    # corpus sessions (22%). It does not raise; it just returns a short list, and
+    # `reorder_tracks` indexes this list, so a caller would have been reordering a third of the
+    # tracks and writing an index element list that omits the rest. The size-driven walk is the
+    # authoritative enumeration everywhere else in this module for exactly this reason.
+    return sorted(((z, c) for z, _e, c in _size_driven_blocks(data)
+                   if c in (0x261C, 0x261E, 0x2620)), key=lambda x: x[0])
 
 
 def _container_display_offsets(data: bytes) -> list[int]:
@@ -2705,9 +2710,14 @@ def _container_display_offsets(data: bytes) -> list[int]:
     body-offset order once MIDI is present (MIDI 0x2620 playlists cluster in the body away from
     the interleaved audio 0x261c). Used to translate a spec/display-relative permutation into
     `reorder_tracks`' body-offset index space."""
+    # SIZE-DRIVEN block sets, not `block_layout`'s scan-derived ones. `parse_records` frames a
+    # record's elements by "is this offset a live zmark", so a short zmark set makes a real
+    # element look like garbage: this raised `bad element tag ... record type 0x2624` on 33 of
+    # 140 corpus sessions, which is why the display order could not be read on any of them.
+    # Given the size-driven sets the same index parses cleanly on all 140.
     ref = _FI.final_index_ref(data)
-    zt, bt = _FI.block_layout(data)
-    for r in _FI.parse_records(ref.data, set(bt), set(zt)):
+    _bl = sorted(_raw_block_bounds(data, ref.start))
+    for r in _FI.parse_records(ref.data, {c for _z, _e, c in _bl}, {z for z, _e, _c in _bl}):
         if r.content_type == 0x2624 and r.count == 1 and r.flag == 1:
             return [e.offsets[0] for e in r.elements[1:] if e.offsets]
     return []

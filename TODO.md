@@ -4101,3 +4101,31 @@ master/bus target in duplicate_track, the block-type allowlist sample, the `list
 permutation here, and the wrong-length permutation before it. **Before reporting that code
 refuses N% of real sessions, check what the API says its inputs MEAN.** The docstring for
 reorder_tracks names its index list in the first sentence.
+
+## The display-order path was reading through the SCAN parser (two fixes, one open finding)
+Chasing the `bad element tag` refusals found that the master index parses cleanly on 140/140
+sessions when given SIZE-DRIVEN block sets. The failures came from the two readers feeding it
+scan-derived data instead.
+
+  1. `track_playlist_order` enumerated via `flat_blocks(parse(data))`. The scan parser does not
+     raise here -- it SILENTLY UNDERCOUNTS: **37 playlists where there are 119**, 29 where there
+     are 104, on **31 of 140 sessions (22%)**. Verified the extra blocks are real: all 119 are
+     DIRECT CHILDREN of the 0x2624 track list, not nested strays. `reorder_tracks` indexes this
+     list, so a caller would have been reordering a third of the tracks and writing an index
+     element list that omits the rest. Now size-driven.
+  2. `_container_display_offsets` passed `block_layout`'s scan-derived sets to `parse_records`,
+     which frames elements by "is this offset a live zmark" -- a short zmark set makes a real
+     element look like garbage. That is the actual source of `bad element tag ... 0x2624`, on
+     **33 of 140 sessions**. Now size-driven: 33 hard failures -> 0.
+
+    TRUE identity reorder (to the session's own display order): 85/85 byte-identical, unchanged.
+    232 tests green.
+
+OPEN, CHARACTERISED, DELIBERATELY NOT FIXED: on 54 sessions the index display list and the
+playlist list still differ in length, and the display list contains offsets that are NOT of the
+three types `track_playlist_order` filters for. The 0x2624 element list covers ALL track kinds --
+including 0x261D master, 0x261F (the VCA-shaped kind documented today) and 0x2621 -- while the
+filter is `(0x261C, 0x261E, 0x2620)`. Extending it changes `reorder_tracks`' INDEX SPACE, which
+is a behavioural change to a PT-CONFIRMED function, so it deserves its own pass rather than
+being tacked onto a reader fix at the end of a long day. Until then those sessions simply refuse
+(a caller cannot build a valid permutation), which is a safe state, not a corrupting one.
