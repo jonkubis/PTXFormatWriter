@@ -4066,3 +4066,38 @@ it is implementable), not a defect -- recorded as such rather than papered over.
     NOT chased: reorder_tracks refuses 66/138. Its refusals may be entirely legitimate (it is
     documented for synth-shaped sessions), but the ratio deserves the same split-by-reason
     treatment that turned duplicate_track's "40% refusal rate" into an artifact of my harness.
+
+## reorder_tracks: NOT a defect either -- my harness, for the FOURTH time today
+I flagged "reorder_tracks refuses 66 of 138" as deserving a split-by-reason. It did, and the
+answer was the same as every other refusal-rate scare this session.
+
+    62 of 66 refusals:  "new_order must be a permutation of 0..N"
+
+I built the permutation from `len(track_types(d))`. The function documents that it indexes
+`track_playlist_order(d)` -- a DIFFERENT list (all playlist kinds, including click/aux, which
+track_types omits). The two differ by up to 62 entries. With the documented length:
+
+    identity reorder byte-identical : 101
+    changed                         :   5
+    refused "bad element tag"       :   8   (a pre-existing index-parse issue on those files)
+
+And the 5 "changes" are not a defect either. `track_playlist_order` is CREATION order;
+`_container_display_offsets` is the CURRENT DISPLAY order. So `list(range(n))` does not mean
+"leave it alone", it means "reset the display order to creation order" -- which correctly
+rewrites index offsets on any session whose tracks were reordered in Pro Tools. Every diff was
+inside the master index with the length unchanged, exactly as an index-only edit should be.
+
+THE TRUE IDENTITY TEST -- reorder to the session's OWN current display order -- is byte-identical
+on 85/85 sessions where the two lists align.
+
+TWO LIMITS OF THAT TEST, stated because they matter:
+  * ZERO sessions in the sample had a display order differing from creation order, so it did not
+    exercise a genuine reorder. It shows the no-op path is faithful, not that reordering is.
+  * Sessions where `len(display) != len(playlists)` were SKIPPED, and those are probably the
+    same files as the 5 above. That shape is uncharacterised.
+
+FOUR TIMES IN ONE SESSION a "high failure rate" has turned out to be my test harness: the
+master/bus target in duplicate_track, the block-type allowlist sample, the `list(range(n))`
+permutation here, and the wrong-length permutation before it. **Before reporting that code
+refuses N% of real sessions, check what the API says its inputs MEAN.** The docstring for
+reorder_tracks names its index list in the first sentence.
