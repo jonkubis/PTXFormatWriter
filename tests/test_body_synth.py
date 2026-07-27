@@ -2913,5 +2913,41 @@ class NameTablePreambleTests(unittest.TestCase):
                 BS._assert_name_table_complete(data)   # must not raise
 
 
+    def test_name_table_guard_separates_off_by_one_from_truncation(self):
+        """The guard must still refuse a catastrophically truncated table while tolerating a
+        one-row shortfall.
+
+        Measured over 612 sessions on four drives, the shortfall (track records minus parsed name
+        entries) is bimodal with NOTHING between 2 and 19: 562 exact, 7 short by one, 42 short by
+        20-152. The motivating case for this guard was 18 names for 54 records. Treating a
+        one-row discrepancy and a 130-row one as the same condition conflates two different
+        failures, and doing so made 7 previously-editable real sessions start refusing when
+        `0x261F` was added to the record set.
+
+        Synthetic here, so it needs no external drive: the property is about the THRESHOLD, and a
+        session is not required to demonstrate arithmetic.
+        """
+        real = BS._assert_name_table_complete
+
+        class FakeBL(list):
+            pass
+
+        # Drive the threshold directly rather than through a fixture: patch the two counts the
+        # guard derives, so the test states the boundary instead of depending on a corpus file.
+        import unittest.mock as mock
+        for ents, trk, should_raise in ((176, 176, False), (175, 176, False),
+                                        (174, 176, True), (81, 177, True)):
+            with self.subTest(entries=ents, records=trk):
+                with mock.patch.object(BS, "_inline_name_entries",
+                                       return_value=[("t%d" % i, 0) for i in range(ents)]), \
+                     mock.patch.object(BS, "_size_driven_blocks",
+                                       return_value=[(0, 1, 0x2519)] + [(0, 1, 0x261C)] * trk):
+                    if should_raise:
+                        with self.assertRaises(ValueError):
+                            real(b"", None)
+                    else:
+                        real(b"", None)
+
+
 if __name__ == "__main__":
     unittest.main()
