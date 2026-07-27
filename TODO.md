@@ -332,6 +332,43 @@ records, all 6 integer id ranges distinct, `duplicate -> remove` byte-exact.
 A crash there is a RESULT, not a setback: it would point straight at the remaining identity field,
 the same way "both Audio 4 tracks are selected" pointed at the two selection flags.
 
+## THE COMPLETE TRACK-IDENTITY MODEL, MEASURED (2026-07-27)
+
+The spec described the track subtree as "GUID-keyed (8B GUID in `0x102d` after `2A 00 00 00`)" with
+"exactly one `0x261B` per track of ANY type". Both halves are narrower than that. Measured across
+four drives:
+
+    field                         coverage
+    0x102D block                  9945/9945 records, EVERY kind, all four corpora   100%
+    2A GUID tag inside it         control 1464/1464, Mac-4TB 6311/6311,
+                                  Hack 1694/1694  -- but /Volumes/Samples 376/476    79%
+    0x261B                        audio, click/aux, master ONLY (100% of those);
+                                  MIDI, instrument, VCA have NONE
+    0x261B ten-UUID list          control + Mac-4TB 100%; Samples 32%, Hack 48%
+
+`/Volumes/Samples` is PT HD 10.3/11.2 -- the same generation missing the UUID list -- so on that
+vintage roughly a fifth of tracks carry NO GUID at the documented location. Combined with the
+0x261B rules, a MIDI track in such a session has no identity field this codebase reads at all.
+
+GUID COLLISIONS ARE NOT A REAL PROBLEM: 0/45 sessions on each external corpus. The 2/58 in
+control_files are our own broken fixtures.
+
+FOUR OF MY OWN PROBES WERE WRONG BEFORE THIS CAME OUT RIGHT, all the same shape -- an unscoped or
+ambiguous search reporting something other than what it claimed:
+
+  * "GUIDs collide in 13/150 external sessions" -- an unscoped `find(2A 00 00 00)` matching
+    coincidental bytes anywhere in the record. Scoped to the 0x102D child: 0/45.
+  * "10 of 16 records have no 0x102D" -- all 16 have one; my probe returned None when EITHER the
+    block was missing OR it held no tag, and I read it as the first.
+  * `meter_map` "the module's worst offender" -- applicability judged by block presence; 219
+    sessions declare count=0 and an empty result is correct.
+  * a clean 100% for `_uuid_list_offset` from `sorted(paths)[:280]`, which puts control_files first
+    and truncated away the three drives that expose every real defect.
+
+A probe is just another locator that can fail silently. The discipline this project applies to the
+SPEC's claims -- scope the search, name the denominator, distinguish the failure modes -- has to
+apply to the instrumentation with equal suspicion.
+
 ## WHICH IDENTITY MECHANISM APPLIES TO WHICH TRACK KIND (2026-07-27)
 
 Follows from `0x261B` belonging to exactly three kinds. A track's identity is not one thing:
