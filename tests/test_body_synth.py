@@ -3062,5 +3062,22 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
 
 
+    # NO REGRESSION TEST FOR THE GUID-LESS DUPLICATE, and the reason is worth recording.
+    #
+    # The defect: `_reallocate_duplicate_track_ids` located the copy's 0x261B by matching the FRESH
+    # GUIDs, so a track with no `2A 00 00 00` in its 0x102D left the copy SHARING its source's id
+    # range -- the condition Pro Tools crashed on. Fixed with a structural fallback; verified on 5
+    # real sessions from /Volumes/Samples, where ~21% of 0x102D blocks carry no tag.
+    #
+    # I wrote a synthetic test for it -- blank the tag in one track's 0x102D on `4 mono tracks`,
+    # duplicate that track, assert the copy takes a distinct range -- and then checked that it FAILS
+    # with the fix disabled. It does not: it passes either way. Blanking that tag does not reproduce
+    # the condition, because the fresh-GUID map the remap matches against is not derived from it.
+    #
+    # A test that passes with and without the fix is worse than no test: it advertises a guard that
+    # does not exist. Removed rather than left in place. Reproducing this without an external drive
+    # needs a real GUID-less fixture, or an understanding of where `gmap` actually comes from --
+    # neither of which is available here yet.
+
 if __name__ == "__main__":
     unittest.main()
