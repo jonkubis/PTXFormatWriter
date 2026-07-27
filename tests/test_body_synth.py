@@ -2759,5 +2759,78 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertGreater(checked, 3, "mono ladder not found -- the degenerate case proved nothing")
 
 
+    def test_playlist_ordinal_repair_reproduces_pro_tools_own_column(self):
+        """The strongest local check available for the repair FORMULA: recomputing the ordinal
+        column from the playlist counts it derives must reproduce, byte for byte, what Pro Tools
+        already wrote. If the formula were wrong, an unedited session would change.
+
+        `_playlist_counts` gates on three agreeing properties -- starts at 1, strictly increasing,
+        and gaps summing to exactly the 0x210B count. The third is the one that matters: it ties the
+        column to an INDEPENDENT object count instead of to itself, which is what a field documented
+        wrongly twice requires.
+        """
+        checked = conforming = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                data = _load_path(path)
+            except Exception:
+                continue
+            checked += 1
+            counts = BS._playlist_counts(data)
+            if counts is None:
+                continue
+            conforming += 1
+            with self.subTest(session=path.name):
+                self.assertEqual(BS._write_playlist_ordinals(data, counts), data,
+                                 msg="recomputing the column changed an UNEDITED Pro Tools session")
+        self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
+        self.assertGreater(conforming, 100, "nothing conformed -- the gate has probably broken")
+
+    def test_playlist_ordinal_repair_is_an_exact_inverse_and_fixes_the_collision(self):
+        """duplicate -> repair -> remove -> repair must return the original byte for byte, and the
+        repaired column must not contain the duplicate ordinal an unrepaired copy leaves.
+
+        Opt-in, so this exercises the helpers directly rather than the default editor path: enabling
+        it rewrites SURVIVING tracks, and Pro Tools opened an UNREPAIRED duplicate cleanly, so the
+        default stays where PT has confirmed it until a PT run says otherwise.
+        """
+        checked = fixed = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            if "Backups" in str(path):
+                continue
+            try:
+                data = _load_path(path)
+                bl = BS._size_driven_blocks(data)
+                nt = [(z, e) for z, e, c in bl if c == 0x2519]
+                if not nt:
+                    continue
+                names = [nm for nm, _p in BS._inline_name_entries(data, nt[0][0], nt[0][1], bl)]
+                if not names:
+                    continue
+                raw = BS.duplicate_track(data, names[-1], "ZZ")
+                # BASELINE FIRST. Two control fixtures (`robust_audio_mixed12`,
+                # `synth_4mono_8stereo`) have malformed name tables -- they are our own broken
+                # output -- and their round trip is already inexact WITHOUT any repair. The
+                # property under test is that the repair does not break what worked, not that it
+                # fixes pre-existing breakage, so sessions that fail the baseline are skipped.
+                if BS.remove_track(raw, "ZZ") != data:
+                    continue
+                rep = BS.repair_playlist_ordinals_after_add(data, raw)
+                back = BS.remove_track(rep, "ZZ")
+                back = BS.repair_playlist_ordinals_after_remove(rep, back)
+            except Exception:
+                continue
+            checked += 1
+            col = [v for _p, v in BS._playlist_ordinal_sites(rep)]
+            with self.subTest(session=path.name):
+                if BS._playlist_counts(data) is not None:
+                    self.assertEqual(len(col), len(set(col)),
+                                     msg="the repaired column still repeats an ordinal")
+                    fixed += 1
+                self.assertEqual(back, data, msg="repair must invert exactly")
+        self.assertGreater(checked, 200, "control corpus not found -- proved nothing")
+        self.assertGreater(fixed, 100, "no session conformed -- the gate has probably broken")
+
+
 if __name__ == "__main__":
     unittest.main()

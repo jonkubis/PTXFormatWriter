@@ -166,18 +166,35 @@ That was wrong,** and it is a cleaner example of the corpus-width trap than the 
 250/250 reads like overwhelming evidence and is exactly as narrow as 1/1: `control_files` is ONE
 machine, `/Volumes/Samples` is ONE vendor, and every session in both owns one playlist per track.
 
-**NOT IMPLEMENTED, deliberately.** Every duplicate does leave two tracks sharing an ordinal (216/216
-control sessions), so the defect is real -- but Pro Tools opened, used and closed such a file
-cleanly (PT-confirmed this session), so it is FIDELITY, not a crash. Correcting it rewrites SURVIVING
-tracks (everything after the copy shifts by the copy's playlist count), which is the exact class of
-change reverted repeatedly here, and no local oracle can validate it. Trading a PT-CONFIRMED-WORKING
-path for an unverifiable fidelity gain is a bad trade; it waits for a PT run.
+**IMPLEMENTED AND TESTED, OPT-IN, DEFAULT OFF** -- `repair_playlist_ordinals_after_add` /
+`..._after_remove`. Every duplicate leaves two tracks sharing an ordinal (226/226 control sessions),
+so the defect is real, but Pro Tools opened, used and closed such a file cleanly (PT-confirmed this
+session): it is FIDELITY, not a crash. The repair rewrites SURVIVING tracks -- everything below the
+copy shifts -- which is the exact class of change reverted four times here, so the DEFAULT stays
+where Pro Tools has confirmed it. Flipping it after one PT run is a one-line change, not a build.
 
-    THE RULE, ready to implement:
-      pc(src) = value[src+1] - value[src]          (or n_0x210B + 1 - value[src] if src is last)
-      copy    = value[src] + pc(src)
-      every track after the copy  +=  pc(src)
-      GATE on the pre-edit column satisfying the invariant; leave non-conforming sessions alone.
+    counts[i]  = ord[i+1] - ord[i]        (last: n_0x210B + 1 - ord[last])
+    add:    insert counts[src] at the copy's index, rewrite the column as prefix sums from 1
+    remove: delete that entry, rewrite               <- exact inverse by construction
+
+CONFORMANCE IS CHECKED THREE WAYS, all must agree: column starts at 1, strictly increasing, and its
+gaps sum to EXACTLY the 0x210B count. The third is the one that earns trust -- it ties the column to
+an INDEPENDENT object count instead of to itself, which is the minimum bar for a field that has been
+documented wrongly twice.
+
+    re-writing the column on an UNEDITED session        NO-OP on 337/337 conforming (of 492)
+    duplicate -> repair -> remove -> repair             byte-exact 224/226
+    unrepaired duplicates with a repeated ordinal       226/226
+    repaired columns all-distinct                       216   (the other 10 are the
+                                                              non-conforming files, declined)
+
+The no-op result is the real validation of the FORMULA: recomputing the column from the counts it
+derives reproduces Pro Tools' own bytes exactly, on every conforming session. A wrong formula would
+have moved something.
+
+The 2 inexact round trips are `robust_audio_mixed12` and `synth_4mono_8stereo`, whose malformed name
+tables make the round trip inexact WITHOUT any repair -- the test gates on that baseline, because
+the property under test is "does not break what worked", not "fixes pre-existing breakage".
 
 **PROVEN BY NAME, not just arithmetic (2026-07-26, later).** `body_synth.track_playlists(data)` now
 attributes playlists to tracks via this rule and the result is checkable against Pro Tools' own

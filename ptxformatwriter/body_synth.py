@@ -6704,6 +6704,103 @@ def _selection_flag_offsets(data: bytes) -> "list[tuple[str, int]]":
     return sites
 
 
+def _playlist_ordinal_sites(data: bytes) -> "list[tuple[int, int]]":
+    """`(absolute position, value)` of each `0x2015`'s playlist ordinal, in block order."""
+    out: "list[tuple[int, int]]" = []
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x2015:
+            continue
+        a = data.find(_ORD2015_ANCHOR, z, e)
+        if a >= 0 and a + 22 <= e:
+            out.append((a + 18, int.from_bytes(data[a + 18 : a + 22], "little")))
+    return out
+
+
+def _playlist_counts(data: bytes) -> "list[int] | None":
+    """Playlists owned by each track, derived from the ordinal column, or `None` if this session
+    does not follow the convention (in which case no caller may write).
+
+    Conformance is checked THREE ways, all of which must agree, because this same field has been
+    documented wrongly twice: the column starts at 1, is strictly increasing, and its gaps sum to
+    exactly the `0x210B` count. The third is the one that makes the counts trustworthy -- it ties
+    the column to an independent object count rather than to itself.
+    """
+    ords = [v for _p, v in _playlist_ordinal_sites(data)]
+    n_pl = sum(1 for _z, _e, c in _size_driven_blocks(data) if c == 0x210B)
+    if not ords or ords[0] != 1 or any(b <= a for a, b in zip(ords, ords[1:])):
+        return None
+    counts = [b - a for a, b in zip(ords, ords[1:])] + [n_pl + 1 - ords[-1]]
+    if any(c < 1 for c in counts) or sum(counts) != n_pl:
+        return None
+    return counts
+
+
+def _write_playlist_ordinals(data: bytes, counts: "list[int]") -> bytes:
+    """Rewrite the ordinal column to the prefix sums of `counts` (`1, 1+c0, 1+c0+c1, ...`)."""
+    sites = _playlist_ordinal_sites(data)
+    if len(sites) != len(counts):
+        return data
+    out = bytearray(data)
+    v = 1
+    for (pos, _old), c in zip(sites, counts):
+        out[pos : pos + 4] = v.to_bytes(4, "little")
+        v += c
+    return bytes(out)
+
+
+def repair_playlist_ordinals_after_add(before: bytes, after: bytes,
+                                       copy_index: "int | None" = None) -> bytes:
+    """Give a duplicated track its own playlist ordinal, shifting the tracks below it.
+
+    A byte-copied duplicate inherits its source's ordinal, so two tracks claim the same first
+    playlist -- 216/216 control sessions. The copy owns as many playlists as its source (it IS a
+    byte copy), so the repair is: insert the source's count at the copy's position and recompute the
+    column as prefix sums.
+
+    OPT-IN, and off by default. It rewrites SURVIVING tracks -- every track below the copy shifts --
+    which is the exact class of change reverted repeatedly in this project, and Pro Tools opened,
+    used and closed an unrepaired duplicate cleanly, so the defect is FIDELITY, not a crash. Trading
+    a PT-confirmed-working path for an unverified one is a bad trade until a Pro Tools run says
+    otherwise. `repair_playlist_ordinals_after_remove` is its exact inverse, so enabling both keeps
+    `duplicate -> remove` byte-exact.
+
+    Returns `after` unchanged when the pre-edit session does not follow the convention.
+    """
+    counts = _playlist_counts(before)
+    if counts is None:
+        return after
+    if copy_index is None:
+        copy_index = _added_block_index(before, after, 0x2015)
+    if copy_index is None or not (0 < copy_index <= len(counts)):
+        return after
+    src = copy_index - 1                       # a copy is inserted directly after its source
+    return _write_playlist_ordinals(after, counts[:copy_index] + [counts[src]] + counts[copy_index:])
+
+
+def repair_playlist_ordinals_after_remove(before: bytes, after: bytes,
+                                          removed_index: "int | None" = None) -> bytes:
+    """Close the gap a removed track leaves in the playlist ordinal column — the exact inverse of
+    `repair_playlist_ordinals_after_add`. Opt-in, for the same reason."""
+    counts = _playlist_counts(before)
+    if counts is None:
+        return after
+    if removed_index is None:
+        removed_index = _removed_block_index(before, after, 0x2015)
+    if removed_index is None or not (0 <= removed_index < len(counts)):
+        return after
+    return _write_playlist_ordinals(after, counts[:removed_index] + counts[removed_index + 1 :])
+
+
+def _removed_block_index(before: bytes, after: bytes, ctype: int) -> "int | None":
+    """Index of the one `ctype` block a track-remove DELETED, mirroring `_added_block_index`."""
+    pre = [bytes(before[z:e]) for z, e, c in _size_driven_blocks(before) if c == ctype]
+    post = [bytes(after[z:e]) for z, e, c in _size_driven_blocks(after) if c == ctype]
+    if len(pre) != len(post) + 1:
+        return None
+    hits = [i for i in range(len(pre)) if pre[:i] + pre[i + 1 :] == post]
+    return hits[0] if hits else None
+
+
 def _added_block_index(before: bytes, after: bytes, ctype: int) -> "int | None":
     """Index of the one `ctype` block a track-add INSERTED, or `None` if that cannot be pinned down.
 
