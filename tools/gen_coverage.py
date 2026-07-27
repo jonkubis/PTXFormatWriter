@@ -59,7 +59,7 @@ for pat in CORPORA:
 # Payload types the walk must not believe it can descend into.
 LEAF_PAYLOADS = {0x1038, 0x2613, 0x2615, 0x2616, 0x1003, 0x1017}
 counts=collections.Counter(); sessions=collections.Counter(); indexed=collections.Counter()
-nested_in_leaf=collections.Counter(); n=0
+nested_in_leaf=collections.Counter(); size8_under_1014=collections.Counter(); n=0
 # Progress + a slow-session report, both flushed. Profiling says a typical session costs ~0.5s and
 # is dominated by the XOR de-obfuscation, so 832 sessions should take ~7 minutes -- but an earlier
 # exhaustive run sat at 98% CPU for nearly THREE HOURS with no output, because stdout was block
@@ -89,12 +89,14 @@ for _i, p in enumerate(allp):
     # it means an unfiltered "undocumented types" list is mostly garbage. Measured: of 213 types
     # unique to the two SSDs, 164 are phantoms.
     leaves=[(lz,le) for lz,le,lc in bl if lc in LEAF_PAYLOADS]
+    entries_1014=[(pz,pe) for pz,pe,pc in bl if pc==0x1014]
     for z,e,c in bl:
         if z < 31 or c == -1:   # the index-pointer record is NOT a typed block (see spec)
             continue
         counts[c]+=1; seen.add(c)
         if z in idx: indexed[c]+=1
         if any(lz < z and e <= le for lz,le in leaves): nested_in_leaf[c]+=1
+        if (e-z) == 8 and any(pz < z and e <= pe for pz,pe in entries_1014): size8_under_1014[c]+=1
     for c in seen: sessions[c]+=1
 spec=open("docs/ptx-format-spec.md").read().lower()
 doc={c for c in counts if ("0x%04x"%c) in spec}
@@ -134,14 +136,22 @@ lines.append("> they have since been dissected and documented. A naive walk also
 lines.append("> \"types\" that are really ONE artifact — the file-header index pointer at body offset 20,")
 lines.append("> whose per-session value is misread as a content-type (see the spec). It is excluded here.\n")
 def is_phantom(c):
-    """Phantom by EITHER of two independent signatures, both measured, not guessed."""
+    """Phantom by ANY of three independent signatures, all measured, none guessed."""
     if counts[c] and nested_in_leaf[c] >= 0.5*counts[c]:
         return True                       # lives inside a leaf payload
-    return (c & 0xFF) == 0 and indexed[c] == 0   # 256*k arithmetic, never index-referenced
+    if (c & 0xFF) == 0 and indexed[c] == 0:
+        return True                       # 256*k arithmetic, never index-referenced
+    # The 8-byte identity id that follows the `2A 00 00 00` tag inside a 0x1014 track-list entry.
+    # Its last byte lands where a size field would be, framing a phantom of DECLARED SIZE 8 whose
+    # parent is always the 0x1014. Found by dissecting the survivors of the first two signatures:
+    # 0x0024/0x0033/0x0034/0x001c each appear in 1-2 sessions, always size 8, always under 0x1014.
+    # The spec already records this GUID as a phantom source; this is the same one, counted.
+    return counts[c] and size8_under_1014[c] >= 0.5*counts[c]
 phantom = {c for c in undoc if is_phantom(c)}
 real_undoc = [c for c in undoc if c not in phantom]
 lines.append("## Phantoms, excluded from the work list\n")
-lines.append("`0x5A` is `'Z'` and occurs freely inside leaf payloads, so the size-driven walk frames")
+lines.append("`0x5A` is `'Z'` and occurs freely inside leaf payloads and binary id fields, so the")
+lines.append("size-driven walk frames")
 lines.append("noise there. **%d of the %d undocumented types are phantoms** by one of two measured"%(len(phantom),len(undoc)))
 lines.append("signatures: ≥50%% of instances nested inside a leaf payload (`0x1038` plug-in state,")
 lines.append("`0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`), or a type whose low byte is")

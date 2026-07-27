@@ -2790,6 +2790,48 @@ family. Whatever accounts for extra playlists there, `0x261F` is not it in gener
 To settle it: a session known to contain the feature, opened in Pro Tools, so the on-screen object
 can be matched to the block. Nothing in the reachable corpora distinguishes the candidates.
 
+### 0x203f — a second 22-byte view-chain element, beside `0x203b`
+
+The last types left after phantom filtering across 832 sessions on four drives. All PT-authored —
+zero instances in this project's own output, checked with `session_is_probably_ours`.
+
+**`0x203f`** — 23 blocks in 9 sessions, **fixed size 22**, parent `0x2015` (22/23) or `0x2589` (1/23).
+That is exactly `0x203b`'s signature: same 22 bytes, same display-chain parents. So the view chain
+carries (at least) **two** such elements, and `_view_volume_offsets`' discriminator — "a view VOLUME's
+immediate parent is its display chain, an automation VOLUME's is its `0x2580` lane" — separates
+`0x203b` from automation but does *not* distinguish `0x203b` from `0x203f`. Any code that locates a
+view element by size-22-under-`0x2015` alone can match the wrong one. **Which display parameter each
+carries is UNPROVEN**; they never co-occur under the same parent in the sampled sessions.
+
+**`0x2631`** — 22 blocks in 5 sessions, parent `0x2632` in 22/22, sizes 250–382 (variable, so
+name- or list-driven). `0x2632` is itself sparse here. Purpose UNKNOWN; its position next to the
+region records (`0x2628`/`0x2629`) is suggestive and nothing more.
+
+**`0x255c`** (4 blocks / 4 sessions, sizes 563–572) and **`0x2557`** (1 block, size 56) both sit
+under **`0x2551`**. Two children of one sparse container; n is far too small to say more.
+
+**`0x2757`** — a single 88,583-byte "block" under `0x1004`, the file-descriptor list. Almost
+certainly a phantom framed inside filename data rather than a type, but it survives all three
+phantom signatures, so it is listed honestly rather than filtered by assertion. n=1.
+
+#### The three phantom signatures, and why the list is 5 and not 171
+
+A raw size-driven walk over those 832 sessions reports 482 content-types, 171 of them undocumented.
+**166 are phantoms.** `0x5A` is `'Z'` and appears freely in binary payloads, so the walk frames
+noise. Each signature below was measured, and each was found by dissecting the survivors of the one
+before it:
+
+1. **≥50% of instances nested inside a leaf payload** — `0x1038` plug-in state, `0x2613`/`0x2615`/
+   `0x2616` view blobs, `0x1003`, `0x1017`. Catches the bulk.
+2. **Low byte `0x00`, never index-referenced** — the `256 × k` arithmetic of a string LENGTH or
+   first letter read as a type: `0x1600` = 256×22, `0x0c00` = 256×12, `0x4100` = 256×`'A'`.
+3. **Declared size 8, parent `0x1014`** — the 8-byte identity id following the `2A 00 00 00` tag in
+   a track-list entry, whose last byte lands where a size field would be. Catches `0x0024`,
+   `0x0033`, `0x0034`, `0x001c`, each in 1–2 sessions.
+
+Reporting the unfiltered 171 would hand the next reader a work list that is mostly garbage — the
+same error as the FALSE `100%` this project's tracker once carried, pointing the other way.
+
 ### 0x2612 — I/O routing-path entry (single output/bus signal path)
 
 - **Kind:** CONTAINER (block_type u16 = 0x0003) with exactly 2 immediate children in fixed order: 0x2626 (a 2-byte empty/placeholder marker, block_type 0x0001) then 0x260e (path-detail record carrying the name, block_type 0x0001). Parent = 0x2627 (path list; sibling children there are 0x2625 ×6 and 0x2616 ×4). Grandparent = 0x261b (I/O/bus group). NOTE: the size-driven enumerator gives the two children a 1-byte overlap (0x2626 rel-end = 0x260e rel-start = 18) because they share the 0x5A frame marker.

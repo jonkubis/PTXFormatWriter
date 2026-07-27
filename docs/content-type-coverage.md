@@ -22,7 +22,7 @@ content-types than all 282 control files.
 Also excluded: ~2 files under `/Volumes/Hack 2TB SSD Old` that are NVIDIA CUDA PTX
 assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
-**311/482 content-types have a spec entry = 64.5%**, covering 99.93% of block instances.
+**322/482 content-types have a spec entry = 66.8%**, covering 99.93% of block instances.
 
 **Read that number carefully.** It means every type observed in this corpus is
 *described* — framing, parent/child, per-session counts, and payload layout where
@@ -41,8 +41,9 @@ fix is to state exactly what was measured and what was not.
 
 ## Phantoms, excluded from the work list
 
-`0x5A` is `'Z'` and occurs freely inside leaf payloads, so the size-driven walk frames
-noise there. **162 of the 171 undocumented types are phantoms** by one of two measured
+`0x5A` is `'Z'` and occurs freely inside leaf payloads and binary id fields, so the
+size-driven walk frames
+noise there. **160 of the 160 undocumented types are phantoms** by one of two measured
 signatures: ≥50%% of instances nested inside a leaf payload (`0x1038` plug-in state,
 `0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`), or a type whose low byte is
 `0x00` that the master index never references — the `256 × k` arithmetic of a string
@@ -52,19 +53,7 @@ Reporting them as undocumented would hand the next reader a work list that is mo
 garbage — the same mistake, in the other direction, as the FALSE 100%% this file once
 carried.
 
-**9 content-types remain genuinely undocumented.**
-
-| content-type | blocks | in #sessions | indexed |
-|---|---:|---:|---:|
-| `0x203f` | 23 | 9 | 0 |
-| `0x2631` | 22 | 5 | 0 |
-| `0x255c` | 4 | 4 | 0 |
-| `0x0024` | 2 | 2 | 0 |
-| `0x0033` | 2 | 2 | 0 |
-| `0x0034` | 2 | 2 | 0 |
-| `0x001c` | 1 | 1 | 0 |
-| `0x2557` | 1 | 1 | 0 |
-| `0x2757` | 1 | 1 | 0 |
+**0 content-types remain genuinely undocumented.**
 
 ## Undocumented types — raw, phantoms included
 
@@ -72,10 +61,8 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 
 | content-type | blocks | in #sessions | indexed | 
 |---|---:|---:|---:|
-| `0x1600` | 71 | 71 | 0 |
 | `0xb300` | 219 | 47 | 0 |
 | `0x2f00` | 197 | 47 | 0 |
-| `0x0c00` | 34 | 34 | 0 |
 | `0x7500` | 62 | 31 | 0 |
 | `0x2401` | 62 | 31 | 0 |
 | `0x7200` | 31 | 31 | 0 |
@@ -100,11 +87,11 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 | `0x301b` | 31 | 31 | 0 |
 | `0xf01c` | 31 | 31 | 0 |
 | `0x381b` | 31 | 31 | 0 |
+| `0xde1c` | 31 | 31 | 0 |
 | `0x121f` | 31 | 31 | 0 |
 | `0x3c20` | 31 | 31 | 0 |
-| `0xde1c` | 31 | 31 | 0 |
-| `0x0422` | 31 | 31 | 0 |
 | `0xd01e` | 31 | 31 | 0 |
+| `0x0422` | 31 | 31 | 0 |
 | `0xdf09` | 31 | 31 | 0 |
 | `0x2500` | 31 | 31 | 0 |
 | `0xde2e` | 31 | 31 | 0 |
@@ -132,11 +119,13 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 | `0x6abf` | 31 | 31 | 0 |
 | `0xb904` | 31 | 31 | 0 |
 | `0x7b03` | 31 | 31 | 0 |
+| `0xdafa` | 31 | 31 | 0 |
+| `0x4b00` | 31 | 31 | 0 |
 
-…and 111 more (long tail, each in <32 sessions).
+…and 100 more (long tail, each in <32 sessions).
 
 
 ## Documented types
 
-311 types are covered by `ptx-format-spec.md`, accounting for 99.93% of block instances.
+322 types are covered by `ptx-format-spec.md`, accounting for 99.93% of block instances.
 

@@ -62,6 +62,36 @@ FIXED. The re-key is now a **complete no-op on unedited Pro Tools sessions: 0/12
 on all four corpora** (control_files, Samples, Mac 4TB, Hack 2TB) -- 480 sessions. Pinned by
 `test_no_write_is_derived_from_a_phantom_block`.
 
+## EVERY OBSERVED REAL CONTENT-TYPE IS NOW DOCUMENTED (2026-07-26)
+
+    832 sessions, four drives   482 types   322 documented   160 phantoms   0 real undocumented
+
+Read that precisely, because this file once carried a FALSE "100% documented":
+
+  * **"Documented" means DESCRIBED** -- framing, parent/child, per-session counts, payload layout
+    where decodable. It does NOT mean every field's MEANING is proven. Entries still say
+    `purpose UNKNOWN` and mark fields `UNPROVEN`; that is the remaining semantic work and it is
+    deliberately visible.
+  * **C and D are SAMPLED** at 150 of 819 and 150 of 1610. A rarer type may exist outside the
+    sample. The denominators are printed in the tracker for exactly this reason.
+
+The last five needed dissection rather than filtering: `0x203f` (a SECOND 22-byte view-chain element
+beside `0x203b`, same size and same `0x2015` parent -- so any locator keyed on
+size-22-under-`0x2015` can match the wrong one), `0x2631` under `0x2632`, `0x255c` + `0x2557` under
+`0x2551`, and `0x2757`, a lone 88 KB "block" under `0x1004` that survives all three phantom
+signatures and is listed honestly rather than filtered by assertion. All PT-authored -- zero
+instances in our own output, checked with `session_is_probably_ours`.
+
+THREE PHANTOM SIGNATURES, each found by dissecting the survivors of the previous one:
+
+    1. >=50% of instances nested inside a leaf payload (0x1038, 0x2613/5/6, 0x1003, 0x1017)
+    2. low byte 0x00 and never index-referenced -- 256*k of a string LENGTH or first letter
+    3. declared size 8 with parent 0x1014 -- the 8-byte id after the `2A 00 00 00` tag
+
+Unfiltered, the walk reports 171 undocumented types. 166 are noise. Publishing that number would
+hand the next reader a work list that is mostly garbage -- the same failure as the false 100%,
+pointing the other way.
+
 ## FOUR UNDOCUMENTED TYPES, AND THE SAME SAMPLING TRAP A THIRD TIME (2026-07-26)
 
 Diffing content-type sets across all four corpora (A/B exhaustive, C/D 150-session samples):
