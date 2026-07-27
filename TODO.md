@@ -277,6 +277,40 @@ felt unsafe; what remains is that it rewrites SURVIVING tracks, which still want
 Playlists live in ONE flat `0x2107` container (126/126), NOT nested per track -- checked, because
 per-track nesting would have made the count structural. It is positional instead.
 
+## HOW FAR THE CRASH FIX REACHES — the ten-UUID identity is absent from half of two corpora (2026-07-26)
+
+`_uuid_list_offset` finds the per-track ten-UUID list in:
+
+    control_files          4525/4525   100.0%      PT Studio 2024
+    /Volumes/Mac 4TB SSD   8866/8866   100.0%
+    /Volumes/Samples        231/724     31.9%
+    /Volumes/Hack 2TB      1252/2600    48.2%
+
+`_reuuid_copied_track` returns the session UNCHANGED when the locator finds nothing, so on those
+blocks the UUID half of the duplicate identity fix is inert. That is CORRECT -- the field is really
+absent -- but it bounds what Pro Tools confirmed: the tested file (`4 mono tracks`, PT Studio 2024)
+carries the list in 100% of its `0x261B`, so the UUID path was fully exercised there. On a session
+without it, a copy's identity rests entirely on the `0x261B` INTEGER ID RANGE, which no PT run has
+isolated.
+
+THREE HYPOTHESES TESTED AND ALL THREE REFUTED, which is why this is a measured fact and not a defect:
+
+  * *generational* -- no. Presence varies WITHIN a version: PT HD 10.3.0 72.2%, 10.3.2 67.5%,
+    10.3.10 33.7%. (The banner regex also failed on 8896 blocks, reporting them as `?` at 100% --
+    an artefact of the extraction, not evidence.)
+  * *by track kind* -- no. audio 40.6%, click/aux 53.2%, master 61.1%: all intermediate, no split.
+  * *the locator's hardcoded `count == 10` is over-specified* -- the attractive one, and REFUTED.
+    Re-running the same signature with the count left free "found" a list in all 1231 missing
+    blocks at counts 2..12, which looked exactly like an `_ORD2015_ANCHOR`-style over-specified
+    constant. It is noise: those matches sit at block offsets **4, 10 and 5** -- inside the header,
+    not near +1100 where the real list lives -- and **0 of 78** sessions had every id distinct
+    across tracks, which is the property that makes them identities at all. An over-eager scan
+    produced 1231 false positives; the distinctness check is what caught it.
+
+WHAT WOULD SETTLE IT: duplicate a track in a session that LACKS the list (any `/Volumes/Samples`
+file) and open it in Pro Tools. If it opens and closes cleanly, the integer id range alone is
+sufficient and the fix is general. Nothing reachable can answer that.
+
 ## PT VERDICT: THE CRASH ON CLOSE IS FIXED (2026-07-26)
 
 Reported from Pro Tools on `PTX_VERIFY_2026-07-25_GENUINE/A_mono_ladder/01_dup_4_mono_tracks.ptx`:
