@@ -3392,3 +3392,63 @@ MEASURED:
 The regression test pins `_count_field_pos`'s arithmetic directly (its `0x210B` branch reads only
 `z` and `e`), so it needs no external drive. VERIFIED TO BITE: with the guard removed it returns
 118 for the empty case and the test fails.
+
+## Name-table entries are UTF-8, and the 64-byte cap was ENDING the walk
+Chasing the edit audit's refusal column paid off better than the crash did.
+
+Of 102 real sessions, `duplicate_track` refused 41. Splitting those by reason:
+  * 33 = "it is a master/bus track" -- an ARTIFACT OF MY AUDIT, which always targeted
+    `names[-1]`, and the last name-table entry is usually the master. Retargeting to the first
+    non-master track put the true clean rate at 94/102, not 61/102. Worth remembering: a
+    refusal rate measured with a badly-chosen target measures the target, not the code.
+  * 8 = "name table appears truncated" -- the real defect. All 8 were backups of ONE project
+    (`NICK JR_ROUTINING_2019`), so this is a narrow shape, not a broad limitation.
+
+ROOT CAUSE: `_name_entry_head` required every name byte in `0x20..0x7E` and capped the length
+at 64. Both are wrong:
+  * Names are UTF-8. The blocking entry was a clip called `Butterbeans Café ...`, and macOS
+    stores that DECOMPOSED (NFD), so the `é` is `e` + U+0301 = `cc 81`. Non-ASCII -> rejected.
+  * Real names reach 100 BYTES. The old cap was 64.
+
+Neither failure reports anything -- the entry just doesn't parse and the walk ENDS. So the
+table silently looks shorter than it is, and `_assert_name_table_complete` then (correctly)
+refuses to edit it. 29 of 180 entries parsed.
+
+THE ORACLE THAT SETTLED IT: each name table declares its own entry count. Against that count,
+the corrected walk agrees on 32 MORE sessions and on ZERO FEWER (253 both / 32 new-only /
+0 old-only / 3 neither). I did not have to argue the new parse was better -- the file says so.
+
+I also nearly mis-called this. The corrected walk changed (not just extended) the parse on 5
+sessions, which looked like a regression. It was the opposite: the new walk recovers a FIRST
+entry the old one skipped (a name containing `·`), so those tables were previously off by one
+at entry [0] -- and `_fix_name_table_count` would have written that wrong count.
+
+MEASURED:
+  * 288 sessions: 11,937 -> 14,948 entries parsed (+25%). 35 sessions gained, 0 lost.
+  * All 8 previously-uneditable sessions now parse in full (e.g. 180 names / 179 records) and
+    duplicate with 0 new validator errors.
+  * Edit audit re-run: `rm` 94 -> 105 clean and its ValueError refusals went 8 -> ZERO --
+    remove_track now succeeds on every real session in the sample. `dup` 61 -> 71 clean
+    (the remaining 34 are the master/bus target artifact above). Still zero INTRODUCED rows.
+  * True max name length is 100 bytes; cap now 255 with UTF-8 validity as the real guard.
+  * The `0x2A` trailer marker is NOT usable as a validator: only 94.98% of entries have it.
+
+STILL OPEN: 3 sessions where NEITHER walk matches the declared count. Not yet diagnosed.
+
+### The no-op check on this one turned out to be the strongest evidence
+I ran it expecting to defend against a regression -- the walk now finds MORE entries, and
+`_fix_name_table_count` WRITES that count, so a wrong walk would corrupt untouched sessions.
+It went the other way:
+
+    _fix_name_table_count on 480 UNTOUCHED sessions
+      PRE-FIX :  54 sessions modified, 61 bytes
+      POST-FIX:   5 sessions modified,  5 bytes
+
+So the short walk was writing a TOO-SMALL entry count into 54 untouched real sessions -- and PT
+bounds its read of the inline list by exactly that count, which is the documented "end of
+stream" trigger. That defect was invisible from the reader's side (rc=0 either way) and only
+showed up as a no-op violation.
+
+The residual 5 are all one project (`M20 PUP PUP BOOGIE_MIX`) and are presumably the same
+sessions as the 3 "neither walk matches the declared count" cases. NOT yet diagnosed -- next
+thread to pull on this file.

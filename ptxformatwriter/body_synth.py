@@ -149,6 +149,12 @@ def _parent_zmarks(ptf: PTFFormat) -> dict[int, int]:
 
 _NAME_ENTRY_SUFFIX = 23        # `<6 fixed><4 tag 0x2a><8 id><ordinal:u32><1 pad>`
 _NAME_ENTRY_SUFFIX_SHORT = 21  # the same, with a 2-byte ordinal instead of 4
+# Upper bound on a name-table entry's BYTE length. Not a format constant -- a sanity bound that
+# stops a garbage `u32` from being read as a length. The previous value (64) was below what Pro
+# Tools actually emits: real clip names reach 100 bytes, and the cap silently ENDED the walk
+# there. Observed maximum is 100 across 288 sessions; 255 leaves headroom while still rejecting
+# wild lengths. The real discriminator is UTF-8 validity (see `_name_entry_head`), not this.
+_NAME_ENTRY_MAX_BYTES = 255
 
 
 def _name_table_entries(table: bytes) -> list[bytes]:
@@ -5059,16 +5065,32 @@ def _inline_name_entries(data: bytes, z: int, e: int, bl=None) -> "list[tuple[st
 
 
 def _name_entry_head(data: bytes, q: int, end: int) -> "tuple[str, int] | None":
-    """`(name, name_end)` if a `<len:u32><printable name>` entry begins at `q`, else None."""
+    """`(name, name_end)` if a `<len:u32><name>` entry begins at `q`, else None.
+
+    Names are UTF-8, not ASCII. This used to require every byte in `0x20..0x7E`, which rejects
+    any accented character -- and macOS stores them DECOMPOSED (NFD), so `Café` is `e` followed
+    by U+0301 (`cc 81`). One such clip name ENDED the walk: eight sessions of one project parsed
+    29 of 179 entries and were uneditable, because `_assert_name_table_complete` (correctly)
+    refuses to edit a table it cannot fully read.
+
+    The test is now "no control characters, and decodes as UTF-8", which is a far stronger
+    discriminator against garbage than a printable-ASCII range plus a tight length cap: random
+    binary rarely decodes as valid UTF-8. Measured across 288 sessions, this parses 11,937 ->
+    14,948 entries, and against each table's OWN declared entry count it agrees on 32 MORE
+    sessions while losing NONE. On five sessions it also recovers a first entry the old walk
+    skipped (a name with a `·`), so those tables were previously off by one at entry [0]."""
     if q + 4 > end:
         return None
     nlen = int.from_bytes(data[q : q + 4], "little")
-    if not (0 < nlen <= 64) or q + 4 + nlen > end:
+    if not (0 < nlen <= _NAME_ENTRY_MAX_BYTES) or q + 4 + nlen > end:
         return None
     name = data[q + 4 : q + 4 + nlen]
-    if not all(0x20 <= b < 0x7F for b in name):
+    if any(b < 0x20 or b == 0x7F for b in name):
         return None
-    return name.decode("latin1"), q + 4 + nlen
+    try:
+        return name.decode("utf-8"), q + 4 + nlen
+    except UnicodeDecodeError:
+        return None
 
 
 def _next_name_entry(data: bytes, name_end: int, end: int) -> int:

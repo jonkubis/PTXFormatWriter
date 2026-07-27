@@ -936,6 +936,19 @@ draws); `ft1`/`ft2` are the source mtime FILETIME, `filesize` the referenced WAV
    confirmed as the exact `0x2519` fault on `remove_track`/`duplicate_track`. Splice/insert the
    **whole** entry (`len | name | 23-byte trailer`), keeping every entry's `0x2A` marker aligned.
 
+   **Names are UTF-8 byte strings, not ASCII, and are not short.** `name_length` counts BYTES,
+   the observed maximum is **100**, and macOS writes accented characters DECOMPOSED (NFD) — a
+   clip named `Butterbeans Café …` stores `e` followed by U+0301 (`cc 81`). A reader that
+   requires printable ASCII, or caps the length near 64, does not report an error: it simply
+   fails to parse that entry and **silently ends the walk**, so the table looks shorter than it
+   is. That is the worst failure shape here, because a short read then drives
+   `_fix_name_table_count` to write a too-small count, which is exactly what PT bounds its read
+   by. Validate an entry as "no control bytes, decodes as UTF-8" — far stronger against garbage
+   than a character-range test, since random binary rarely decodes as valid UTF-8. Measured over
+   288 sessions this parses 11,937 → 14,948 entries and agrees with the tables' own declared
+   counts on 32 more sessions while losing none. The `0x2A` trailer marker is NOT a usable
+   validator on its own: it holds for only 94.98% of entries (11,158 of 11,748).
+
 `ptxformatwriter.eos_validator.simulate(data, blocks)` reproduces PT's count-driven read of the
 name table and track container and pinpoints the object/field that would overrun;
 `body_synth.validate(data)` runs it plus the count-container check as a **pre-write gate** (sound

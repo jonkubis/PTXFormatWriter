@@ -3169,6 +3169,52 @@ class NameTablePreambleTests(unittest.TestCase):
         self.assertIsNone(BS._count_field_pos(b"", 100, 121, C2107, []))
         self.assertEqual(BS._count_field_pos(b"", 100, 122, C2107, []), 118)
 
+    def test_a_name_table_entry_may_be_utf8_and_longer_than_64_bytes(self):
+        """Name-table entries are UTF-8, and Pro Tools emits names well past 64 bytes.
+
+        `_name_entry_head` used to require every byte in `0x20..0x7E` and cap the length at 64.
+        Both assumptions are wrong on real sessions, and each one silently ENDS the walk rather
+        than reporting anything -- the entry simply stops parsing and the table looks shorter
+        than it is. Eight sessions of one project (`NICK JR_ROUTINING_2019`) parsed 29 of 180
+        entries and were therefore uneditable, because `_assert_name_table_complete` refuses to
+        edit a table it cannot fully read.
+
+        The blocker was a clip named `Butterbeans Café …` -- and macOS stores that DECOMPOSED
+        (NFD), so the `é` is `e` + U+0301 (`cc 81`). Verified to BITE: with the old test both
+        assertions below fail (the accented name returns None, and the 100-byte name returns
+        None).
+
+        Measured on 288 sessions: 11,937 -> 14,948 entries parsed, agreement with each table's
+        own declared entry count gained on 32 sessions and lost on none."""
+        # a real NFD name from the corpus: 'e' + COMBINING ACUTE ACCENT
+        nfd = "Butterbeans Café _Theme Song Music Video".encode("utf-8")
+        self.assertIn(b"\xcc\x81", nfd, "the fixture must actually be decomposed")
+        buf = len(nfd).to_bytes(4, "little") + nfd + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        got = BS._name_entry_head(buf, 0, len(buf))
+        self.assertIsNotNone(got, "a UTF-8 name must parse -- rejecting it silently ends the walk")
+        self.assertEqual(got[0].encode("utf-8"), nfd, "the name must round-trip to its file bytes")
+        self.assertEqual(got[1], 4 + len(nfd))
+
+        # 100 bytes is the real observed maximum; the old cap of 64 stopped the walk there
+        long_name = ("X" * 100).encode()
+        buf = len(long_name).to_bytes(4, "little") + long_name + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        got = BS._name_entry_head(buf, 0, len(buf))
+        self.assertIsNotNone(got, "Pro Tools emits 100-byte names; a 64-byte cap truncates the table")
+        self.assertEqual(got[0], "X" * 100)
+
+        # the guard still has to reject garbage: invalid UTF-8 and control bytes
+        bad = b"\xff\xfe\xff\xfe" * 4
+        buf = len(bad).to_bytes(4, "little") + bad + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf)),
+                          "bytes that are not valid UTF-8 are not a name")
+        ctrl = b"ABC\x01DEF"
+        buf = len(ctrl).to_bytes(4, "little") + ctrl + b"\x00" * BS._NAME_ENTRY_SUFFIX
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf)),
+                          "a control character is not a name")
+        # and a wild length is still refused
+        buf = (10 ** 6).to_bytes(4, "little") + b"ABCD"
+        self.assertIsNone(BS._name_entry_head(buf, 0, len(buf)))
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 
