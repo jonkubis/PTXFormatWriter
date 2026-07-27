@@ -2634,6 +2634,37 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x483B / 0x483D / 0x4841 / 0x1600 / 0x2042 / 0x2079 / 0x208E / 0x2583 / 0x2584 / 0x2585 — framing and parentage
+
+| type | span | parent | child | distinct payloads | note |
+|---|---|---|---|---|---|
+| `0x483B` | 13 (all 25) | TOP-LEVEL | leaf | **1** | product-gated fixture |
+| `0x483D` | 11 (all 25) | **`0x2519`** | leaf | **1** | product-gated, attached to the name table |
+| `0x4841` | 37 (all 25) | TOP-LEVEL | **`0x2011`** | **1** | product-gated — **and a tenth `0x2011` holder** |
+| `0x1600` | **8 (all 13)** | **`0x1017`** | leaf | **1**, EMPTY | a sixth empty-terminator |
+| `0x2042` | 19 (all 22) | **`0x2032`** | leaf | **1** | |
+| `0x2079` | 22 (all 17) | **`0x2020`** | leaf | **17** — one per instance | real per-session data |
+| `0x208E` | 17 (all 5) | **`0x208C`** | leaf | 2 | the inner block of the MIDI DEVICE record |
+| `0x2583` | 438 | `0x2584`, `0x2586` | `0x2581` | 1 | |
+| `0x2584` | 635 | `0x2586` | `0x2552` + `0x2582` | 1 | |
+| `0x2585` | 17 | `0x2583` | leaf | 1 | |
+
+**Four things worth stating:**
+
+1. **`0x1600` is a sixth empty-terminator** (span 8, empty payload, one form), parented by the
+   plugin catalog `0x1017`. Joins `0x2037`/`0x2626`/`0x4301`/`0x4420`/`0x1048`.
+2. **`0x208E` confirms the `0x206F` decode** — it is the inner block of the `0x208C` MIDI device
+   record, so the chain `0x206F ⊃ 0x208C (device name) ⊃ 0x208E` is now attested from both ends.
+3. **`0x2079` is the only type in this batch carrying real data** — 17 distinct payloads in 17
+   instances, parented by `0x2020`, whose own a/b/c/d fields were measured and matched no known
+   session quantity. Both halves of that structure vary per session and neither is decodable
+   here.
+4. **`0x483B`/`0x483D`/`0x4841` belong to the `Pro Tools Studio` family** above — same 25-session
+   cohort, same byte-constancy. `0x483D` attaches to the `0x2519` name table, which matters for
+   anything that rewrites it on a Studio-written session.
+
+- **Confidence:** HIGH on framing/parentage/constancy throughout; purposes UNPROVEN.
+
 ### 0x4808 / 0x4820 / 0x4824 / 0x4826 / 0x4828 / 0x4829 / 0x4834 / 0x4501 / 0x2567 — the `Pro Tools Studio` block family
 
 > **Scope:** this entry settles WHEN these nine types appear (a product gate), their framing, spans and parents. It does NOT settle what any of them means — every one is byte-constant, so the corpus cannot.
@@ -2676,8 +2707,9 @@ fixture. What identifies it is not its content but *which product wrote the file
 ### 0x2505 / 0x2507 / 0x259C / 0x206C — more `0x2011`-child class members
 
 All four are TOP-LEVEL, one per session (75/75 each), and hold **exactly one `0x2011`**, with
-only 2–7 distinct payloads apiece. With `0x2016`/`0x2017`/`0x2019`/`0x201A` and `0x4834` that makes **NINE
-types sharing one payload schema** — `0x2011` is the record, and the parent's content type is
+only 2–7 distinct payloads apiece. With `0x2016`/`0x2017`/`0x2019`/`0x201A` plus `0x4834` and `0x4841` that makes **AT LEAST TEN
+types sharing one payload schema** (stated as a floor, not a closure — this count has been
+revised upward twice as the sample widened) — `0x2011` is the record, and the parent's content type is
 the only discriminator.
 
 | type | span | position in the top-level run |

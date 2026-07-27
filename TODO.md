@@ -4745,3 +4745,30 @@ METHOD NOTE: this family was found by noticing that ten unrelated-looking types 
 "25 sessions" in the profiler output. **An identical, oddly specific session count across several
 types is a signal worth chasing** -- it means they share a gate, and finding the gate explains all
 of them at once.
+
+## Queue, batch 15: ten more, and the "class is complete" claim stated as a FLOOR
+    entries 287 -> 297, mention-only 36 -> 26
+
+  * **0x1600 is a SIXTH empty-terminator** (span 8, empty payload, one form), parented by the
+    plugin catalog 0x1017. Joins 0x2037/0x2626/0x4301/0x4420/0x1048.
+  * **0x208E confirms the 0x206F decode from the other end** -- it is the inner block of the
+    0x208C MIDI device record, so `0x206F ⊃ 0x208C (device name) ⊃ 0x208E` is now attested from
+    both directions.
+  * **0x2079 is the only type in this batch carrying real data** -- 17 distinct payloads in 17
+    instances, parent 0x2020, whose own a/b/c/d fields matched no known session quantity. Both
+    halves of that structure vary per session and neither is decodable from the corpus.
+  * **0x483B/0x483D/0x4841 belong to the Pro Tools Studio family.** 0x483D attaches to the 0x2519
+    NAME TABLE, which matters for anything rewriting it on a Studio-written session.
+
+**I HAVE NOW BEEN WRONG TWICE ABOUT THE 0x2011 CLASS BEING COMPLETE** -- "eight" became nine
+(0x4834) became ten (0x4841), each time because the sample widened. The spec now states it as
+**AT LEAST TEN, explicitly a floor rather than a closure**, with the revision history in the
+sentence. That is the honest form for any "the set is complete" claim measured on a sample, and
+it is the third time today a completeness claim of mine has needed revising (the others: the
+0x2628 parents, "the remaining latin1 decodes are not name readers").
+
+USEFUL NEGATIVE FROM THE COHORT VIEW: grouping the remaining types by SESSION COUNT shows ~60 of
+them share a single 31-session cohort with wildly varied hex values (0x7AA9, 0xDAFA, 0xE09D...).
+That is the phantom signature -- one cluster of sessions whose plugin blobs frame noise -- not 60
+real types awaiting documentation. The genuinely remaining work is much smaller than the raw
+count suggests.
