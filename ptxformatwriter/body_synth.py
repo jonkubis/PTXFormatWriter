@@ -4577,7 +4577,7 @@ def region_list(data: bytes) -> "list[tuple[int, str]]":
             if rc == 0x2628 and z < rz < e:
                 nl = int.from_bytes(data[rz + 9 : rz + 13], "little")
                 if 0 < nl <= 128:
-                    nm = data[rz + 13 : rz + 13 + nl].decode("latin1")
+                    nm = _decode_name(data[rz + 13 : rz + 13 + nl])
                 break
         out.append((z, nm))
     return sorted(out)

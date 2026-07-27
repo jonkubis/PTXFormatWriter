@@ -3862,3 +3862,27 @@ RULE, now demonstrated three times in one session: after fixing a reader, (a) gr
 consumer of what it returns for length arithmetic, and (b) diff old vs new behaviour over the
 corpus. A more capable parser pushes new data into old code, and a green suite proves nothing
 when the fixtures do not contain the data that got more capable.
+
+## CORRECTION + close-out: I asserted the name audit was finished; it was not
+Two commits ago I wrote that the remaining `latin1` decodes "are NOT name readers -- they are
+WAV/RIFF chunk text, plugin-id FourCCs and index-record tags". That was reasoning from a
+SPOT-CHECK of five readers, and it was wrong: `region_list` is a name reader, and every one of
+its 1,690 non-ASCII strings was absent from the file it came from.
+
+I found it by doing systematically what I had previously done by hand -- enumerate EVERY public
+single-argument reader by reflection (30 of them), walk whatever it returns for strings, and
+assert the property "a non-ASCII name must re-encode to bytes present in this session".
+
+    BEFORE the sweep : region_list 1690 broken   (region_names/clips already fixed)
+    AFTER            : 0 broken across all 30 public readers
+
+Also swept the whole package for the arming pattern behind the core.py regression -- any `len()`
+of a value that came from `.decode(`, `parsestring(` or `_decode_name(`, both as a variable and
+inline. **Zero remaining instances** in any module. The two surviving `latin1` decodes in core.py
+are the deliberate fallback inside `parsestring` and a 4-byte type code; both correct.
+
+THE LESSON IS ABOUT MY OWN CLAIM, not the bug: "I checked the important ones and the rest are a
+different kind of thing" is an assertion dressed as a finding. The reflective sweep costs one
+script and answers the question for the whole API instead of the part I happened to look at --
+and it immediately contradicted me. Prefer enumerating the surface to sampling it whenever the
+property is cheap to state.
