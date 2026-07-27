@@ -3559,3 +3559,37 @@ session**, where n(0x2077)=0 and the deficit is identically zero. So this defect
 in front of Pro Tools. Fixing it needs the per-playlist bit above decided (which form to emit)
 -- OR the observation that in a uniform session every row is the same byte string, which covers
 51+5 of 65 sessions. NEXT: implement for the uniform case, refuse/warn on mixed.
+
+### ...and the attempted FIX is reverted (3 wrong walks, and it made things worse)
+I implemented `sync_marker_playlist_rows` + wired it into `duplicate_track`. REVERTED. Recording
+it because the next attempt should not re-derive any of this.
+
+The measurement stands and is worth having: `duplicate_track` leaves the matrix short by exactly
+n(0x2077), on 79/79 marker-bearing real sessions, and the relation held 79/79 BEFORE the edit
+(a third independent confirmation of the 0x2506 rule).
+
+WHERE IT WENT WRONG -- the row-run locator, three times:
+  1. FORWARD scan from payload start, resyncing on the next 0x5A: desyncs when a 0x5A occurs in
+     the marker's variable-length header. Reported 0 rows for 6 of 388 markers that hold 140 each,
+     and the caller then silently SKIPPED those markers (short by 6 instead of 0).
+  2. BACKWARD walk from the marker end in 17-byte steps: the rows are NOT the trailing bytes --
+     there is a ~23-byte trailer after the last row. Reported 0 rows for EVERY marker.
+  3. Find the first fully-framed 0x2506 then step forward 17 at a time: this LOCATES correctly
+     (51/79 sessions then satisfied the relation) but the splice still destroyed one 0x2077 in
+     the other 28.
+So the rows are a contiguous run with a variable-length header BEFORE and a ~23-byte trailer
+AFTER. Any future walk must handle both ends; two of my three attempts assumed one of them away.
+
+A SEPARATE BUG I FIXED ON THE WAY AND SHOULD KEEP IN MIND: when a marker is itself the top-level
+block, `tz == z`, so the marker's size field IS the container's -- incrementing both applied the
+growth TWICE. Set sizes ABSOLUTELY (`span - 7`), never incrementally.
+
+WHY IT IS REVERTED RATHER THAN LEFT IN: with the sync wired in, 28 of 79 sessions LOSE a 0x2077.
+I verified this is mine, not pre-existing -- with the sync stubbed out, 0 of 79 lose one. Today
+duplicate_track produces a short matrix; with my patch it produced a short matrix AND destroyed a
+marker. Strictly worse, on a code path Pro Tools has confirmed, with no way for me to PT-test it.
+
+NEXT ATTEMPT SHOULD START BY: writing the locator against a FIXTURE with a known row count and
+asserting it round-trips, before touching duplicate_track at all. All three of my walks would
+have been caught in minutes by that. Then check whether the new playlist's 0x210B block is even
+being created -- n(0x210B) does go +1, so that part is fine.
