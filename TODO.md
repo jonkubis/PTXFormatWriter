@@ -4180,3 +4180,34 @@ THE NAMED NON-PT LIST IS NOW EMPTY:
 What remains genuinely needs Pro Tools: the 26 unsettled typed spec sections (overwhelmingly
 "what does this UI flag DO"), and the three staged experiments -- of which the regenerated
 `CURRENT 2026-07-27 - DUPLICATED 01 130 G Full Stereo.ptx` now covers two at once.
+
+## The headline coverage number was inflated — "documented" meant "mentioned anywhere"
+Audited the claim that underpins everything this tracker says: **0 genuinely undocumented types.**
+It rested on two filters, and BOTH were too generous.
+
+  1. **`doc = {c for c in counts if ("0x%04x"%c) in spec}`** — a type counted as documented if its
+     hex string appeared ANYWHERE in the spec, including a passing mention inside another type's
+     prose. Measured honestly:
+
+         observed content types                        482
+         with their OWN `### ` spec entry              146
+         "documented" by a passing MENTION only        176
+
+  2. **`is_phantom`'s second signature** (`low byte 0x00` and never index-referenced) had no
+     top-level clause. A phantom is a false `0x5A` INSIDE another block's payload; the top-level
+     chain is walked contiguously by declared size, so nothing false can appear in it. Without
+     that clause the signature was eligible to swallow real types.
+
+`0x2000` is the proof that both mattered at once: **480 instances in 480 sessions — one per
+session, always TOP-LEVEL, block_type 0x0001, span 13, always between 0x2033 and 0x2634** — and
+it had NO entry, qualifying as "documented" on four incidental mentions while simultaneously
+matching the phantom signature. A universal top-level block was invisible to both halves of the
+tracker at once. Now documented (spec §0x2000) and the phantom test carries the top-level clause.
+
+THE TRACKER NOW REPORTS THREE STANDARDS instead of one — mentioned / has an entry / settled —
+with the 176 mention-only types listed as the work queue. This is the same failure the file's
+own 2026-07-20 correction was about (a FALSE 100% from a too-generous measurement), which is
+precisely why it was worth re-auditing rather than trusting.
+
+    HONEST STATE: 146 of 482 types have a real entry; 176 need one; 160 are phantoms;
+                  26 of 145 entries still say the PURPOSE is unproven.

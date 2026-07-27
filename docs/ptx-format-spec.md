@@ -2568,6 +2568,29 @@ form and reads garbage on another.
 - **notes:** In the top-level session-preferences region; top-level neighbors byte-for-byte constant: ...0x2050, 0x204b, [0x207b], 0x2016, 0x2017... (19/19). PT-owned session-config state PT recomputes/rewrites; not for hand-authoring. The 'timecode/SMPTE-config' role is well-grounded for the large form (direct HH:MM:SS:FF evidence) but INFERRED for the 13 small-form sessions (no timecode string). IMPLEMENTATION CAVEAT: small form payload is 9 bytes with no child / no timecode string — consumers must not read past +9. CORRECTIONS from proposal: (1) the 0x4530 child spans 97 (size_field 90), NOT 115 (115 is the 0x207b PARENT span); (2) +1 does NOT track form/child-presence — only block_type predicts child presence, +1 varies independently within both forms.
 - **confidence:** HIGH on frame, size/kind bimodality, per-session count (1), parent=top-level, neighbor order, constant +0=0 and +3=1000, block_type-predicts-child, and the byte-identical 0x4530 child + its '00:00:00:00' timecode string. MEDIUM-LOW on the meaning of the two u16 enums (+1, +7) — distributions stable but unmapped, and +1's spread is partly a backup-duplication artifact.
 
+### 0x2000 — universal top-level 13-byte stub (count-0 / presence marker)
+
+- **Kind:** LEAF, TOP-LEVEL. Exactly **one per session in all 480 sampled** — universal.
+- **Size:** span 13, declared size 6, `block_type = 0x0001`, payload 4 bytes.
+- **Bytes:** `5A 01 00 06 00 00 00 | 00 20 | 00 00 00 00` — the payload is four zero bytes in
+  every instance examined.
+- **Position:** always between `0x2033` and `0x2634` in the top-level sequence (24/24 sampled).
+- **Reading:** a count-prefixed container holding ZERO children, or a pure presence marker. The
+  4-byte zero payload is the shape a count-0 container takes elsewhere in this format (compare
+  the empty `0x1055`/`0x1057` stubs, §5c), which makes "empty container" the better-supported of
+  the two — but nothing observed distinguishes them, because no session has a non-empty one.
+- **Confidence:** HIGH on framing/position/universality (480/480 sessions, one each);
+  purpose UNPROVEN.
+
+> **HOW THIS WAS MISSED, which matters more than the block does.** `0x2000` was counted as
+> "documented" by the coverage tracker because the string `0x2000` appears four times in this
+> spec — all of them incidental mentions in other types' prose. It had no entry. It was
+> simultaneously eligible to be written off as a PHANTOM, since its low byte is `0x00` and it is
+> never index-referenced. A universal, top-level, one-per-session block was therefore invisible
+> to both halves of the tracker at once. See the tracker's "three standards" section: a phantom
+> is a false `0x5A` INSIDE another block's payload, so nothing in the contiguous top-level chain
+> can be one, and that clause is now part of the test.
+
 ### 0x2018 — Small boolean/flags block (**NOT fixed — 5 payloads externally**) (top-level window/view-state)
 
 > **DERIVED-COUNT HYPOTHESIS EXCLUDED (2026-07-27).** Every varying `u16`/`u32` in this

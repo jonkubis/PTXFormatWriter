@@ -60,6 +60,7 @@ for pat in CORPORA:
 LEAF_PAYLOADS = {0x1038, 0x2613, 0x2615, 0x2616, 0x1003, 0x1017}
 counts=collections.Counter(); sessions=collections.Counter(); indexed=collections.Counter()
 nested_in_leaf=collections.Counter(); size8_under_1014=collections.Counter(); n=0
+toplevel=collections.Counter()   # blocks in the contiguous top-level chain -- see is_phantom
 # Progress + a slow-session report, both flushed. Profiling says a typical session costs ~0.5s and
 # is dominated by the XOR de-obfuscation, so 832 sessions should take ~7 minutes -- but an earlier
 # exhaustive run sat at 98% CPU for nearly THREE HOURS with no output, because stdout was block
@@ -88,6 +89,14 @@ for _i, p in enumerate(allp):
     # a defect in the walk -- the stream is genuinely self-describing only down to the leaves -- but
     # it means an unfiltered "undocumented types" list is mostly garbage. Measured: of 213 types
     # unique to the two SSDs, 164 are phantoms.
+    # The contiguous top-level chain, walked ONCE by declared size (the same walk
+    # `final_index_ref` uses). A containment test per block would be O(n^2) on a 24k-block
+    # session; this is O(n).
+    _tops=set(); _q=min((z for z,_e,_c in bl), default=None)
+    while _q is not None and _q + 9 <= len(d):
+        _sz=int.from_bytes(d[_q+3:_q+7],"little")
+        if d[_q]!=0x5A or _sz<=0 or _q+7+_sz>len(d): break
+        _tops.add(_q); _q=_q+7+_sz if _q+7+_sz<len(d) else None
     leaves=[(lz,le) for lz,le,lc in bl if lc in LEAF_PAYLOADS]
     entries_1014=[(pz,pe) for pz,pe,pc in bl if pc==0x1014]
     for z,e,c in bl:
@@ -96,10 +105,24 @@ for _i, p in enumerate(allp):
         counts[c]+=1; seen.add(c)
         if z in idx: indexed[c]+=1
         if any(lz < z and e <= le for lz,le in leaves): nested_in_leaf[c]+=1
+        if z in _tops: toplevel[c]+=1
         if (e-z) == 8 and any(pz < z and e <= pe for pz,pe in entries_1014): size8_under_1014[c]+=1
     for c in seen: sessions[c]+=1
 spec=open("docs/ptx-format-spec.md").read().lower()
+# "documented" here means the hex string appears ANYWHERE in the spec -- including a passing
+# mention in another type's prose. That is a weak standard, and it is the one this tracker has
+# always reported. Compute the STRICTER measure alongside it: does the type have its own
+# `### 0x....` entry (shared headings like "### 0x261F / 0x2610 / ..." count for each type named)?
+# 0x2000 is why this matters: 480 instances in 480 sessions, always TOP-LEVEL, and it has no
+# entry -- it was "documented" purely on four incidental mentions elsewhere.
+import re as _re2
+_entry_types=set()
+for _m in _re2.finditer(r"(?m)^### ([^\n]*)", spec):
+    _line=_m.group(1)
+    if _line.lower().startswith("0x"):
+        _entry_types |= {int(h,16) for h in _re2.findall(r"0x[0-9a-fA-F]{4}", _line)}
 doc={c for c in counts if ("0x%04x"%c) in spec}
+has_entry={c for c in counts if c in _entry_types}
 undoc=sorted(set(counts)-doc, key=lambda c:(-sessions[c],-counts[c]))
 tot=sum(counts.values()); ub=sum(counts[c] for c in undoc)
 lines=[]
@@ -131,6 +154,21 @@ _typed = [x for x in _secs if _re.match(r"0x[0-9a-fA-F]{4}", x)]
 _unsettled = [x for x in _typed
               if _re.search(r"purpose UNKNOWN|UNPROVEN|not proven|still open|speculat|"
                             r"INFERRED, not proven|cannot be settled", x, _re.I)]
+_mention_only = sorted(doc - has_entry, key=lambda c: (-sessions[c], -counts[c]))
+lines.append("## Three standards, not one — mentioned, entered, settled\n")
+lines.append("**%d of the %d observed content types have their OWN `### ` spec entry.** A further"%(len(has_entry),len(counts)))
+lines.append("**%d are counted as \"documented\" only because their hex string appears somewhere in"%len(_mention_only))
+lines.append("another type's prose.** That weaker standard is the one this tracker reported alone until")
+lines.append("2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the %d sessions**,"%n)
+lines.append("always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental")
+lines.append("mentions. The mention-only list is the honest work queue:\n")
+lines.append("| type | instances | sessions |")
+lines.append("|---|---|---|")
+for c in _mention_only[:40]:
+    lines.append("| `0x%04x` | %d | %d |"%(c,counts[c],sessions[c]))
+if len(_mention_only) > 40:
+    lines.append("\n…and %d more.\n"%(len(_mention_only)-40))
+lines.append("")
 lines.append("## Described vs settled — two different numbers\n")
 lines.append("**%d types are DESCRIBED** (framing, parent/child, per-session counts, payload layout"%len(doc))
 lines.append("where decodable) and **0 real types are undocumented**.\n")
@@ -158,8 +196,17 @@ def is_phantom(c):
     """Phantom by ANY of three independent signatures, all measured, none guessed."""
     if counts[c] and nested_in_leaf[c] >= 0.5*counts[c]:
         return True                       # lives inside a leaf payload
-    if (c & 0xFF) == 0 and indexed[c] == 0:
-        return True                       # 256*k arithmetic, never index-referenced
+    if (c & 0xFF) == 0 and indexed[c] == 0 and toplevel[c] < 0.5*counts[c]:
+        # 256*k arithmetic, never index-referenced -- AND not a top-level block.
+        #
+        # CORRECTION 2026-07-27: without the top-level clause this signature swallowed REAL
+        # types and so hid them from the "genuinely undocumented" count, which is exactly the
+        # error this file's 2026-07-20 correction was about. A phantom is a false `0x5A` INSIDE
+        # another block's payload; the top-level chain is walked contiguously by declared size,
+        # so nothing false can appear in it. `0x2000` is the proof: 480 instances in 480
+        # sessions -- one per session, ALWAYS top-level, always between 0x2033 and 0x2634,
+        # block_type 0x0001, span 13 -- and it was being written off as arithmetic noise.
+        return True
     # The 8-byte identity id that follows the `2A 00 00 00` tag inside a 0x1014 track-list entry.
     # Its last byte lands where a size field would be, framing a phantom of DECLARED SIZE 8 whose
     # parent is always the 0x1014. Found by dissecting the survivors of the first two signatures:
@@ -205,5 +252,6 @@ if _slow:
         print("   %7.1fs  %-48s %.1fMB %d blocks" % (dt, nm[:48], sz/1e6, nb))
 print("sessions=%d types=%d documented=%d undocumented=%d (%.2f%% of blocks)"%(n,len(counts),len(doc),len(undoc),100.0*ub/tot))
 print("ubiquitous undocumented (in ALL %d sessions): %d"%(n,sum(1 for c in undoc if sessions[c]==n)))
+print("with own spec ENTRY=%d  mention-only=%d"%(len(has_entry),len(doc-has_entry)))
 print("phantoms=%d  GENUINELY UNDOCUMENTED=%d -> %s"%(len(phantom),len(real_undoc),
       ", ".join("0x%04x"%c for c in real_undoc[:20]) or "none"))

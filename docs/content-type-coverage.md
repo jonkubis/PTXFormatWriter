@@ -24,6 +24,61 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 **322/482 content-types have a spec entry = 66.8%**, covering 99.93% of block instances.
 
+## Three standards, not one — mentioned, entered, settled
+
+**146 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**176 are counted as "documented" only because their hex string appears somewhere in
+another type's prose.** That weaker standard is the one this tracker reported alone until
+2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
+always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
+mentions. The mention-only list is the honest work queue:
+
+| type | instances | sessions |
+|---|---|---|
+| `0x2601` | 73387 | 832 |
+| `0x2602` | 73387 | 832 |
+| `0x2434` | 32456 | 832 |
+| `0x103a` | 3065 | 832 |
+| `0x2028` | 1288 | 832 |
+| `0x2029` | 1288 | 832 |
+| `0x2030` | 1288 | 832 |
+| `0x0003` | 832 | 832 |
+| `0x1004` | 832 | 832 |
+| `0x2004` | 832 | 832 |
+| `0x2016` | 832 | 832 |
+| `0x2017` | 832 | 832 |
+| `0x2019` | 832 | 832 |
+| `0x201a` | 832 | 832 |
+| `0x1022` | 832 | 832 |
+| `0x2023` | 832 | 832 |
+| `0x2027` | 832 | 832 |
+| `0x1028` | 832 | 832 |
+| `0x202b` | 832 | 832 |
+| `0x202d` | 832 | 832 |
+| `0x202e` | 832 | 832 |
+| `0x2050` | 832 | 832 |
+| `0x2067` | 832 | 832 |
+| `0x206c` | 832 | 832 |
+| `0x2071` | 832 | 832 |
+| `0x2072` | 832 | 832 |
+| `0x2073` | 832 | 832 |
+| `0x2505` | 832 | 832 |
+| `0x230a` | 832 | 832 |
+| `0x2507` | 832 | 832 |
+| `0x2510` | 832 | 832 |
+| `0x2519` | 832 | 832 |
+| `0x2603` | 832 | 832 |
+| `0x2595` | 832 | 832 |
+| `0x259c` | 832 | 832 |
+| `0x2624` | 832 | 832 |
+| `0x1054` | 1662 | 831 |
+| `0x2000` | 831 | 831 |
+| `0x242e` | 831 | 831 |
+| `0x2430` | 831 | 831 |
+
+…and 136 more.
+
+
 ## Described vs settled — two different numbers
 
 **322 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
