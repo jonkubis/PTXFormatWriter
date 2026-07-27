@@ -2634,6 +2634,64 @@ form and reads garbage on another.
   content is length-prefixed inside the leaf rather than framed as a block.
 - **Confidence:** HIGH on framing/position/universality; purpose UNPROVEN.
 
+### 0x203C — a SEVENTH member of the 0x203x view-element family
+
+- Span **23 in all 164 instances**, child **ALWAYS `0x2037`**, **one distinct payload**, parents
+  `0x2015` (156) and `0x2589` (8) — exactly the family shape.
+- **The family is `0x2038`, `0x2039`, `0x203B`, `0x203C`, `0x203D`, `0x203E`, `0x203F` — seven,
+  found across three widenings of the sample.** Stated as a floor: every previous count of this
+  family has been revised upward.
+- **Confidence:** HIGH (full instance counts); purpose UNPROVEN, like every member.
+
+### 0x2631 — and the correction it forces to 0x2632
+
+- **`0x2631`** — parent **ALWAYS `0x2632`** (70/70), and it holds **BOTH `0x2629` and `0x252C`**
+  (70 each). Spans 250–412, 21 distinct payloads: real per-session data. Found in 8 of 880
+  sessions.
+- **This corrects the `0x2632` entry.** That entry described `0x2632` as span 13 with a single
+  payload and *never populated in any file seen* — true of the 180 sessions it was measured on,
+  false in general. `0x2632` is a container that is empty in the overwhelming majority of
+  sessions and holds a `0x2631` in a few.
+- **Why it matters beyond the two types:** `0x2632` was cited as the *pure* example of the
+  "universal stub slot" pattern — the one slot never seen populated. It now has the same shape as
+  the rest (usually empty, occasionally full), which strengthens the general rule while removing
+  its cleanest illustration. **A pattern's best example is the most likely thing to be a sampling
+  artifact**, because it is precisely the case where no counterexample has yet been drawn.
+- **Confidence:** HIGH on the parentage and children (full instance counts across 880 sessions).
+
+### 0x2587 / 0x2551 / 0x2586 / 0x2020 / 0x2021 / 0x2032 — the settings trees, parentage measured
+
+**The `0x2587` tree** — one per session in 56/56, and the only branch of it carrying a name:
+
+```
+0x2587 (TOP-LEVEL, child ALWAYS 0x2551)
+   └ 0x2551  ── length-prefixed name, observed `(untitled)` ──┐
+        ├ 0x258B  ⊃ {0x2552, 0x2553}                          │  three routes
+        ├ 0x2556  ⊃ 0x2552                                    │  to the same
+        ├ 0x255C  ⊃ 0x2552                                    │  0x2552 child
+        └ 0x2586  ⊃ {0x2584, 0x2583}   (1 session)
+```
+
+- `0x2587` spans 1,563–2,898 with **38 distinct payloads** in 56 sessions, and `0x2551` 15 — so
+  this tree carries real per-session data, unlike most of the settings fixtures.
+- **Four wrappers now reach `0x2552`.** That is the fourth "family of wrappers around one shared
+  record" in this format, and the fourth whose membership grew as the sample widened.
+
+**The `0x2013` pair** — `0x2020` and `0x2021` both have parent **ALWAYS `0x2013`**, one of each
+per session (75/75), confirming from the child side what the `0x2013` entry states from the
+parent side. `0x2020` spans 17/39/83 with 10 distinct payloads; `0x2021` spans 13/14/36 with 3.
+
+**`0x2032`** — TOP-LEVEL, one per session, and its child VARIES: `0x270A` in 53 sessions,
+`0x2042` in 22. A container whose single child's type is the discriminator, like the ruler
+containers but without a name to say which is which.
+
+- **Confidence:** HIGH on all parentage (full instance counts); purposes UNPROVEN.
+
+> **Not profiled — too rare to reach in a 75-session sample:** `0x203C` (101 instances / 20
+> sessions), `0x2631` (22 / 5), `0x2557` (1 / 1), `0x2757` (1 / 1). They are recorded here so the
+> gap is visible rather than silent; a targeted sample of the sessions that contain them would be
+> needed, and at 1–2 instances the last two could not support a claim anyway.
+
 ### 0x1053 / 0x1051 — the VIDEO placement chain (a third alongside audio and MIDI)
 
 - **`0x1053`** — parent **`0x1055`**, and its payload opens with a **length-prefixed name**. In
@@ -2942,7 +3000,7 @@ of a container that states its own name.
 - **Confidence:** HIGH throughout — framing, children and the names are all 50/50, and the names
   are self-describing rather than inferred.
 
-### The 0x203x view-element family — every member wraps a single 0x2037
+### 0x2038 / 0x2039 / 0x203B / 0x203D / 0x203E / 0x203F — the 0x203x view-element family (each wraps one 0x2037)
 
 Beyond `0x2038` and `0x203B`, the same shape recurs across the whole range. All are parented by
 the view records `0x2015`/`0x2589`, all hold exactly one `0x2037` terminator:
@@ -3370,7 +3428,7 @@ Six more universal top-level slots, and they are **contiguous**, in two runs:
 |---|---|---|---|
 | `0x2637` | 13 (105/180) | 73, 5,915 | 50 |
 | `0x262C` | 17 (174/180) | 4,315, **74,966** | 4 |
-| `0x2632` | **13 in ALL 180** | none | **1** |
+| `0x2632` | 13 in 180/180 sampled | **see correction below** | 1 |
 | `0x262A` | 13 (37/180) | 577, **66,161** | 135 |
 | `0x2630` | 13 (124/180) | 4,442, 4,971 | 48 |
 | `0x262E` | 13 (176/180) | 89, 396 | 4 |
@@ -3379,8 +3437,11 @@ Six more universal top-level slots, and they are **contiguous**, in two runs:
 - **Reading:** with the nine already recorded, that is **fifteen universal top-level stub slots**,
   and the `0x26xx` ones form an adjacent band rather than being scattered — consistent with one
   feature area (the `0x262x` family is clip/fade-adjacent elsewhere in this spec) reserving a
-  contiguous run of slots. `0x2632` is the pure case: span 13 with a single payload in every
-  session, never populated in any file seen.
+  contiguous run of slots. `0x2632` looked like the pure case — span 13, a single payload, never populated — but that
+  was a 180-session sample. **Widening to 880 sessions found `0x2631` with parent ALWAYS
+  `0x2632`, 70 instances across 8 sessions.** So `0x2632` IS populated, just rarely; see its
+  own entry. This is the fourth completeness claim in this document to be revised by a wider
+  sample, and the correction is left visible rather than edited away.
 - **Confidence:** HIGH on framing/position/universality/adjacency; purposes UNPROVEN.
 
 ### 0x242E / 0x2430 — the twin 22-byte wrappers around the two region catalogs

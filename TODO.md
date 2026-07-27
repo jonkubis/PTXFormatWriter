@@ -4800,3 +4800,32 @@ ALSO: **0x2105 is a SECOND 0x2103 holder** alongside 0x2104, and **0x2556/0x255C
 wrappers around one shared inner record -- which now has four instances in this format (0x2037,
 0x2103, 0x2552, 0x2011). **When a type appears under several wrappers, expect MORE wrappers than
 you have found.**
+
+## Queue, batch 17: the corpus-answerable queue is effectively CLEARED
+    entries 305 -> 309, mention-only 18 -> 14
+
+Of the 14 still without an entry, **13 match a documented PHANTOM signature** -- 61 more sit in
+the single 31-session cohort whose plugin blobs frame noise. What genuinely remains is:
+
+    0x2757   1 instance  / 1 session
+    0x2557   1 instance  / 1 session
+
+Two types, one instance each. **At one instance nothing can be claimed beyond "it exists", so
+this is the floor of what the corpus can give.**
+
+TWO RESULTS FROM THE TARGETED HUNT (880 sessions, aimed at the types too rare for a 75-session
+sample):
+  * **0x203C is a SEVENTH member of the 0x203x family** -- span 23 in all 164 instances, child
+    always 0x2037, one payload. The family has now grown across three widenings, so the spec
+    states seven as a FLOOR.
+  * **0x2631's parent is ALWAYS 0x2632** -- and that CORRECTS my own entry from three batches ago,
+    which called 0x2632 "span 13 with a single payload in every session, never populated in any
+    file seen". True of the 180 sessions it was measured on; false in general. 0x2632 holds a
+    0x2631 in 8 of 880 sessions.
+
+**THE CORRECTION IS THE MOST INSTRUCTIVE PART.** 0x2632 was cited as the PURE example of the
+"universal stub slot" pattern -- the one slot never seen populated. It turns out to have the
+same shape as all the others. **A pattern's cleanest example is the most likely thing to be a
+sampling artifact**, precisely because it is the case where no counterexample has been drawn yet.
+That is the fourth completeness claim of mine revised by a wider sample today; all four
+corrections are left visible in the spec rather than edited away.
