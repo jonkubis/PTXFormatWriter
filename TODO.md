@@ -3739,3 +3739,39 @@ NOT changing it now: it may be calibrated against a real PT verdict, and I alrea
 change today that had to be reverted. Investigate before demoting: does the 23 come from the
 locator misreading a second layout (as with track-id-uniqueness), or is the ordinal genuinely
 non-conforming in those files?
+
+## ANSWERED: 0x2519-entry-ordinals was MY bug, and the answer was the third option
+I left this open asking "is the 23 the locator misreading a second layout (as with
+track-id-uniqueness), or genuinely non-conforming ordinals?" Neither. It was a byte-vs-character
+length bug in the validator, and I had armed it earlier the same day.
+
+    check("0x2519-entry-ordinals", [... data[p + len(n) + 18 : p + len(n) + 20] ...])
+
+`_inline_name_entries` returns DECODED names, and names are UTF-8, so `len(n)` is the CHARACTER
+count. Any entry after a name containing a non-ASCII character had its ordinal read two bytes
+early -> garbage value -> spurious "repeated ordinal" ERROR.
+
+THE DIAGNOSTIC THAT SETTLED IT IN ONE STEP: split the 440 sessions by whether they contain a
+multi-byte name.
+
+    error + non-ASCII names : 23        clean + non-ASCII names : 19
+    error + all-ASCII names :  0        clean + all-ASCII names : 398
+
+Zero all-ASCII sessions fire. That is not a pattern any "second layout" story produces.
+
+**THE PART WORTH REMEMBERING: fixing a reader can ARM a bug that was previously unreachable.**
+This arithmetic was always wrong, but before today's UTF-8 fix the entry walk STOPPED at the
+first accented name, so those entries never reached the line. Making the parser more capable
+pushed new data into old code. After a reader fix, re-examine every consumer of what it returns
+-- a second site (`_guid_after`, same function) had the identical bug and was fixed with it.
+A third site at line ~6540 already used `len(name.encode())`, so the codebase knew; the two
+validator sites were simply missed.
+
+RESULT: ERROR-severity findings on 440 untouched sessions 25 -> 2, and the surviving 2 are OUR
+OWN stale synthesized outputs (`test_clickbottom_3stereo.ptx`, `mixedmidi_click_bottom.ptx` --
+`mixedmidi` is referenced in tests/test_body_synth.py), both showing the repeated-ordinal defect
+that actually crashed Pro Tools and that the editors now repair. So: **zero error-severity
+findings on genuine PT-authored sessions**, and the two that fire are true positives.
+
+The regression test pins the CONTRACT (`name_end` advances by BYTE length) rather than the two
+call sites, because the next consumer to get this wrong will be a third site.

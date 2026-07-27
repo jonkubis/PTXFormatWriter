@@ -6045,8 +6045,15 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
         elif dense_from is not None and nz != list(range(dense_from, dense_from + len(nz))):
             note(kind, f"{vals[:24]} is unique but not dense from {dense_from}")
 
+    # BYTE length, not character count. `_inline_name_entries` returns DECODED names, and names
+    # are UTF-8: `Butterbeans Café ...` is one byte longer than its Python length, so `len(n)`
+    # aimed this read two bytes early and produced a garbage "ordinal". It surfaced as an
+    # ERROR-severity finding on 23 of 440 untouched sessions -- every one of them a session with
+    # a non-ASCII name, and ZERO all-ASCII sessions -- i.e. the validator rejecting files Pro
+    # Tools itself wrote. Latent until UTF-8 names began parsing at all; the entry walk used to
+    # stop at the first accented name, so these entries never reached this line.
     check("0x2519-entry-ordinals",
-          [int.from_bytes(data[p + len(n) + 18 : p + len(n) + 20], "little")
+          [int.from_bytes(data[p + len(n.encode()) + 18 : p + len(n.encode()) + 20], "little")
            for n, p in entries], 1)
 
     # Only lanes the 0x2519 name table actually contains. The odd counts that made this check reject
@@ -6235,7 +6242,10 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
 
     eg = []
     for nm, pos in entries:
-        g = _guid_after(0, pos + len(nm) + 24, pos + len(nm))
+        # BYTE length -- see the note on the ordinal check above; a decoded name is shorter than
+        # its bytes whenever it carries a non-ASCII character.
+        _nb = len(nm.encode())
+        g = _guid_after(0, pos + _nb + 24, pos + _nb)
         if g:
             eg.append(g)
     rg = []

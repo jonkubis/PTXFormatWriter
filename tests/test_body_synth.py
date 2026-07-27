@@ -3282,6 +3282,35 @@ class NameTablePreambleTests(unittest.TestCase):
         empty = b"\x5a\x0b\x00" + (len(header) + 2).to_bytes(4, "little") + b"\x77\x20" + header
         self.assertEqual(BS._marker_scaffold_rows(empty, 0, len(empty)), [])
 
+    def test_a_name_entry_advances_by_BYTES_not_characters(self):
+        """`name_end` is `name_start + len(name.encode())`, never `+ len(name)`.
+
+        `_inline_name_entries` hands back DECODED names, and names are UTF-8, so a name carrying
+        any non-ASCII character is LONGER in the file than in Python. Two places in
+        `validate_pt_invariants` computed a field offset as `pos + len(name) + k` and so read
+        every following field two bytes early on such a session. It surfaced as an ERROR-severity
+        `0x2519-entry-ordinals` finding on 23 of 440 untouched sessions -- every one of them a
+        session containing a non-ASCII name, and ZERO all-ASCII sessions -- i.e. the validator
+        rejecting files Pro Tools itself wrote.
+
+        The bug was LATENT until UTF-8 names began parsing at all: before that the entry walk
+        stopped at the first accented name, so those entries never reached the arithmetic. Fixing
+        a reader can arm a bug that was previously unreachable, which is why this pins the
+        contract rather than the call sites."""
+        for text in ("Butterbeans Café", "Thalía", "plain ascii"):
+            raw = text.encode("utf-8")
+            buf = len(raw).to_bytes(4, "little") + raw + b"\x00" * BS._NAME_ENTRY_SUFFIX
+            got = BS._name_entry_head(buf, 0, len(buf))
+            self.assertIsNotNone(got, f"{text!r} must parse")
+            name, name_end = got
+            self.assertEqual(name, text)
+            self.assertEqual(name_end - 4, len(raw),
+                             "name_end must advance by the BYTE length")
+            self.assertEqual(buf[4:name_end], raw,
+                             "the span [start, name_end) must be exactly the stored bytes")
+        # and the two lengths genuinely differ for the fixtures that caused the bug
+        self.assertNotEqual(len("Butterbeans Café".encode("utf-8")), len("Butterbeans Café"))
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 
