@@ -2458,7 +2458,8 @@ def _resize_marker_block(block: bytes, markers) -> bytes:
 
 def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> bytes:
     """Write session markers onto `data`. `markers` = list of (name, position_in_ticks) in
-    time order. Markers live SOLELY in the 0x2030 marker list: a count + one 0x2077 record
+    time order, OR the dicts `markers()` returns (its "name"/"tick" keys are used), so
+    `set_markers(d, markers(d))` composes. Markers live SOLELY in the 0x2030 marker list: a count + one 0x2077 record
     per marker (ordinal, length-prefixed name, position = ZERO_TICKS + ticks, a unique GUID).
 
     The 0x2030 template is INLINED (`_templates.MARKER_BLOCK_TEMPLATE`, a minimal 1-record
@@ -2468,6 +2469,23 @@ def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> byt
     it's the easy reindex case. Returns unxored bytes."""
     if not markers:
         return data
+    # Accept what `markers()` RETURNS, not only the tuple form. The reader hands back dicts
+    # ({"name", "tick", "sample"}) and this writer took (name, ticks) pairs, so the obvious
+    # composition `set_markers(d, markers(d))` raised "too many values to unpack" on every one of
+    # 88 corpus sessions that has a marker. A read layer whose output its own write layer cannot
+    # consume is a gap in the API, not just an inconvenience.
+    markers = [(m["name"], m["tick"]) if isinstance(m, dict) else tuple(m)[:2] for m in markers]
+    # A marker is EITHER tick-locked or SAMPLE-locked (§10: top position byte 0x40 vs 0x00), and
+    # `markers()` reports a sample-locked one as tick=None with the value in "sample". This
+    # writer only emits the tick encoding, so such a marker cannot be round-tripped -- 25 of 88
+    # corpus sessions carry one. Say that, instead of failing deep inside int() with
+    # "int() argument must be a string...", which says nothing about markers at all.
+    _untimed = [n for n, t in markers if t is None]
+    if _untimed:
+        raise ValueError(
+            f"{len(_untimed)} marker(s) are SAMPLE-locked, not tick-locked (e.g. {_untimed[0]!r}) "
+            f"-- set_markers writes only the tick encoding, so these cannot be expressed; supply "
+            f"an explicit tick for each, or leave the session's existing marker list in place")
     if markers_ref is None:
         from . import _templates as _T
         template_2030 = _T.MARKER_BLOCK_TEMPLATE

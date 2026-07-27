@@ -4035,3 +4035,34 @@ re-encrypts and reloads byte-identically.
 GENERAL POINT WORTH KEEPING: **re-verify staged artifacts after every code change that could
 touch them.** Ten commits landed today; one of them silently invalidated a file that had been
 sitting on the Desktop waiting to be tested. Staging is a snapshot, and snapshots go stale.
+
+## The read layer's output could not be fed to the write layer (set_markers)
+Extended the identity sweep to the mutators not yet covered. Results:
+
+    set_track_names(current names)   138/138 byte-identical
+    move_clip(same position)         111/111
+    reorder_tracks(identity order)    72 byte-identical, 66 refused (ValueError)
+    set_markers(markers(d))          FAILED on ALL 88 sessions that have a marker
+
+The set_markers failure was not a subtle one: `markers()` returns DICTS
+(`{"name","tick","sample"}`) and `set_markers` took `(name, ticks)` PAIRS, so the obvious
+composition raised "too many values to unpack". **A read layer whose output its own write layer
+cannot consume is a gap in the API, not an inconvenience** -- and no test covered it because
+every existing caller builds the tuple list by hand.
+
+FIXED: `set_markers` now accepts either form. 63 of 88 sessions round-trip their marker list
+EXACTLY (names and ticks).
+
+THE OTHER 25 EXPOSED A REAL FORMAT LIMIT, not a bug: a marker is either TICK-locked or
+SAMPLE-locked (spec §10, top position byte 0x40 vs 0x00). `markers()` reports a sample-locked
+one as `tick=None` with the value in `sample`, and `set_markers` only emits the tick encoding.
+Those 25 sessions therefore cannot be round-tripped at all. They used to fail deep inside
+`int()` with "int() argument must be a string, a bytes-like object..." -- a message that never
+mentions markers. Now they get a refusal that names the marker and says why.
+
+WRITING sample-locked markers is a genuine open feature (the encoding is documented in §10, so
+it is implementable), not a defect -- recorded as such rather than papered over.
+
+    NOT chased: reorder_tracks refuses 66/138. Its refusals may be entirely legitimate (it is
+    documented for synth-shaped sessions), but the ratio deserves the same split-by-reason
+    treatment that turned duplicate_track's "40% refusal rate" into an artifact of my harness.
