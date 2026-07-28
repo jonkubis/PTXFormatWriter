@@ -5733,3 +5733,40 @@ the AST and dropping the docstring before checking the body. Verified to bite: r
 reader as `len(audio_files(data))` now fails it.
 
 257 tests green.
+
+## 2026-07-27 — feeding audio_files() to the gate sweep explained NOTHING, and that is the finding
+
+Applied the move that took gates 14 -> 23 (build an observable, re-run) to the new `audio_files()`
+reader. Six features added: any files, many files, AIFF present, UTF-8 filenames, .L/.R stereo
+pairs, file table disagrees.
+
+**Zero extra types explained. Still 23 of 110.**
+
+### Why — and it is measurable BEFORE running the sweep
+
+    has_files  ~  regions        Jaccard 0.992   <- the same sessions
+    audio_clips ~ regions        Jaccard 0.997
+    has_plugins ~ elastic_audio  Jaccard 0.995
+    studio_product ~ avid_only   Jaccard 0.956
+
+A session with regions has files. A feature collinear with one already in the set carries no new
+information and cannot separate anything new, whatever it measures.
+
+**RULE for the next pass: compute a candidate feature's Jaccard against the existing set FIRST.**
+High overlap means it cannot pay. `plugins` worked because it was orthogonal (a session can have
+regions and no plug-ins); `audio_files` could not, because files and regions are the same sessions.
+
+### A real negative worth keeping
+
+Three of the six WERE orthogonal — `has_aiff` (n=18, closest 0.19), `utf8_filenames` (n=34, 0.38),
+`file_table_disagrees` (n=7, 0.06) — and still explained nothing. So no unproven type's presence
+tracks whether a session uses AIFF, carries accented filenames, or has a file table this library
+parses imperfectly.
+
+### A defective feature of my own, caught by the same matrix
+
+`elastic_audio` overlaps `has_plugins` at **0.995**. I defined it as "any plug-in identifier
+containing `fela`" — and `com.avid.aax.fela.2sola` is in almost every session, so it detected a
+ubiquitous Avid plug-in rather than Elastic Audio use. Any conclusion resting on it would have been
+"session has plug-ins" under a different name. None did, but only by luck — the overlap matrix is
+now the check that would have caught it deliberately.

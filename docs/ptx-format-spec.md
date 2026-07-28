@@ -4530,9 +4530,32 @@ The remaining Studio-family hits against `avid_only` (0.96/1.00) are not a separ
 types already match `studio_product` at 1.00, and a session whose plug-ins are all Avid is largely
 the same population. Reported for completeness, not as a finding.
 
-**87 of 110 remain unexplained**, and the lesson generalises: the ceiling moved because a new
-observable was built, not because more sessions were read. Anything else this library learns to read
-is a candidate for another pass.
+**87 of 110 remain unexplained**, and the ceiling moved because a new observable was BUILT, not
+because more sessions were read.
+
+> **But not every new observable helps, and it is now possible to tell which will — before running
+> the sweep.** `audio_files()` was fed in next, adding six features (any files, many files, AIFF
+> present, UTF-8 filenames, `.L/.R` stereo pairs, file table disagrees). It explained **zero** extra
+> types; the count stayed at 23 of 110.
+>
+> The reason is measurable. `has_files` and `regions` have a **Jaccard overlap of 0.992** — they are
+> the same population of sessions, because a session with regions has files. A feature collinear
+> with one already present carries no new information and cannot separate anything new. The same
+> holds for `audio_clips ~ regions` (0.997) and `studio_product ~ avid_only` (0.956).
+>
+> **Rule for the next pass: compute a candidate feature's Jaccard against the existing set FIRST.**
+> High overlap means it cannot pay, whatever it measures.
+>
+> Three of the six *were* genuinely orthogonal — `has_aiff` (n=18, closest overlap 0.19),
+> `utf8_filenames` (n=34, 0.38), `file_table_disagrees` (n=7, 0.06) — and still explained nothing.
+> That is a real negative: **no unproven type's presence tracks whether a session uses AIFF, has
+> accented filenames, or has a file table this library parses imperfectly.**
+>
+> The overlap matrix also exposed a **defective feature of my own**: `elastic_audio` overlaps
+> `has_plugins` at **0.995**. It was defined as "any plug-in identifier containing `fela`", and
+> `com.avid.aax.fela.2sola` turns out to be in almost every session — so it detected a ubiquitous
+> Avid plug-in, not Elastic Audio. Any conclusion that had rested on it would have been about
+> "session has plug-ins" wearing a different name. It did not support one, but only by luck.
 
 ### Differential analysis over `.bak` chains — running the "saved twice" experiment on the corpus
 
