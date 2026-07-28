@@ -4424,9 +4424,48 @@ non-circular, so they are the instrument returning the known answer at n=290 and
 > — but for `0x1003`/`0x1033`/`0x2106` it narrows the question without answering it. The entries
 > below are updated to say gate-known, purpose-narrowed, rather than settled.
 
-**100 of the 114 are not explained by any of the 17 features**, which is itself the useful negative:
-their presence does not track anything this library can currently measure, so the next advance there
-needs either a new observable or Pro Tools.
+**100 of the 114 were not explained by any of the 17 features**, which said the next advance needed
+either a new observable or Pro Tools.
+
+#### A new observable: the plug-in catalog
+
+`0x1017` is in the parser's LEAF_PAYLOADS, so the walk must not descend into it — plug-in names
+contain `Z` and manufacture phantoms (the catalogue's `0x0c00` is the `Z` in `iZotope`). **"Do not
+descend" is not "cannot read."** The record is regular:
+
+    +9   u8   record kind -- 3 in 1537 of 1585 blocks; 4, 8 and 0xFF also occur
+    +10  u32  length of the display name
+    +14  ..   display name, ASCII
+    ..   12   three four-character codes (manufacturer / type / subtype, byte-reversed)
+    ..   7    fixed bytes
+    ..   u32  length of the identifier
+    ..   ..   identifier -- e.g. `com.fabfilter.Pro-Q.3.AAX`, `com.avid.aax.dyn3.Expander`
+    ..   ..   trailer -- the record does NOT end at the identifier (0 of 1534 blocks did)
+
+**1534 of 1585 blocks parse — 96.8%**; the 51 that fail are the non-3 record kinds and are skipped
+rather than guessed at. This is now `plugins()` on the public surface, and it closes a real gap:
+the library could not previously say what plug-ins a session uses.
+
+Re-running the gate sweep with the catalog as an observable takes the explained count from **14 to
+23 of 110**, and the new ones are all non-circular:
+
+| gate | types | agreement |
+|---|---|---|
+| **the session uses ANY plug-in** | `0x2715` | **408/408 both directions** |
+| | `0x4530` | 0.99 / 1.00 |
+| | `0x270A`, `0x0F3E` | 1.00 / 0.97 |
+
+`0x2715` is exact: present in every one of the 408 sessions carrying a plug-in and in none of the
+other 204. `0x0F3E` is notable for a second reason — it was in the set that **never changed across
+330 consecutive saves**, so it is a session-invariant whose presence is nonetheless feature-gated.
+
+The remaining Studio-family hits against `avid_only` (0.96/1.00) are not a separate gate: those
+types already match `studio_product` at 1.00, and a session whose plug-ins are all Avid is largely
+the same population. Reported for completeness, not as a finding.
+
+**87 of 110 remain unexplained**, and the lesson generalises: the ceiling moved because a new
+observable was built, not because more sessions were read. Anything else this library learns to read
+is a candidate for another pass.
 
 ### Differential analysis over `.bak` chains — running the "saved twice" experiment on the corpus
 

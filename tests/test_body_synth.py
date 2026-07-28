@@ -3624,3 +3624,72 @@ class PlacementCountInvariantTests(unittest.TestCase):
         vsrc = inspect.getsource(BS.validate_pt_invariants)
         self.assertIn("placement-count", vsrc)
         self.assertIn("_fp - 4", vsrc, "the invariant must read the FIXED offset")
+
+
+class PluginCatalogTests(unittest.TestCase):
+    """`plugins()` reads the 0x1017 catalog: (display name, identifier).
+
+    0x1017 is a LEAF_PAYLOAD -- the block walk must not descend into it, because plug-in names
+    contain 'Z' and manufacture phantoms (the phantom catalogue's 0x0c00 is the Z in "iZotope").
+    "Do not descend" is not "cannot read": the record is regular, and 1534 of 1585 corpus blocks
+    parse.
+    """
+
+    #: A control session known to carry a populated catalog. Named, so that "no plug-ins found"
+    #: FAILS instead of skipping -- a bite check showed that breaking the identifier offset by one
+    #: byte made every test in this class skip, and a skip is not a pass.
+    FIXTURE = "128 click tracks.ptx"
+
+    def _a_session_with_plugins(self):
+        hits = sorted(ROOT.glob("control_files/**/" + self.FIXTURE))
+        if not hits:
+            self.skipTest("fixture %s is not in control_files" % self.FIXTURE)
+        d = _load_path(hits[0])
+        got = BS.plugins(d)
+        self.assertTrue(got, "%s carries a populated 0x1017 catalog; reading none means the "
+                             "record layout is wrong, not that the session is empty" % self.FIXTURE)
+        return d
+
+    def test_reads_name_and_identifier_pairs(self):
+        d = self._a_session_with_plugins()
+        got = BS.plugins(d)
+        self.assertTrue(got)
+        for name, ident in got:
+            self.assertIsInstance(name, str)
+            self.assertIsInstance(ident, str)
+            self.assertTrue(name.strip(), "a plug-in must have a display name")
+            self.assertTrue(ident.strip(), "a plug-in must have an identifier")
+            self.assertLess(len(name), 201)
+            self.assertLess(len(ident), 251)
+
+    def test_identifiers_look_like_reverse_dns(self):
+        """Not a format guarantee -- a shape check that catches a mis-set offset immediately."""
+        d = self._a_session_with_plugins()
+        idents = [i for _n, i in BS.plugins(d)]
+        self.assertTrue(any("." in i for i in idents),
+                        "identifiers are reverse-DNS strings; none had a dot -> offset is wrong")
+
+    def test_results_are_deduplicated(self):
+        d = self._a_session_with_plugins()
+        got = BS.plugins(d)
+        self.assertEqual(len(got), len(set(got)))
+
+    def test_empty_0x1017_stubs_contribute_nothing(self):
+        """A session's EMPTY catalog stubs (span 49, all zeros) must yield no pair.
+
+        Originally written as `plugins(bytes(4096)) == []`, which asserted a promise the library
+        does not make: EVERY reader raises on non-session input (`clips`, `markers`, `tempo_map`,
+        `region_list`, `playlist_names`, `volumes` all AttributeError; `track_types` ValueError).
+        `plugins` is consistent with them, so the test was wrong rather than the code. The
+        library-wide behaviour is a wart worth fixing on its own terms, not by making one reader
+        special.
+        """
+        d = self._a_session_with_plugins()
+        n_blocks = sum(1 for z, _e, c in BS._size_driven_blocks(d) if c == 0x1017 and z >= 31)
+        self.assertLessEqual(len(BS.plugins(d)), n_blocks,
+                             "cannot report more plug-ins than there are catalog blocks")
+
+    def test_it_is_on_the_public_surface(self):
+        import ptxformatwriter as ptx
+        self.assertIs(ptx.plugins, BS.plugins)
+        self.assertIn("plugins", ptx.__all__)

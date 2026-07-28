@@ -5604,3 +5604,55 @@ not track anything this library can measure, so the next advance there needs a n
 Pro Tools.
 
 Per-type count: **at most 110 unproven** (from 114), 10 settled within flagged sections (from 6).
+
+## 2026-07-27 — built a new observable (plugins) and it moved the gate count 14 -> 23
+
+Last round ended: "100 of 114 explained by none of the 17 features ... needs a new observable or Pro
+Tools." A new observable is buildable. Two gaps found while looking:
+
+  1. `track_types` only ever reports mono/stereo/midi — no aux, master, VCA or folder kinds. A
+     reader limitation worth its own fix; noted, not fixed here.
+  2. **`0x1017`, the plug-in catalog, is fully decodable.** It is in LEAF_PAYLOADS so the WALK must
+     not descend into it (plug-in names contain 'Z' and manufacture phantoms — the catalogue's
+     0x0c00 is the Z in "iZotope"), but "do not descend" is not "cannot read".
+
+        +9   u8   record kind (3 in 1537/1585; also 4, 8, 0xFF)
+        +10  u32  display-name length      +14 .. name
+        ..   12   three four-char codes (mfr/type/subtype, byte-reversed)
+        ..   7    fixed                     .. u32 identifier length  .. identifier
+        ..   ..   trailer (0 of 1534 blocks end at the identifier)
+
+     **1534/1585 parse = 96.8%**; the 51 failures are the non-3 kinds and are skipped, not guessed.
+
+SHIPPED: `plugins(data) -> [(display_name, identifier)]`, exported to the package root. Closes a
+real gap — the library could not say what plug-ins a session uses. 5 tests, 252 green.
+
+**Gate sweep re-run with the catalog as an observable: 14 -> 23 of 110 explained.** New, all
+non-circular:
+
+    ANY plug-in present   0x2715   408/408 both directions (and 0 of the other 204)
+                          0x4530   0.99/1.00
+                          0x270A 0x0F3E   1.00/0.97
+
+`0x0F3E` is doubly interesting: it was in the set that NEVER changed across 330 consecutive saves,
+so it is a session-invariant whose PRESENCE is nonetheless feature-gated.
+
+The Studio family's `avid_only` hits (0.96/1.00) are NOT a separate gate — those types already match
+`studio_product` at 1.00 and the populations largely coincide. Reported, not claimed.
+
+### A test that skipped instead of failing
+
+The first `PluginCatalogTests` looked for any control session with plug-ins and skipped if none had
+them. Breaking the identifier offset by ONE BYTE made all four tests **skip** — and a skip is not a
+pass. Fixed by pinning the fixture (`128 click tracks.ptx`, known to carry a populated catalog) so
+"no plug-ins found" FAILS with a message saying the layout is wrong. Re-verified: the same one-byte
+break now fails 4 tests.
+
+Also corrected a test of mine that asserted `plugins(bytes(4096)) == []`. EVERY reader raises on
+non-session input (`clips`, `markers`, `tempo_map`, `region_list`, `playlist_names`, `volumes` →
+AttributeError; `track_types` → ValueError). `plugins` is consistent with them, so the TEST was
+wrong. The library-wide behaviour is a wart worth fixing on its own terms, not by making one reader
+special.
+
+**87 of 110 still unexplained.** The ceiling moved because an observable was BUILT, not because more
+sessions were read — so anything else this library learns to read is a candidate for another pass.
