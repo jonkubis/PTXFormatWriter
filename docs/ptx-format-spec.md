@@ -3519,8 +3519,40 @@ sessions, occasionally much larger.
   top-level slots** whose payload is usually empty. The generalisation is the finding: Pro Tools
   emits the slot unconditionally and fills it only when the corresponding feature is used, so an
   empty stub means "feature absent", not "block missing".
-- **Confidence:** HIGH on framing/position/universality and the empty-vs-populated split;
-  purposes UNPROVEN.
+
+> **WHICH feature — measured on 612 sessions, 2026-07-27.** The slot rule says the payload appears
+> only when a feature is used, and that makes the feature findable: split the corpus on whether the
+> slot is populated and ask what the populated sessions share.
+>
+> **The slots co-populate in fixed groups** — not merely in equal numbers, but in the *same
+> sessions*: `{0x2000, 0x2634}` in the same 118, and `{0x2424, 0x2426, 0x262C}` in the same 18. The
+> rest are singletons. A group is one feature's footprint spread over several slots.
+>
+> **`0x2000` and `0x2634` are the MIDI pair. Every one of the 93 sessions containing a MIDI clip
+> populates both — 93/93, no exceptions.** Of the 118 populated sessions, 93 have MIDI clips and a
+> further 15 have a MIDI or instrument track with no clips on it; 10 are unexplained and are worth
+> someone's attention.
+>
+> That settles the purpose of two entries that have said UNPROVEN since they were written, and it
+> gives `0x2000` — one per session in all 832, always top-level — its first established meaning.
+>
+> **`0x2424`/`0x2426`/`0x262C`: video is REFUTED.** It was the leading candidate (10 of the 13
+> video-clip sessions populate the group) but only 10 of the 18 populated sessions contain video, so
+> it fails in both directions. Purpose still unknown; the co-population group is the new fact.
+>
+> **`0x202E` populated ⟹ MIDI**, 19/19 — but only 20% of MIDI sessions populate it, so it marks a
+> MIDI *sub*-feature, not MIDI. **`0x2027`** tracks session size: 94% of sessions with more than 24
+> tracks populate it. **`0x2073`** has no clean correlate among the features measured.
+>
+> *(An earlier pass today claimed `0x2000` "moves with MIDI clips" from 4 byte-level pairs and
+> **withdrew** it, because at n=7 its bytes also moved elsewhere. That withdrawal was right for that
+> evidence. This is a different and much better test — slot population across 612 sessions, not byte
+> churn across 4 pairs — and it is the reason the conclusion returns in a stronger form rather than
+> the same one being re-asserted.)*
+
+- **Confidence:** HIGH on framing/position/universality and the empty-vs-populated split.
+  Purposes: `0x2000`/`0x2634` SETTLED (MIDI, 93/93); `0x202E` narrowed to a MIDI sub-feature;
+  `0x2027` to session size; the rest UNPROVEN.
 
 ### 0x2510 — top-level leaf, near-constant
 

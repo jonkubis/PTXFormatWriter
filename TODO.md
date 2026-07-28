@@ -5482,3 +5482,54 @@ answer is known. That is calibration the circularity filter otherwise denies us.
 **HONEST YIELD:** across 74 controlled pairs the instrument's only non-circular discovery is
 `0x1058`. It mostly recovers what is already documented — reasonable for a new instrument, and a bad
 reason to trust its outliers.
+
+## 2026-07-27 — 0x2000 SETTLED: the slot rule made its own feature findable
+
+The spec's slot rule says PT emits nine universal top-level slots unconditionally and fills each one
+only when the corresponding feature is used — "an empty stub means feature absent, not block
+missing". The RULE was documented; the FEATURES were not, and every one of those entries ended
+"purposes UNPROVEN".
+
+The rule itself makes them findable: split 612 sessions on whether the slot is populated, and ask
+what the populated ones share.
+
+**The slots co-populate in fixed GROUPS — the same sessions, not merely equal counts:**
+
+    {0x2000, 0x2634}          the same 118 sessions
+    {0x2424, 0x2426, 0x262C}  the same 18 sessions
+    others                    singletons
+
+**0x2000 and 0x2634 are the MIDI pair. All 93 sessions containing a MIDI clip populate both —
+93/93, no exceptions.** Of the 118 populated, 93 have MIDI clips, 15 more have a MIDI/instrument
+track with no clips; **10 are unexplained** and are worth a look.
+
+That settles two entries that have said UNPROVEN since they were written, and gives `0x2000` — one
+per session in all 832, always top-level — its first established meaning.
+
+**0x2424/0x2426/0x262C: video REFUTED.** Leading candidate (10 of 13 video sessions populate the
+group) but only 10 of 18 populated sessions contain video — fails both directions. The
+co-population group is the new fact; the feature is still unknown.
+
+**0x202E populated => MIDI, 19/19**, but only 20% of MIDI sessions populate it: a MIDI SUB-feature.
+**0x2027** tracks session size (94% of >24-track sessions). **0x2073** has no clean correlate.
+
+### On un-retracting
+
+I withdrew "0x2000 moves with MIDI clips" earlier today. That withdrawal was correct for the
+evidence it was based on — 4 byte-level pairs, and at n=7 its bytes moved elsewhere too. This is a
+DIFFERENT test: slot population across 612 sessions. The conclusion returns in a much stronger form;
+the same evidence was not re-asserted.
+
+### The "53 unsettled sections" figure I have been quoting is inflated
+
+    unsettled SECTIONS           54
+      of which cover >1 type     26
+    distinct TYPES named in them 120
+
+A section is marked unsettled if ANY type in it is unproven, and 26 sections cover several types
+each — two cover TEN. `0x1056` is counted unsettled while its own row in that table reads "**the
+MIDI placement wrapper**" in bold. So "54 unsettled" is neither 54 types nor 120 types; it is 54
+sections of mixed status, and the real per-type number is somewhere between.
+
+Splitting those shared headings is the cheapest available reduction in the unsettled count and does
+not need Pro Tools. Recorded as the next concrete task.
