@@ -5656,3 +5656,32 @@ special.
 
 **87 of 110 still unexplained.** The ceiling moved because an observable was BUILT, not because more
 sessions were read — so anything else this library learns to read is a candidate for another pass.
+
+## 2026-07-27 — two predicted reader defects, both refuted by measurement
+
+Building `plugins()` started from noticing `track_types` reports only mono/stereo/midi and uses
+`flat_blocks`, the scan parser known to undercount. Two defects looked likely. Neither exists.
+
+**No undercount.** `track_types` returns exactly the size-driven count of 0x1014 + 0x1057 in
+**417/417** sessions. The `flat_blocks` undercount is real but hits PLAYLISTS, not track headers —
+so the general warning about that parser does not transfer to this reader.
+
+**No track-kind field to miss.** Every byte of a 0x1014 after the name, over 482 tracks:
+
+    +0,+1     channel-map header: 01 02 stereo (83%), 00 01 mono (16%)
+    +2,+3,+4  always 00
+    +5        first channel index (144 distinct)
+    +6        always 00
+    +7        second channel index (105 distinct)
+    +8,+9,+10 always 00
+    +11       00, or the 2A GUID tag on mono where the shorter map shifts it forward
+
+Everything is channel map or padding. **The three kinds are not a reader limitation — they are what
+0x1014 encodes.** If aux/master/VCA are distinguished at all it is not here, and no corpus session
+carries a track this reader can be shown to mislabel.
+
+Recorded because a suspicion left unrecorded is a trap: the next person would go looking for a kind
+byte that is not there. Also worth noting against my own track record this session — I have now
+predicted a defect and been wrong twice (this and the phantom-contamination sweep, which found the
+readers clean except one masked case), and been right twice (the 0x251A lane count, the missing
+public exports). Predictions are cheap; the measurement is the work.

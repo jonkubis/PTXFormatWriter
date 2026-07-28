@@ -4427,6 +4427,34 @@ non-circular, so they are the instrument returning the known answer at n=290 and
 **100 of the 114 were not explained by any of the 17 features**, which said the next advance needed
 either a new observable or Pro Tools.
 
+#### A predicted reader defect that does not exist
+
+Building `plugins()` was prompted by noticing that `track_types` reports only `mono`/`stereo`/`midi`
+— no aux, master, VCA or folder kinds — and it uses `flat_blocks`, the older scan parser known to
+undercount. Two defects looked likely. **Both were refuted by measurement**, and the refutations are
+more useful than the suspicion.
+
+**It does not undercount.** `track_types` returns exactly the size-driven count of `0x1014` +
+`0x1057` in **417 of 417** sessions. The `flat_blocks` undercount is real but hits *playlists*, not
+track headers.
+
+**There is no track-kind field to miss.** Every byte of a `0x1014` after the name, over 482 tracks:
+
+| offset past name | content |
+|---|---|
+| +0, +1 | channel-map header — `01 02` stereo (83%), `00 01` mono (16%) |
+| +2, +3, +4 | always `00` |
+| +5 | first channel index — 144 distinct values |
+| +6 | always `00` |
+| +7 | second channel index — 105 distinct |
+| +8, +9, +10 | always `00` |
+| +11 | `00`, or the `2A` GUID tag on mono, where the shorter channel map shifts it forward |
+
+Every byte is channel map or padding. **`track_types`' three kinds are not a limitation of the
+reader — they are what `0x1014` encodes.** If aux, master and VCA tracks are distinguished anywhere,
+it is not here, and no session in these corpora carries a track this reader can be shown to
+mislabel. Recorded so the next person does not go looking for a kind byte that is not there.
+
 #### A new observable: the plug-in catalog
 
 `0x1017` is in the parser's LEAF_PAYLOADS, so the walk must not descend into it — plug-in names
