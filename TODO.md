@@ -5120,3 +5120,41 @@ WHAT SURVIVES, and it is worth the pass on its own: **`0x1004` has h=4 in 831 of
 and the one exception has h=0 — that exception being exactly the session whose file-descriptor
 count is 346 = 0x0000015A, i.e. the session that produced the `0x2757` phantom. The count-field
 explanation is confirmed corpus-wide, not just on the file it was dissected from.
+
+## 2026-07-27 — do phantoms reach the public readers? Almost never, and the exception was luck
+
+Today's phantom catalogue raises an obvious question about the reimplementation rather than the
+documentation: every reader walks `_size_driven_blocks`, which by design frames noise inside leaf
+payloads. If a phantom carries a READER-RELEVANT content type, a reader could return an object
+built out of plug-in state.
+
+Measured per instance over 522 sessions, for the 15 types the public readers key on
+(`0x2619`, `0x2628`, `0x2629`, `0x2506`, `0x2028`, `0x2029`, `0x1014`, `0x2519`, `0x251A`,
+`0x1052`, `0x1050`, `0x1057`, `0x1056`, `0x104F`, `0x2077`) — **1.1M instances**:
+
+    phantom instances: 0    for 14 of the 15 types
+    phantom instances: 10   for 0x251A, in 10 sessions
+
+So the readers are clean, with one exception — and the exception was surviving on luck.
+
+`_rekey_offsynth_positional` derived the track count as `len(by[0x251A]) // 2`, from a GLOBAL type
+index. A phantom shifts the lane-group boundary and mis-numbers every ordinal in the second group.
+In all 10 affected sessions (one project family; each phantom a 290-byte block inside a `0x1038`
+audio payload) there is **exactly one** phantom and the total is **odd**, so `len // 2` absorbed it.
+Nothing about a stray `0x5A` in audio data promises the next session will only have one.
+
+FIXED: `_lane_blocks(by)` returns only `0x251A` blocks contained in the name table, falling back to
+the unfiltered list if containment finds nothing.
+
+Verified the way the `core.parsestring` regression taught:
+
+  * lane-set comparison — removes exactly 1 entry from each of the 10, nothing from the other 434,
+    derived count changes in **0 of 462**;
+  * **A/B of the actual output** — `_rekey_offsynth_positional` hashed over 459 sessions with and
+    without the filter: **byte-identical on all 459**, 0 errors. A counting argument is not an
+    output measurement, and it was a counting argument that made `core.parsestring` look safe.
+
+3 tests added, each verified to bite. 239 green.
+
+Note the shape of this one: the bug was found by asking what today's DOCUMENTATION finding implied
+for the CODE. The phantom catalogue was not written to find bugs.

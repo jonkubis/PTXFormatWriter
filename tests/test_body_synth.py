@@ -3441,3 +3441,38 @@ class NameTablePreambleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaneBlockSelectionTests(unittest.TestCase):
+    """The lane list that drives ordinal re-keying must contain only real lanes.
+
+    `_blocks_by_type` is a GLOBAL type index, so a `0x251A` framed by a stray `0x5A` inside a leaf
+    payload lands in it beside the real lanes. The caller derives the track count by DIVIDING that
+    list, so a phantom shifts the lane-group boundary and mis-numbers a whole group.
+
+    Ten corpus sessions really do carry such a phantom. Each has exactly ONE and an ODD total, so
+    `len // 2` absorbed it -- the count was right by luck, not by construction.
+    """
+
+    def test_a_phantom_lane_outside_the_name_table_is_excluded(self):
+        by = {0x2519: [(1000, 2000)],
+              0x251A: [(1100, 1200), (1200, 1300), (1300, 1400), (1400, 1500)]}
+        self.assertEqual(len(BS._lane_blocks(by)), 4)
+        by[0x251A].append((50_000, 50_290))          # 290 bytes, inside a 0x1038 -- the real shape
+        self.assertEqual(len(BS._lane_blocks(by)), 4,
+                         "a 0x251A outside the name table is not a lane")
+
+    def test_two_phantoms_would_have_broken_the_derived_track_count(self):
+        """Why this is worth fixing while it is still masked: the luck is one phantom deep."""
+        real = [(1000 + 100 * i, 1100 + 100 * i) for i in range(4)]
+        by = {0x2519: [(900, 2000)], 0x251A: list(real)}
+        self.assertEqual(len(BS._lane_blocks(by)) // 2, 2)
+        by[0x251A] += [(50_000, 50_290), (60_000, 60_290)]
+        self.assertEqual(len(by[0x251A]) // 2, 3, "unfiltered, two phantoms shift N from 2 to 3")
+        self.assertEqual(len(BS._lane_blocks(by)) // 2, 2, "filtered, N is unchanged")
+
+    def test_an_unexpected_name_table_shape_leaves_the_lanes_alone(self):
+        """Better to re-key as before than to re-key off an empty lane set."""
+        lanes = [(10, 20), (20, 30)]
+        self.assertEqual(BS._lane_blocks({0x251A: lanes}), lanes)          # no 0x2519
+        self.assertEqual(BS._lane_blocks({0x2519: [(0, 5)], 0x251A: lanes}), lanes)

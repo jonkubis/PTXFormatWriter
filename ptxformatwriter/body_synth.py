@@ -5757,6 +5757,34 @@ def _blocks_by_type(data: bytes) -> "dict[int, list[tuple[int, int]]]":
     return by
 
 
+def _lane_blocks(by: "dict[int, list[tuple[int, int]]]") -> "list[tuple[int, int]]":
+    """The real lane-major `0x251A` entries: the children of the name table, and nothing else.
+
+    `_blocks_by_type` is a GLOBAL index, so a `0x251A` framed by a stray `0x5A` inside a leaf
+    payload sits in it next to the real lanes. That matters because the caller derives the track
+    count by DIVIDING this list (`len // 2`): one phantom shifts the lane-group boundary and
+    mis-numbers every ordinal in the second group.
+
+    Measured over 462 corpus sessions: 10 hold a phantom `0x251A` -- all one project family, each a
+    290-byte block inside a `0x1038` audio payload. This filter removes **exactly one** entry from
+    each of those 10 and nothing at all from the other 434, and the derived count changes in **0 of
+    462** -- because in every affected session the phantom count is 1 and the total is odd, so
+    `len // 2` happened to absorb it. It is right by luck, and a second stray `0x5A` in audio data
+    would end the luck.
+
+    Falls back to the unfiltered list if the containment test finds nothing, so a session whose
+    name table is shaped unexpectedly is left exactly as it was rather than re-keyed off an empty
+    lane set.
+    """
+    lanes = by.get(0x251A, [])
+    tables = by.get(0x2519)
+    if not tables:
+        return lanes
+    nz, ne = tables[0]
+    real = [(lz, le) for lz, le in lanes if nz < lz and le <= ne]
+    return real or lanes
+
+
 def _view_scale_base_n(data: bytes) -> int:
     """The builder's scaffold/donor track count == the number of LEADING 0x2104 blocks whose
     28-byte view-scale payload is all-zero (pure mono/stereo synths carry 8, the mixed donor 2).
@@ -6118,7 +6146,21 @@ def _rekey_offsynth_positional(data: bytes, *, c4_dense: "bool | None" = None) -
     # overwrote Pro Tools' own values. Preserving them cannot be worse than overwriting them, and
     # it matches the measured shape: the nonzeros form ascending runs restarting at 1 (25/25, and
     # 148/149 on the wider sample).
-    lanes = by.get(0x251A, [])
+    # PHANTOM-FREE lane list. `by` is a GLOBAL type index, so a `0x251A` framed by a stray 0x5A
+    # inside a leaf payload lands in it alongside the real lanes -- and `n` below is derived by
+    # DIVIDING that list, so one phantom shifts the lane-group boundary and mis-numbers every
+    # ordinal in the second group. The real lanes are children of the name table; nothing else is.
+    #
+    # Measured over 462 corpus sessions: 10 hold a phantom `0x251A` (all in one project family,
+    # each a 290-byte block inside a `0x1038` audio payload). In every one there is EXACTLY ONE
+    # phantom and the total is ODD, so `len//2` absorbs it and `n` is right by luck --
+    # `n_all == n_clean` in 10 of 10, which is what makes this filter a byte-level no-op on the
+    # whole corpus. Two phantoms in one session would not have been survivable, and nothing about
+    # a stray 0x5A in audio data promises there will only ever be one.
+    #
+    # (The spec's note that 4 `0x251A` sit under `0xE196` is the same artifact from the other end:
+    # `0xE196` is itself a phantom type, 31/31 nested in `0x1038`.)
+    lanes = _lane_blocks(by)
     n = len(lanes) // 2 or 1                    # two lane entries per track, click included
     k = 0
     for i, (z, e) in enumerate(lanes):
