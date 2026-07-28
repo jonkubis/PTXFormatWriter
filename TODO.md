@@ -5533,3 +5533,33 @@ sections of mixed status, and the real per-type number is somewhere between.
 
 Splitting those shared headings is the cheapest available reduction in the unsettled count and does
 not need Pro Tools. Recorded as the next concrete task.
+
+## 2026-07-27 — made the unsettled count PER-TYPE, and measured the inflation
+
+The "53 unsettled" I quoted all session counts SECTIONS. A section is flagged when ANY type in it is
+unproven, and 26 of 54 name several types — two name TEN. `0x1056` was counted unsettled while its
+own row read "**the MIDI placement wrapper**".
+
+FIXED: added machine-readable `**Purpose status (per type).**` lines to the two widest shared
+sections, and `gen_coverage.py` now reads them, falling back to "every type in the heading" for
+sections without one. So the reported per-type figure is an UPPER BOUND and is labelled as one.
+
+    unsettled SECTIONS = 54 (26 multi-type)
+    per-type: at most 114 unproven, 6 already settled inside flagged sections
+
+Then checked how much of the remainder is inflation, by reading the four widest shared sections:
+
+  * Pro Tools Studio family (9) — its own scope note says it "does NOT settle what any of them
+    means — every one is byte-constant, so the corpus cannot". Genuinely all unproven.
+  * 0x203x view-element family (6) — settled as a CLASS, individual roles unproven.
+  * settings trees (6) and 0x1002/0x1005 group (6) — framing/parentage only, 1-3 instances each.
+
+**So the inflation is real but small.** 6 types recovered; the widest remainder is genuinely
+all-unproven. **114 is close to the true figure, not a loose bound** — worth knowing before anyone
+spends effort attacking the COUNT rather than the types.
+
+Side effect worth noting: `documented` rose 323 -> 331 and mention-only 13 -> 21, because prose I
+wrote this session NAMES phantom type numbers (0x2f00, 0xb300, 0x02c0 ...) in the .bak churn list.
+Under the "mention" standard, writing a hex string anywhere makes a type "documented". The queue
+split still classifies all 21 as phantoms, so the real queue stays EMPTY — but it is a live
+demonstration of why the mention standard is worthless on its own.

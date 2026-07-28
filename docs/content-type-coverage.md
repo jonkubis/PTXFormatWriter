@@ -22,7 +22,7 @@ content-types than all 282 control files.
 Also excluded: ~2 files under `/Volumes/Hack 2TB SSD Old` that are NVIDIA CUDA PTX
 assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
-**323/482 content-types have a spec entry = 67.0%**, covering 99.93% of block instances.
+**331/482 content-types have a spec entry = 68.7%**, covering 99.94% of block instances.
 
 ## The strongest form of the coverage claim — measured per INSTANCE
 
@@ -50,14 +50,14 @@ noise"*, but *"every type with even a single unexplained instance is written dow
 ## Three standards, not one — mentioned, entered, settled
 
 **310 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**13 are counted as "documented" only because their hex string appears somewhere in
+**21 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
 mentions.
 
 But a mention-only list is not yet a work list. Running the same phantom signatures used
-below over it splits the 13 into **13 phantoms** and **0 real types**. Most of the phantoms
+below over it splits the 21 into **21 phantoms** and **0 real types**. Most of the phantoms
 are mentioned *because the spec explains them as phantoms* — the sentence deriving
 `0x0c00` from 256×12 is the very reason `0x0c00` counts as mentioned. Listing those as
 outstanding work is this file's original error wearing a different hat.
@@ -67,15 +67,22 @@ outstanding work is this file's original error wearing a different hat.
 *(none — every mention-only type is a phantom)*
 
 **Phantoms that were sitting in the queue** (each traced to the byte that produced it in
-the spec's phantom catalogue): `0x2a00`, `0x0c00`, `0x2002`, `0x0800`, `0xe196`, `0x1900`, `0x0000`, `0x0024`, `0x0033`, `0x0034`, `0x0700`, `0x2757`, `0x001c`.
+the spec's phantom catalogue): `0xb300`, `0x2f00`, `0x2a00`, `0x0c00`, `0x2002`, `0x0800`, `0xe196`, `0x1900`, `0x0000`, `0x3300`, `0xaf00`, `0x5300`, `0x0024`, `0x2ab0`, `0x0033`, `0x0034`, `0x001c`, `0x22b0`, `0x0700`, `0x12c0`, `0x2757`.
 
 
 ## Described vs settled — two different numbers
 
-**323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
+**331 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
 Of the 197 typed sections in the spec, **54 still say the PURPOSE is unproven** —
+but that counts SECTIONS, and 26 of them cover more than one type: a heading naming ten
+types is flagged when ONE is unproven. `0x1056` was counted unsettled while its own row
+read *"the MIDI placement wrapper"*. Read per TYPE instead, the flagged sections name
+**at most 114 unproven types**, with 6 already settled inside them. Sections carrying an
+explicit `Purpose status (per type)` line are counted from it; the rest still contribute
+every type they name, so 114 is an UPPER BOUND, not a measurement.
+
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
@@ -103,7 +110,7 @@ fix is to state exactly what was measured and what was not.
 
 `0x5A` is `'Z'` and occurs freely inside leaf payloads and binary id fields, so the
 size-driven walk frames
-noise there. **159 of the 159 undocumented types are phantoms** by one of FOUR measured
+noise there. **151 of the 151 undocumented types are phantoms** by one of FOUR measured
 signatures: ≥50% of instances nested inside a leaf payload (`0x1038` plug-in state,
 `0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`); a type whose low byte is
 `0x00` that the master index never references — the `256 × k` arithmetic of a string
@@ -129,15 +136,14 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 
 | content-type | blocks | in #sessions | indexed | 
 |---|---:|---:|---:|
-| `0xb300` | 219 | 47 | 0 |
-| `0x2f00` | 197 | 47 | 0 |
-| `0x7500` | 62 | 31 | 0 |
 | `0x2401` | 62 | 31 | 0 |
+| `0x7500` | 62 | 31 | 0 |
+| `0x7e00` | 31 | 31 | 0 |
 | `0x7200` | 31 | 31 | 0 |
 | `0x2201` | 31 | 31 | 0 |
 | `0x8201` | 31 | 31 | 0 |
-| `0x7e00` | 31 | 31 | 0 |
-| `0xae00` | 31 | 31 | 0 |
+| `0x7400` | 31 | 31 | 0 |
+| `0x3405` | 31 | 31 | 0 |
 | `0x0807` | 31 | 31 | 0 |
 | `0x1008` | 31 | 31 | 0 |
 | `0x6208` | 31 | 31 | 0 |
@@ -161,7 +167,6 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 | `0xd01e` | 31 | 31 | 0 |
 | `0x0422` | 31 | 31 | 0 |
 | `0xdf09` | 31 | 31 | 0 |
-| `0x2500` | 31 | 31 | 0 |
 | `0xde2e` | 31 | 31 | 0 |
 | `0xbe03` | 31 | 31 | 0 |
 | `0xc600` | 31 | 31 | 0 |
@@ -185,15 +190,17 @@ Sorted by how many sessions carry them (ubiquity first), then block count.
 | `0xf303` | 31 | 31 | 0 |
 | `0x7aa9` | 31 | 31 | 0 |
 | `0x6abf` | 31 | 31 | 0 |
-| `0xb904` | 31 | 31 | 0 |
 | `0x7b03` | 31 | 31 | 0 |
 | `0xdafa` | 31 | 31 | 0 |
 | `0x4b00` | 31 | 31 | 0 |
+| `0xf102` | 31 | 31 | 0 |
+| `0xd102` | 31 | 31 | 0 |
+| `0x5903` | 31 | 31 | 0 |
 
-…and 99 more (long tail, each in <32 sessions).
+…and 91 more (long tail, each in <32 sessions).
 
 
 ## Documented types
 
-323 types are covered by `ptx-format-spec.md`, accounting for 99.93% of block instances.
+331 types are covered by `ptx-format-spec.md`, accounting for 99.94% of block instances.
 

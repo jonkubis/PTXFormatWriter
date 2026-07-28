@@ -2740,6 +2740,8 @@ Each is `lane/record ⊃ wrapper ⊃ placement`, differing only in the two outer
 
 ### 0x483B / 0x483D / 0x4841 / 0x1600 / 0x2042 / 0x2079 / 0x208E / 0x2583 / 0x2584 / 0x2585 — framing and parentage
 
+**Purpose status (per type).** SETTLED: `0x1600` a sixth empty-terminator; `0x208E` the inner block of the `0x208C` MIDI device record. UNPROVEN: `0x483B`, `0x483D`, `0x4841`, `0x2042`, `0x2079`, `0x2583`, `0x2584`, `0x2585` — `0x2079` carries real per-session data but its meaning is unread.
+
 | type | span | parent | child | distinct payloads | note |
 |---|---|---|---|---|---|
 | `0x483B` | 13 (all 25) | TOP-LEVEL | leaf | **1** | product-gated fixture |
@@ -2872,6 +2874,26 @@ nothing and the parent is the whole content of the finding:
 - **Confidence:** HIGH for the top-level form; the nested form is classified as noise.
 
 ### 0x1056 / 0x4403 / 0x2636 / 0x262F / 0x2597 / 0x2588 / 0x2721 / 0x4809 / 0x4833 / 0x2062 — framing and parentage
+
+> **How much of the "unsettled" count is shared-heading inflation? Checked, 2026-07-27.**
+> A section is flagged when ANY type in it is unproven, and 26 of the 54 flagged sections name
+> several types — two name ten. That inflates the figure, so the four widest remaining shared
+> sections were read individually to find out by how much:
+>
+> - the **Pro Tools Studio family** (9 types) — its own scope note already says it "does NOT settle
+>   what any of them means — every one is byte-constant, so the corpus cannot". All 9 genuinely
+>   unproven.
+> - the **`0x203x` view-element family** (6) — settled as a CLASS (thin wrappers around one shared
+>   terminator); each member's individual role unproven.
+> - the **settings trees** (6) and the **`0x1002`/`0x1005`** group (6) — framing and parentage only,
+>   explicitly resting on 1–3 instances.
+>
+> So the inflation is **real but small**: 6 types recovered from the two sections that did contain
+> settled members, and the four widest remainder are genuinely all-unproven. **≤114 types is close
+> to the true figure, not a loose bound** — which is worth knowing before anyone spends effort
+> attacking the count rather than the types.
+
+**Purpose status (per type).** SETTLED: `0x1056` the MIDI placement wrapper; `0x262F` the fade record; `0x4403` scaffolding inside the region wrapper; `0x2721` a universal stub slot. UNPROVEN: `0x2636`, `0x2597`, `0x2588`, `0x4809`, `0x4833`, `0x2062` — framing and parentage only.
 
 Structure for ten more types. Every ratio is the full instance count of the child.
 

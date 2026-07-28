@@ -182,9 +182,32 @@ lines.append("**%d/%d content-types have a spec entry = %.1f%%**, covering %.2f%
 import re as _re
 _secs = _re.split(r"(?m)^### ", open("docs/ptx-format-spec.md").read())
 _typed = [x for x in _secs if _re.match(r"0x[0-9a-fA-F]{4}", x)]
-_unsettled = [x for x in _typed
-              if _re.search(r"purpose UNKNOWN|UNPROVEN|not proven|still open|speculat|"
-                            r"INFERRED, not proven|cannot be settled", x, _re.I)]
+_UNSET_RE = (r"purpose UNKNOWN|UNPROVEN|not proven|still open|speculat|"
+             r"INFERRED, not proven|cannot be settled")
+_unsettled = [x for x in _typed if _re.search(_UNSET_RE, x, _re.I)]
+
+# PER-TYPE, not per-section. A heading may name TEN types and be flagged because ONE of them is
+# unproven -- 0x1056 was counted unsettled for weeks while its own row read "the MIDI placement
+# wrapper". Sections carrying an explicit `**Purpose status (per type).**` line are read from it;
+# the rest still contribute every type in their heading, which OVERSTATES them, so the number below
+# is an upper bound and is labelled as one.
+_settled_types, _unsettled_types = set(), set()
+for _x in _unsettled:
+    _head = _x.split("\n")[0]
+    _named = {int(h, 16) for h in _re.findall(r"0x[0-9a-fA-F]{4}", _head)}
+    _m = _re.search(r"\*\*Purpose status \(per type\)\.\*\*(.*?)(?:\n\n|$)", _x, _re.S)
+    if _m:
+        _txt = _m.group(1)
+        _s_part, _, _u_part = _txt.partition("UNPROVEN")
+        _s_hex = {int(h, 16) for h in _re.findall(r"0x[0-9a-fA-F]{4}", _s_part)}
+        _settled_types |= (_s_hex & _named)
+        _unsettled_types |= (_named - _s_hex)
+    else:
+        _unsettled_types |= _named
+_multi = [x for x in _unsettled
+          if len({h.lower() for h in _re.findall(r"0x[0-9a-fA-F]{4}", x.split("\n")[0])}) > 1]
+print("unsettled SECTIONS=%d (multi-type %d)  per-type: unsettled<=%d, settled-within-flagged=%d"
+      % (len(_unsettled), len(_multi), len(_unsettled_types), len(_settled_types)))
 def is_phantom(c):
     """Phantom by ANY of three independent signatures, all measured, none guessed."""
     if counts[c] and nested_in_leaf[c] >= 0.5*counts[c]:
@@ -294,6 +317,13 @@ lines.append("## Described vs settled — two different numbers\n")
 lines.append("**%d types are DESCRIBED** (framing, parent/child, per-session counts, payload layout"%len(doc))
 lines.append("where decodable) and **0 real types are undocumented**.\n")
 lines.append("Of the %d typed sections in the spec, **%d still say the PURPOSE is unproven** —"%(len(_typed),len(_unsettled)))
+lines.append("but that counts SECTIONS, and %d of them cover more than one type: a heading naming ten"%len(_multi))
+lines.append("types is flagged when ONE is unproven. `0x1056` was counted unsettled while its own row")
+lines.append("read *\"the MIDI placement wrapper\"*. Read per TYPE instead, the flagged sections name")
+lines.append("**at most %d unproven types**, with %d already settled inside them. Sections carrying an"%(
+    len(_unsettled_types),len(_settled_types)))
+lines.append("explicit `Purpose status (per type)` line are counted from it; the rest still contribute")
+lines.append("every type they name, so %d is an UPPER BOUND, not a measurement.\n"%len(_unsettled_types))
 lines.append("`purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is")
 lines.append("the remaining semantic work, and it is deliberately visible: most of those entries name")
 lines.append("the Pro Tools experiment that would settle them (typically *one session, saved twice,")
