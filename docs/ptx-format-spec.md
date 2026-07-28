@@ -4392,9 +4392,20 @@ above what the multiple-comparison budget allows.
 
 **Two findings that need no correlation at all:**
 
-- **161 of the 330 pairs changed NOTHING this library can read** — the user altered mixer state,
-  automation, plug-in settings or view state between saves. That is a direct measurement of how
-  much of a session the reimplementation still does not see, and it is roughly half of all saves.
+- **159 of the 314 adjacent pairs (51%) changed NOTHING this library can read** — the user altered
+  mixer state, automation, plug-in settings or view state between saves. That is a direct
+  measurement of how much of a session the reimplementation still does not see, and it is roughly
+  half of all saves. *(First reported as 161/330; one of the observables was silently broken —
+  see the note below.)*
+
+> **A dead observable, in my own instrument.** `track_names` was computed as
+> `for n, _k in track_types(d)`, but `TrackInfo` is a dataclass, not a tuple, so it raised
+> `TypeError` on **every** session — and the harness's `except: return None` folded that into
+> "unchanged". The observable was dead in all 330 pairs, so a pure RENAME registered as a pair
+> where nothing observable changed. Fixed by using `t.name` and by recording a raised exception as
+> a distinct value rather than as `None`. Effects: quiet pairs 161→159; the "only `n_tracks`
+> changed" pairs correctly became two-observable ones (adding a track adds a name); and two real
+> pure-rename pairs surfaced, which produced the `rename_track` finding above.
 - **87 of the unsettled types never changed once across all 330 saves.** A type that is byte-stable
   across 330 consecutive saves of 10 different projects cannot encode anything those users touched.
   That does not name its purpose, but it is a real constraint on what the purpose can be — and it
@@ -4405,6 +4416,45 @@ The types that churned *most* in the 161 quiet pairs are `0x2f00`, `0xb300`, `0x
 catalogue. **Phantom counts fluctuate between saves of one session while the real structure holds
 still**, because the leaf payloads they live in are audio and plug-in data that PT rewrites. That is
 independent evidence for the phantom classification, from a direction it was not designed for.
+
+#### Controlled experiments — pairs where PT changed exactly ONE thing
+
+Of the 314 truly-adjacent pairs, **16 changed exactly one observable**. In such a pair every
+difference in the file is attributable to that one change, because nothing else moved. These are
+the corpus's own version of the experiment the entries below keep requesting.
+
+**`0x2629` is the AUDIO region detail; `0x2633` is the MIDI region detail; `0x2628` is neither.**
+Measured on 4 MIDI-only and 7 region-only pairs, with no exceptions in either direction:
+
+| | `0x2628` | `0x2629` | `0x2633` |
+|---|---|---|---|
+| 7 pairs where only the region count moved | +N | **+N, always equal** | never present |
+| 4 pairs where only the MIDI clip count moved | +1 | **never present** | +1 |
+
+So a region record `0x2628` is shared, and the detail record that accompanies it depends on the
+clip's kind. PT's complete footprint for **adding one MIDI clip** is exactly
+
+    0x104F + 1     the placement
+    0x1056 + 1     the MIDI wrapper
+    0x2628 + 1     the region record
+    0x2633 + 1     the MIDI region detail
+
+in **4 of 4** controlled pairs. `remove_clip` reverses only the first two, by design — it leaves the
+region in the clips bin, which is PT-confirmed correct for audio. This measurement says the MIDI
+case has the same shape, with `0x2633` in the role `0x2629` plays for audio.
+
+**A divergence in `rename_track`, found without Pro Tools.** Two pairs are pure renames — nothing
+else in the session changed. In both, PT touched **`0x2097`**, the I/O routing element handle; one
+added a whole `0x2005`/`0x2006`/`0x2086`/`0x208C`/`0x2097` chain. Our `rename_track` rewrites name
+bytes and changes **no** block count at all.
+
+> PT appears to allocate a routing element when a track is renamed, and we do not. Whether PT
+> minds on reload is precisely the question only PT can answer — but it is now a *specific, named*
+> question instead of a general doubt about the rename path.
+
+> **CAVEAT that bounds every footprint above: these are COUNT deltas.** A type whose BYTES changed
+> while its count held still does not appear — which is exactly what a rename does to the `0x2519`
+> name table. Absence in these tables means *"count unchanged"*, never *"untouched"*.
 
 #### Per-FIELD semantics from a chain — and why identity edits can be byte-exact
 

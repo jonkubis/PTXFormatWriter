@@ -5321,3 +5321,54 @@ Future passes should filter on `gap == 1`.
 STILL NOT CLOSED: the 53 entries naming a PT experiment. What this pass adds is a reason to stop
 looking for a save counter, a decoded explanation for six types' ASCII fields, and a corrected
 method.
+
+## 2026-07-27 — the controlled experiments I set up and then failed to collect
+
+Last round found 18 pairs where exactly ONE observable changed and then never used them. In such a
+pair every difference in the file is attributable to that one change. Collected now.
+
+### 0x2629 is the AUDIO region detail; 0x2633 is the MIDI one; 0x2628 is shared
+
+                                          0x2628   0x2629            0x2633
+    7 pairs, only region count moved       +N      +N (always equal)  never present
+    4 pairs, only MIDI clip count moved    +1      never present      +1
+
+No exceptions in either direction. PT's complete footprint for adding ONE MIDI clip, in 4 of 4:
+
+    0x104F +1 (placement)  0x1056 +1 (MIDI wrapper)  0x2628 +1 (region)  0x2633 +1 (MIDI detail)
+
+`remove_clip` reverses only the first two, deliberately — it leaves the region in the clips bin,
+PT-confirmed correct for AUDIO. This says the MIDI case has the same shape with 0x2633 playing
+0x2629's role, which is the first evidence that the MIDI path's design is right rather than just
+structurally sound.
+
+### A divergence in rename_track, found without Pro Tools
+
+Two pairs are pure renames. In BOTH, PT touched **0x2097** (I/O routing element handle); one added
+a whole 0x2005/0x2006/0x2086/0x208C/0x2097 chain. Our `rename_track` rewrites name bytes and
+changes NO block count at all.
+
+PT appears to allocate a routing element on rename and we do not. Whether PT minds on reload is
+exactly what only PT can answer — but it is now a SPECIFIC question, not a general doubt. Add it to
+the staged-experiment list.
+
+### A dead observable in my own instrument
+
+`track_names` was `for n, _k in track_types(d)` — but `TrackInfo` is a dataclass, not a tuple, so it
+raised TypeError on EVERY session, and the harness's `except: return None` folded that into
+"unchanged". Dead in all 330 pairs, so a pure RENAME counted as a pair where nothing observable
+changed.
+
+FIXED: use `t.name`, and record a raised exception as a distinct value instead of None, so a broken
+reader can never again masquerade as a stable one.
+
+Effects: quiet pairs 161 -> 159 (48%); the "only n_tracks changed" pairs correctly became
+two-observable (you cannot add a track without adding a name); and two genuine rename pairs
+surfaced — which is where the rename_track finding above came from. **The published 161/330 figure
+was slightly wrong and is corrected in the spec.**
+
+### The caveat that bounds all of it
+
+These footprints are COUNT deltas. A type whose BYTES changed while its count held still does not
+appear — exactly what a rename does to the 0x2519 name table. Absence means "count unchanged",
+never "untouched". A byte-level version of this pass is the obvious next instrument.
