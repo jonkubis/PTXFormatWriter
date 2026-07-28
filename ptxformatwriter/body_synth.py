@@ -5009,13 +5009,21 @@ def replace_clip_region(data: bytes, lane_zmark: int, clip_index: int,
 
 
 def session_info(data: bytes) -> dict:
-    """A consolidated read-only snapshot of an arbitrary session, from the confirmed
-    read primitives: format (sample rate / bit depth / start bar), block/track/clip/
-    region/marker counts, and the clip lanes with their names and clip counts."""
+    """A consolidated read-only snapshot of an arbitrary session, from the confirmed read
+    primitives: the writing PRODUCT, format (sample rate / bit depth / start bar),
+    block/track/clip/region/marker counts, the placement lanes of all three kinds, and the
+    machine-level context (volumes, MIDI devices).
+
+    `n_clips` counts `0x1050` — AUDIO placements only, matching `clip_lanes`/`clips`. The
+    per-kind breakdown is in `placements`, which covers the MIDI (`0x1056`) and video (`0x1051`)
+    chains those two cannot see."""
     from collections import Counter
     bl = _size_driven_blocks(data)
     ctc = Counter(c for _z, _e, c in bl)
+    _pl = placement_lanes(data)
+    _dev = midi_devices(data)
     return {
+        "product": session_product(data),
         "sample_rate": session_sample_rate(data),
         "bit_depth": session_bit_depth(data),
         "start_bar": session_start_bar(data),
@@ -5029,6 +5037,12 @@ def session_info(data: bytes) -> dict:
         "n_tempo_events": len(tempo_map(data)),
         "n_meter_events": len(meter_map(data)),
         "clip_lanes": [(name, k) for _z, name, k in clip_lanes(data)],
+        # all three placement chains -- audio/MIDI/video (see `placement_lanes`)
+        "placements": {kind: sum(k for _z, _n, k, kd in _pl if kd == kind)
+                       for kind in ("audio", "midi", "video")},
+        "volumes": volumes(data),
+        "midi_inputs": [n for n, kind in _dev if kind == "input"],
+        "midi_ports": [n for n, kind in _dev if kind == "port"],
     }
 
 

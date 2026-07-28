@@ -4965,3 +4965,28 @@ empty in all but 26 of 1,532 sessions, so a reader written from that population 
 instances and misses 407.
 
 233 tests green.
+
+## session_info() now reports the product, all three placement kinds, and machine context
+Extended the consolidated inspector with today's readers:
+
+    product        "Pro Tools Ultimate" / "Studio" / "HD" / "Pro Tools"
+    placements     {"audio": 596, "midi": 1, "video": 0}   -- all three chains
+    volumes        ["ABTB ROAD 1"]
+    midi_inputs / midi_ports
+
+Succeeds on 120/120 sessions. The docstring states explicitly that `n_clips` counts 0x1050 --
+AUDIO only, matching clip_lanes/clips -- and points at `placements` for the MIDI and video chains
+those two cannot see. That keeps the old field's meaning unchanged while making the gap visible
+in the same object.
+
+VERIFIED THE "port" LABEL RATHER THAN ASSUMING IT. Two of the first names printed were
+`CLICK TRACK` and `TEMPO MAP`, which read like TRACK names -- so I checked all of them against
+each session's own track list: **230 of 231 are NOT track names** (Stylus RMX 1, Micro Express
+USB Port 1, Xpand2 1, Network M1 Mac ...). The label holds; those two are user-named ports. One
+name coincidentally matches a track, which is what a 1-in-231 coincidence looks like.
+
+That check took one script and would have caught a wrong label on a brand-new public API. Worth
+doing every time a reader assigns a KIND to something, because the kind is the part callers will
+trust without re-deriving.
+
+233 tests green.
