@@ -2721,6 +2721,8 @@ Each is `lane/record ⊃ wrapper ⊃ placement`, differing only in the two outer
 
 ### 0x1002 / 0x1005 / 0x2105 / 0x2078 / 0x2556 / 0x255C — framing and parentage
 
+**Purpose status (per type).** GATE SETTLED (see *Feature gates*): `0x1002`, `0x1005`, `0x2105` — present in exactly the 13 corpus sessions containing a VIDEO clip, and in none of the other 599, so their rarity was the video feature's rarity. Payload semantics still unread. UNPROVEN: `0x2078`, `0x2556`, `0x255C`.
+
 | type | span | parent | child | instances |
 |---|---|---|---|---|
 | `0x1005` | 235 | `0x1006` | leaf | 3 |
@@ -3056,6 +3058,8 @@ of a container that states its own name.
   are self-describing rather than inferred.
 
 ### 0x2038 / 0x2039 / 0x203B / 0x203D / 0x203E / 0x203F — the 0x203x view-element family (each wraps one 0x2037)
+
+**Purpose status (per type).** GATE SETTLED: `0x2039` — present in exactly the 13 sessions containing a VIDEO clip (13/13, 0 of 599 others), so it is the video member of this view-element family. UNPROVEN: `0x2038`, `0x203B`, `0x203D`, `0x203E`, `0x203F`.
 
 Beyond `0x2038` and `0x203B`, the same shape recurs across the whole range. All are parented by
 the view records `0x2015`/`0x2589`, all hold exactly one `0x2037` terminator:
@@ -4379,6 +4383,50 @@ So the `u32` is the **file-descriptor count**, and its low byte is `0x5A` only b
 happens to hold 346 files (`0x0000015A`). A session with 345 or 347 files produces no phantom at
 all, which is why n=1. This is the only phantom in the corpus whose existence is a property of a
 *count* rather than of text.
+
+### Feature gates — what makes Pro Tools emit a type at all
+
+The slot pass settled `0x2000` by splitting sessions on whether a slot was populated and asking what
+the populated ones shared. Nothing in that is specific to slots: **any type PT emits only when a
+feature is used betrays the feature by being present in exactly those sessions.** Applied to all
+**114** types whose purpose the spec calls unproven, over **612 sessions**, testing presence against
+17 measurable session features in both directions, with each feature's reader introspected so a
+reader that mentions the type under test cannot testify about it.
+
+**Fourteen of the 114 have their presence explained at 1.00 in both directions.** All fourteen
+pairings are non-circular.
+
+| gate | types | agreement |
+|---|---|---|
+| **the session contains VIDEO** | `0x1002`, `0x1005`, `0x2039`, `0x2105` | 13/13 present, 0 of the other 599 |
+| **the session contains REGIONS** | `0x1003`, `0x1033`, `0x2106` | 380/380 both directions |
+| **the session contains MARKERS** | `0x2506` | 290/290 both directions |
+| **product is Pro Tools Studio** | `0x483B`, `0x483D`, `0x4833`, `0x4809`, `0x4841` | 282–283 / 283 |
+
+The **video** row is the new one, and it is worth stating precisely: 13 sessions in 612 contain a
+video clip; **all 13 carry these four types and not one of the remaining 599 does.** `0x1002` and
+`0x1005` were previously filed under "framing and parentage … all are rare (1–3 instances), so these
+entries fix framing and parentage only" — their rarity was the video feature's rarity.
+
+It also resolves a loose end: video was **refuted** as the gate for the `0x2424`/`0x2426`/`0x262C`
+slot group earlier today. Video's real footprint is these four types; the slot group is something
+else.
+
+The **region** row promotes an earlier one-directional result (`0x1003`/`0x1033`/`0x2106` "imply the
+audio placement set changed", from the `.bak` pass) into a two-directional one at n=380.
+
+The **marker** and **Studio** rows are calibration rather than discovery — `0x2506` is the known
+marker×playlist matrix and the Studio family is already documented as product-gated — but both are
+non-circular, so they are the instrument returning the known answer at n=290 and n=283.
+
+> **A gate is not a meaning.** This settles *when* Pro Tools writes these types, not what their
+> payload bytes say. For `0x1002`/`0x1005` that is close to identification — they are video records
+> — but for `0x1003`/`0x1033`/`0x2106` it narrows the question without answering it. The entries
+> below are updated to say gate-known, purpose-narrowed, rather than settled.
+
+**100 of the 114 are not explained by any of the 17 features**, which is itself the useful negative:
+their presence does not track anything this library can currently measure, so the next advance there
+needs either a new observable or Pro Tools.
 
 ### Differential analysis over `.bak` chains — running the "saved twice" experiment on the corpus
 

@@ -5563,3 +5563,44 @@ wrote this session NAMES phantom type numbers (0x2f00, 0xb300, 0x02c0 ...) in th
 Under the "mention" standard, writing a hex string anywhere makes a type "documented". The queue
 split still classifies all 21 as phantoms, so the real queue stays EMPTY — but it is a live
 demonstration of why the mention standard is worthless on its own.
+
+## 2026-07-27 — feature gates: what makes PT emit a type at all (14/114 explained)
+
+Generalised the slot technique. It settled `0x2000` by splitting sessions on whether the slot was
+populated; nothing in that is slot-specific. **Any type PT emits only when a feature is used betrays
+the feature by being present in exactly those sessions.**
+
+Applied to all **114** unproven types over **612 sessions** against 17 features, both directions,
+with each feature's reader introspected so a reader mentioning the type under test cannot testify
+about it.
+
+**14 of 114 explained at 1.00 both directions. All 14 pairings non-circular.**
+
+    VIDEO in the session   0x1002 0x1005 0x2039 0x2105   13/13 present, 0 of the other 599
+    REGIONS present        0x1003 0x1033 0x2106          380/380 both directions
+    MARKERS present        0x2506                        290/290
+    product = PT Studio    0x483B 0x483D 0x4833 0x4809 0x4841   282-283/283
+
+**NEW: the video row.** 13 of 612 sessions contain a video clip; all 13 carry those four types and
+none of the other 599 does. `0x1002`/`0x1005` were filed under "all are rare (1-3 instances), so
+these entries fix framing and parentage only" — **their rarity WAS the video feature's rarity.**
+
+It also closes a loose end: video was REFUTED as the gate for the `0x2424`/`0x2426`/`0x262C` slot
+group earlier today. Video's real footprint is these four; the slot group is something else.
+
+**PROMOTED: the region row.** `0x1003`/`0x1033`/`0x2106` were a one-directional `.bak` result
+("imply the audio placement set changed"); now two-directional at n=380.
+
+**CALIBRATION: markers and Studio.** `0x2506` is the known marker matrix, the Studio family is
+already documented product-gated — but both non-circular, so this is the instrument returning the
+known answer at n=290 and n=283.
+
+**A GATE IS NOT A MEANING.** This settles WHEN PT writes these types, not what their bytes say. For
+`0x1002`/`0x1005` that is near identification; for `0x1003`/`0x1033`/`0x2106` it narrows without
+answering. Entries updated to say gate-known / purpose-narrowed, NOT settled.
+
+**100 of 114 are explained by none of the 17 features** — the useful negative. Their presence does
+not track anything this library can measure, so the next advance there needs a new observable or
+Pro Tools.
+
+Per-type count: **at most 110 unproven** (from 114), 10 settled within flagged sections (from 6).

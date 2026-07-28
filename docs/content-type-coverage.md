@@ -79,9 +79,9 @@ Of the 197 typed sections in the spec, **54 still say the PURPOSE is unproven** 
 but that counts SECTIONS, and 26 of them cover more than one type: a heading naming ten
 types is flagged when ONE is unproven. `0x1056` was counted unsettled while its own row
 read *"the MIDI placement wrapper"*. Read per TYPE instead, the flagged sections name
-**at most 114 unproven types**, with 6 already settled inside them. Sections carrying an
+**at most 110 unproven types**, with 10 already settled inside them. Sections carrying an
 explicit `Purpose status (per type)` line are counted from it; the rest still contribute
-every type they name, so 114 is an UPPER BOUND, not a measurement.
+every type they name, so 110 is an UPPER BOUND, not a measurement.
 
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
