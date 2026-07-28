@@ -4264,6 +4264,79 @@ def volumes(data: bytes) -> "list[str]":
     return out
 
 
+#: Four-character audio-format tags in the file table, stored BYTE-REVERSED (`EVAW` = `WAVE`) --
+#: the same convention the plug-in catalog uses for its manufacturer/type codes. Measured over 12
+#: sessions: WAVE 1878, AIFF 8.
+_FILE_TAGS = (b"EVAW", b"FFIA", b"CIAA", b"46FA", b"1LPM", b"tflA")
+
+
+def audio_files(data: bytes) -> "list[tuple[str, str]]":
+    """Every audio file the session references, as `(filename, format)`.
+
+    Example: `("BS EBASS.L.wav", "WAVE")`. This is the question most often asked of a session file
+    -- what does it need in order to open -- and nothing in this library could answer it: the
+    exports covered WRITING wavs (`add_audio_clip`, `set_clip_wav`, `wrap_raw_wav`) and none of
+    them reading the table.
+
+    Layout. The file table is `0x1004`, whose payload opens with a **u32 file count** (the same
+    field whose low byte produced the `0x2757` phantom), followed by children that tile the payload
+    exactly. One of those children is a `0x103A` name list:
+
+        u32 len | name | 4-char format tag, byte-reversed
+
+    **The reader checks itself.** `0x1004` declares how many files there are, so a parse that
+    disagrees is wrong by the file's own account. Measured: the name count equals the declared
+    count in every `0x103A` that sits under a `0x1004`, including 76/76 and 158/158.
+
+    Only the `0x103A` INSIDE the file table is read. The type is used elsewhere for other lists,
+    and those carry no declared count to check against, so they are left alone rather than guessed
+    at.
+    """
+    bl = _size_driven_blocks(data)
+    tables = [(z, e) for z, e, c in bl if c == 0x1004 and z >= 31]
+    if not tables:
+        return []
+    tz, te = tables[0]
+    out: "list[tuple[str, str]]" = []
+    for z, e, c in bl:
+        if c != 0x103A or not (tz < z and e <= te):
+            continue
+        q = z + 9
+        while q + 4 <= e:
+            n = int.from_bytes(data[q : q + 4], "little")
+            if 1 <= n <= 255 and q + 8 + n <= e:
+                seg = data[q + 4 : q + 4 + n]
+                tag = data[q + 4 + n : q + 8 + n]
+                # NOT `all(32 <= b < 127)`. Filenames are UTF-8 -- macOS stores accents DECOMPOSED
+                # -- and an ASCII-only test silently DROPS them. Measured before the fix: 20 of 462
+                # sessions parsed fewer files than their own table declares, all in one project
+                # family, all undercounts, and every missing name was accented: `Butterbeans Café`,
+                # `Thalía with Dora the Explorer`. Third time an ASCII assumption has bitten this
+                # project, after the 0x2519 name-table walk and the validator's ordinal offsets.
+                #
+                # The 4-byte format tag is the validator, and a strong one: a length-prefixed run
+                # followed by one of six fixed tags. Control bytes are still rejected, since no
+                # filename contains them and they are what a mis-framed run looks like.
+                if tag in _FILE_TAGS and not any(b < 0x20 for b in seg):
+                    out.append((_decode_name(seg), tag[::-1].decode("ascii")))
+                    q += 8 + n
+                    continue
+            q += 1
+    return out
+
+
+def audio_file_count(data: bytes) -> "int | None":
+    """The file count the `0x1004` table DECLARES, or None if there is no table.
+
+    Exposed separately because it is the oracle `audio_files()` checks itself against: if the two
+    disagree on a session, the parse is wrong by the file's own account rather than by ours.
+    """
+    for z, _e, c in _size_driven_blocks(data):
+        if c == 0x1004 and z >= 31:
+            return int.from_bytes(data[z + 9 : z + 13], "little")
+    return None
+
+
 def plugins(data: bytes) -> "list[tuple[str, str]]":
     """Every plug-in in the session's catalog, as `(display_name, identifier)`.
 

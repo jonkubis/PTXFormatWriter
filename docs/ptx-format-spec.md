@@ -4455,6 +4455,45 @@ reader — they are what `0x1014` encodes.** If aux, master and VCA tracks are d
 it is not here, and no session in these corpora carries a track this reader can be shown to
 mislabel. Recorded so the next person does not go looking for a kind byte that is not there.
 
+#### The file table, read: `audio_files()`
+
+*What does this session need in order to open?* is the question most often asked of a session file,
+and nothing in this library could answer it — the exports covered **writing** wavs
+(`add_audio_clip`, `set_clip_wav`, `wrap_raw_wav`) and none of them reading the table.
+
+`0x1004` opens with a **u32 file count** — the same field whose low byte produced the `0x2757`
+phantom — followed by children that tile the payload exactly. One child is a `0x103A` name list:
+
+    u32 len | filename | 4-char format tag, BYTE-REVERSED (`EVAW` = `WAVE`)
+
+the same byte-reversed four-character convention the plug-in catalog uses for its
+manufacturer/type codes.
+
+**The reader checks itself against the file's own declaration.** `0x1004` says how many files there
+are, so a parse that disagrees is wrong by the session's account rather than ours — and
+`audio_file_count()` is exposed separately so a caller can run that check too.
+
+| | |
+|---|---:|
+| sessions with a file table | 462 of 462 |
+| parsed count == declared count | **459 (99.4%)** |
+| formats observed | `WAVE` 29,153 · `AIFF` 53 |
+
+> **The bug it shipped with, and the third time this exact assumption has bitten.** The first
+> version required every filename byte in `32..126`. Filenames are **UTF-8** — macOS stores accents
+> DECOMPOSED — so `Butterbeans Café` and `Thalía with Dora the Explorer` were silently dropped and
+> **20 of 462 sessions parsed fewer files than their own table declared**, every miss accented.
+> Caught only because the declared count disagreed. After the fix, **260 non-ASCII filenames** are
+> read and the agreement went 95.7% → 99.4%.
+>
+> The 4-byte format tag was always the real validator; the ASCII test was redundant *and* wrong.
+> Previous instances: the `0x2519` name-table walk, and the validator reading name offsets by
+> CHARACTER count.
+
+The three sessions that still disagree are honest failures, not hidden ones: one parses 0 of 207,
+two parse 4 short, and in those the tag simply is not present for the missing entries. Reported
+rather than papered over, and detectable by any caller via `audio_file_count()`.
+
 #### A new observable: the plug-in catalog
 
 `0x1017` is in the parser's LEAF_PAYLOADS, so the walk must not descend into it — plug-in names

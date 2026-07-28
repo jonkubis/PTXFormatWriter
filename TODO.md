@@ -5685,3 +5685,51 @@ byte that is not there. Also worth noting against my own track record this sessi
 predicted a defect and been wrong twice (this and the phantom-contamination sweep, which found the
 readers clean except one masked case), and been right twice (the 0x251A lane count, the missing
 public exports). Predictions are cheap; the measurement is the work.
+
+## 2026-07-27 — audio_files(): the library could not say what files a session needs
+
+Nothing here could answer the question most often asked of a session file. The exports covered
+WRITING wavs (`add_audio_clip`, `set_clip_wav`, `wrap_raw_wav`); none of them read the table.
+
+`0x1004` opens with a u32 file count — the field whose low byte produced the `0x2757` phantom — and
+one of its children is a `0x103A` name list of `u32 len | filename | 4-char format tag`, the tag
+BYTE-REVERSED (`EVAW` = `WAVE`), the same convention the plug-in catalog uses.
+
+SHIPPED: `audio_files(data) -> [(filename, format)]` and `audio_file_count(data)`, both exported.
+
+**The reader checks itself against the file's own declaration** — `0x1004` says how many files there
+are — and `audio_file_count` is exposed so callers can run the same check:
+
+    sessions with a file table            462/462
+    parsed count == DECLARED count        459  (99.4%)
+    formats                               WAVE 29,153 · AIFF 53
+
+### The bug it shipped with — third time this assumption has bitten
+
+First version required every filename byte in 32..126. Filenames are UTF-8, macOS stores accents
+DECOMPOSED, so `Butterbeans Café` and `Thalía with Dora the Explorer` were silently DROPPED — **20
+of 462 sessions parsed fewer files than their own table declared**, every miss accented.
+
+Caught only because the declared count disagreed. That is the whole argument for building the
+self-check into the reader rather than adding it later.
+
+After the fix: **260 non-ASCII filenames read**, agreement 95.7% -> 99.4%. The 4-byte format tag was
+always the real validator; the ASCII test was redundant AND wrong.
+
+Previous instances of the same assumption: the 0x2519 name-table walk (8 sessions parsed 29 of 180
+entries) and the validator reading name offsets by CHARACTER count (23/440 false errors).
+
+### Remaining 3 disagreements, reported not hidden
+
+One parses 0 of 207; two parse 4 short. In those the format tag is not present for the missing
+entries — a different record shape, not a missing tag value. Detectable by any caller via
+`audio_file_count()`.
+
+### A test of mine that failed for the wrong reason
+
+`test_the_count_reader_is_independent_of_the_name_parse` searched the whole source of
+`audio_file_count` for "audio_files" — and its DOCSTRING legitimately mentions it. Fixed by parsing
+the AST and dropping the docstring before checking the body. Verified to bite: rewriting the count
+reader as `len(audio_files(data))` now fails it.
+
+257 tests green.

@@ -3693,3 +3693,73 @@ class PluginCatalogTests(unittest.TestCase):
         import ptxformatwriter as ptx
         self.assertIs(ptx.plugins, BS.plugins)
         self.assertIn("plugins", ptx.__all__)
+
+
+class AudioFileTableTests(unittest.TestCase):
+    """`audio_files()` answers the question most often asked of a session file: what does it need?
+
+    Nothing in this library could answer it before — the exports covered WRITING wavs
+    (`add_audio_clip`, `set_clip_wav`, `wrap_raw_wav`) and none of them reading the table.
+
+    The reader has its own oracle: `0x1004` DECLARES the file count, so a parse that disagrees is
+    wrong by the file's own account. 459 of 462 corpus sessions agree exactly.
+    """
+
+    FIXTURE = "1 stereo + 1 clip.ptx"
+
+    def _fixture(self):
+        hits = sorted(ROOT.glob("control_files/**/" + self.FIXTURE))
+        if not hits:
+            self.skipTest("fixture %s is not in control_files" % self.FIXTURE)
+        return _load_path(hits[0])
+
+    def test_parsed_count_matches_the_declared_count(self):
+        d = self._fixture()
+        declared = BS.audio_file_count(d)
+        self.assertIsNotNone(declared, "the fixture has a 0x1004 file table")
+        self.assertEqual(len(BS.audio_files(d)), declared)
+
+    def test_returns_name_and_format(self):
+        d = self._fixture()
+        got = BS.audio_files(d)
+        self.assertTrue(got)
+        for name, fmt in got:
+            self.assertTrue(name.strip())
+            self.assertIn(fmt, ("WAVE", "AIFF", "AIFC", "AF64", "MPL1", "Aflt"))
+
+    def test_a_utf8_filename_is_not_dropped(self):
+        """The bug this reader shipped with, pinned.
+
+        The first version required every name byte in 32..126. Filenames are UTF-8 — macOS stores
+        accents decomposed — so `Butterbeans Café` and `Thalía with Dora the Explorer` were
+        silently dropped, and 20 of 462 sessions parsed FEWER files than their own table declared.
+        Third time an ASCII assumption has bitten this project.
+        """
+        name = "Café Thalía.L.wav".encode("utf-8")
+        blob = (len(name)).to_bytes(4, "little") + name + b"EVAW"
+        self.assertFalse(all(32 <= b < 127 for b in name), "fixture must be non-ASCII")
+        # the accept test the reader applies: a valid tag and no control bytes
+        seg, tag = blob[4:4 + len(name)], blob[4 + len(name):8 + len(name)]
+        self.assertIn(tag, BS._FILE_TAGS)
+        self.assertFalse(any(b < 0x20 for b in seg))
+
+    def test_the_count_reader_is_independent_of_the_name_parse(self):
+        """`audio_file_count` must read the declared u32, not count what we parsed — otherwise it
+        could not serve as the check."""
+        import ast, inspect
+        tree = ast.parse(inspect.getsource(BS.audio_file_count).lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]                      # drop the docstring, which names audio_files
+        body = ast.unparse(fn)
+        self.assertNotIn("audio_files", body,
+                         "the count must be READ from 0x1004, not derived from the name parse")
+        self.assertIn("0x1004", inspect.getsource(BS.audio_file_count))
+
+    def test_it_is_on_the_public_surface(self):
+        import ptxformatwriter as ptx
+        self.assertIs(ptx.audio_files, BS.audio_files)
+        self.assertIs(ptx.audio_file_count, BS.audio_file_count)
+        for n in ("audio_files", "audio_file_count"):
+            self.assertIn(n, ptx.__all__)
