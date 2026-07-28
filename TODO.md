@@ -5273,3 +5273,51 @@ rewrites. Independent evidence for the phantom classification.
 No, and it should not be reported as if it did. It is a second instrument that makes some unsettled
 entries narrower and tells us which ones are hopeless from the corpus (the 87). The 53 entries that
 name a PT experiment still need one. What changed is that we can now say WHY for most of them.
+
+## 2026-07-27 — per-FIELD semantics from a chain: no save counter exists, and that is the finding
+
+I had written "I've taken the corpus-side work as far as I can see how to." That was wrong. The
+pair analysis only asked WHETHER a type changed; a chain supports asking what each FIELD POSITION
+does across saves. Never changes = constant. Strictly increases = counter or timestamp, one of the
+few semantics that identifies itself.
+
+3 chains x 24 generations, **383,975 field positions**:
+
+    constant across all 24 saves    380,817   99.2%
+    strictly monotonic                    0
+    non-decreasing, >=3 values            17   all explained
+    varies without order               3,141    0.8%
+
+**No save counter and no timestamp in any stable-shaped block.** That is not a null result — it is
+the reason a property this project depends on is achievable: **it is why an identity edit can be
+byte-exact.** A format with a save counter or modified-time field could not round-trip to identical
+bytes, and correctness property #2 would be unattainable rather than just hard.
+
+### The 17 "stepped" hits were ASCII misread as integers
+
+  * `0x2530`+79, `0x2581`+172, `0x258A`+181, `0x2066`+76, `0x2016`+766: 892353072 -> 808466992 is
+    `'0:05'` -> `'0:00'`, an ASCII time display.
+  * `0x2067`+245/275/287: `'k.00'` -> `'k.05'`, mid-string.
+
+An integer-monotonicity scan over a format storing ASCII will always find "counters" that are text
+drifting lexicographically. `'0:05'` as a little-endian u32 is 892,353,072 and decreases to `'0:00'`
+exactly like a countdown.
+
+### Fields that DO change every save, none a counter
+
+`0x2097`+9 differs in all 20 generations of one chain, stepping by exactly 345,600 within a run —
+but holds still for many saves in four other chains and jumps at discontinuities. `0x2067`+378 sits
+inside a run of `0x01` filler. Not claimed as counters. Not identified.
+
+### A flaw in the .bak method, found by using it
+
+`.bak` numbering HAS GAPS — one chain runs 0,1,2,3,26,27,... — so "consecutive pair" was an
+assumption, and a pair spanning a gap is many saves apart. Measured: **314 of 330 pairs are
+genuinely adjacent**. Of the 14 non-circular relations, **9 survive** the adjacency restriction;
+the 5 marginal ones (0x2627, 0x2626, 0x261C, 0x261B, 0x200B <-> n_tracks) sat at exactly 0.91 and
+drop below the 0.90 threshold with 16 fewer pairs. Marginal, not refuted, and now reported as such.
+Future passes should filter on `gap == 1`.
+
+STILL NOT CLOSED: the 53 entries naming a PT experiment. What this pass adds is a reason to stop
+looking for a save counter, a decoded explanation for six types' ASCII fields, and a corrected
+method.

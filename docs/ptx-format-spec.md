@@ -4359,8 +4359,17 @@ observable) pair.
 **Non-circular, both directions ≥0.90 — the per-track subtree, confirmed by a second method.**
 Every one of these tracks `n_tracks`, which is derived from `0x1014`/`0x1057` alone:
 
-`0x1052`, `0x2619`, `0x251A`, `0x2434`, `0x2015`, `0x200A`, `0x102D`, `0x2627`, `0x2626`, `0x261C`,
-`0x261B`, `0x200B` — P(type|tracks) 0.91–0.96, P(tracks|type) 0.98–1.00, n = 50–55.
+`0x1052`, `0x2619`, `0x251A`, `0x2434`, `0x2015`, `0x200A`, `0x102D` — P(type|tracks) 0.93–0.96,
+P(tracks|type) 0.98–1.00, n = 52–55. A further five (`0x2627`, `0x2626`, `0x261C`, `0x261B`,
+`0x200B`) sit at exactly 0.91 and fall below the threshold when the pass is restricted to strictly
+adjacent saves — marginal, not refuted, and listed separately for that reason.
+
+> **A flaw in this method, found by using it.** `.bak` numbering has GAPS — one chain runs
+> 0, 1, 2, 3, 26, 27, … — so "consecutive pair" was an assumption, not a fact, and a pair spanning
+> a gap is many saves apart rather than one. Measured: **314 of 330 pairs are genuinely adjacent**,
+> so the error is small, but it is real. Of the 14 non-circular relations, **9 survive** the
+> adjacency restriction unchanged and the 5 marginal ones above do not. Any future pass should
+> filter on `gap == 1`.
 
 This is the per-track subtree membership the document derives structurally, arrived at from a
 completely different direction: not "what is nested inside what" but "what moves when a user adds a
@@ -4396,6 +4405,47 @@ The types that churned *most* in the 161 quiet pairs are `0x2f00`, `0xb300`, `0x
 catalogue. **Phantom counts fluctuate between saves of one session while the real structure holds
 still**, because the leaf payloads they live in are audio and plug-in data that PT rewrites. That is
 independent evidence for the phantom classification, from a direction it was not designed for.
+
+#### Per-FIELD semantics from a chain — and why identity edits can be byte-exact
+
+The pair analysis asks only WHETHER a type changed. A chain of consecutive saves supports a sharper
+question: for a block that keeps the same size and index in every generation, what does each FIELD
+POSITION do over time? Never changes → a constant. Strictly increases → a counter or timestamp,
+which is one of the few semantics that identifies itself. Changes without order → state.
+
+Measured over 3 chains × 24 generations, **383,975 field positions**:
+
+| verdict | positions | |
+|---|---:|---|
+| constant across all 24 saves | 380,817 | **99.2%** |
+| strictly monotonic | **0** | — |
+| non-decreasing with ≥3 values | 17 | all explained below |
+| varies without order | 3,141 | 0.8% |
+
+> **There is no save counter and no timestamp in any stable-shaped block.** Zero strictly monotonic
+> fields out of 384k positions across 24 consecutive saves of three different sessions.
+>
+> This is not a null result — it is the explanation for a property the writer depends on. **It is
+> why an identity edit can be byte-exact at all.** A format carrying a save counter or a modified
+> timestamp could not round-trip to identical bytes, and the project's second correctness property
+> ("an identity edit is byte-exact") would be unattainable rather than merely difficult.
+
+**The 17 "stepped" fields are ASCII, misread as integers.** Decoding them:
+
+| type / offset | u32 values | actually |
+|---|---|---|
+| `0x2530`+79, `0x2581`+172, `0x258A`+181, `0x2066`+76, `0x2016`+766 | 892353072 → 808466992 | `'0:05'` → `'0:00'` — an **ASCII time display** |
+| `0x2067`+245/275/287 | 808463979 → 892350059 | `'k.00'` → `'k.05'` — mid-string, a numbered suffix |
+
+An integer-monotonicity scan over a format that stores ASCII will always find "counters" that are
+text drifting lexicographically. Worth stating plainly: **`'0:05'` read as a little-endian u32 is
+892,353,072, and it decreases to `'0:00'` in a way that looks exactly like a countdown.**
+
+**Fields that change on every save do exist, and none is a counter.** `0x2097`+9 takes a different
+value in all 20 generations of one chain, stepping by exactly 345,600 within a run — but it holds
+still for many saves in four other chains and jumps arbitrarily at chain discontinuities. `0x2067`
++378 sits inside a run of `0x01` filler. Neither behaves like a counter, and neither is claimed as
+one here.
 
 #### The three phantom signatures, and why the list is 5 and not 171
 
