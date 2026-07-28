@@ -4907,3 +4907,31 @@ NOTE SEVERITY, DELIBERATELY. 100% on PT-authored files says the rule is REAL; it
 Tools REJECTS a file that breaks it, and "error" in this validator means a confirmed rejection.
 Promote only if PT is observed refusing one. Edit audit unchanged (dup 72 clean, rm 105 clean),
 233 tests green.
+
+## Two more invariants shipped — and calibration caught a FIFTH overstated claim
+Calibrated three more candidates on 240 untouched sessions. Two hold universally and are now
+enforced; the third turned out to be my own error.
+
+  * **ruler-shape** -- each 0x271x holds exactly one 0x2619 name and one content block.
+    645 rulers measured, ZERO exceptions. Bites: blanking the Tempo ruler's 0x2619 fires it.
+  * **one-2011-child** -- the ten known 0x2011 holders each hold exactly one. 2,040 measured,
+    ZERO exceptions. Membership stated as a FLOOR, since it has been revised upward twice.
+
+  * **studio-family all-or-nothing -- REJECTED, and it corrects batch 14.** I wrote that the nine
+    Pro Tools Studio types "appear in exactly the same 30 sessions". At 240 sessions **one carries
+    only 6 of the 9.** The family is STRONGLY co-present, not strictly all-or-nothing, so a
+    validator must NOT treat a partial set as corruption -- which is exactly what I would have
+    shipped had I not calibrated first.
+
+**THAT IS THE FIFTH COMPLETENESS CLAIM OF MINE REVISED BY A WIDER SAMPLE TODAY** (the others:
+0x2628's parents, the 0x2011 class twice, the latin1 name readers, 0x2632 "never populated").
+All five corrections are left visible in the spec. The pattern is consistent enough to state as
+a working rule: **any claim of the form "always / exactly / never / the same set" that I measure
+on one sample will be wrong about 20% of the time at four times the sample size.**
+
+CALIBRATION IS WHAT CAUGHT IT. Adding a check without first running it against untouched corpus
+files would have shipped a false positive into a validator whose whole value is that it does not
+cry wolf. **Calibrate, then add** -- and a candidate that FAILS calibration is not a wasted
+experiment, it is a documentation correction.
+
+233 tests green, silent on all 240 untouched sessions.

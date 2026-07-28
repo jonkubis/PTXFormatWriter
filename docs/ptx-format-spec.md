@@ -2774,8 +2774,14 @@ Each is `lane/record ⊃ wrapper ⊃ placement`, differing only in the two outer
 > **Scope:** this entry settles WHEN these nine types appear (a product gate), their framing, spans and parents. It does NOT settle what any of them means — every one is byte-constant, so the corpus cannot.
 
 `0x4808`, `0x4820`, `0x4824`, `0x4826`, `0x4828`, `0x4829`, `0x4834`, `0x4501` and `0x2567`
-appear in **exactly the same 30 sessions**, and the `0x0003` product string of every one of those
-sessions is **`Pro Tools Studio`** (30/30). No session of another product carries any of them.
+appear together in **60 of 61 sessions that carry any of them**, and the `0x0003` product string
+of those sessions is **`Pro Tools Studio`**. No session of another product carries any.
+
+> **CORRECTED on a wider sample.** This entry first said "exactly the same 30 sessions" — true
+> of the 30 measured then, false at 240: **one session carries only 6 of the 9**. The family is
+> therefore *strongly* co-present, not strictly all-or-nothing, so a validator MUST NOT treat a
+> partial set as corruption. Fifth completeness claim in this document revised by a wider
+> sample; the correction is left visible.
 
 | type | span | parent | payload |
 |---|---|---|---|

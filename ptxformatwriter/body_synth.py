@@ -164,6 +164,14 @@ _NAME_ENTRY_SUFFIX_SHORT = 21  # the same, with a 2-byte ordinal instead of 4
 # wild lengths. The real discriminator is UTF-8 validity (see `_name_entry_head`), not this.
 # Wrapper -> the child it carries in 100% of untouched corpus instances (§5c). Used by
 # `validate_pt_invariants` to catch a splice that dropped a child.
+# Each conductor-ruler container holds exactly one 0x2619 (its NAME) and exactly one content
+# block. Measured 645 rulers over 240 sessions, zero exceptions (§5c).
+_RULER_CONTENT = {0x2718: 0x2028, 0x2719: 0x2029, 0x271A: 0x2030, 0x271B: 0x2433, 0x271C: 0x2437}
+# The types that hold exactly one 0x2011. Measured 2,040 instances, zero exceptions. Stated as a
+# FLOOR: this membership has been revised upward twice as the sample widened.
+_ONE_2011_HOLDERS = frozenset({0x2016, 0x2017, 0x2019, 0x201A, 0x206C,
+                               0x2505, 0x2507, 0x259C, 0x4834, 0x4841})
+
 _MANDATED_CHILD = {
     0x1050: 0x104F, 0x1056: 0x104F, 0x1051: 0x104F,   # the three placement chains
     0x2629: 0x2628, 0x2625: 0x2626, 0x2038: 0x2037, 0x203B: 0x2037,
@@ -6223,6 +6231,30 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
             note("terminator-span",
                  f"0x{_c:04x} at {_z} spans {_e - _z}, not {_span} -- the empty-terminator types "
                  f"are byte-constant in every untouched instance measured")
+            break
+
+    # RULER SHAPE and the 0x2011 SINGLE-CHILD rule -- both measured with zero exceptions
+    # (645 rulers, 2,040 holders, 240 sessions). Same NOTE-severity reasoning as above.
+    for _z, _e, _c in bl:
+        _kids, _q = [], _z + 9
+        if _c in _RULER_CONTENT or _c in _ONE_2011_HOLDERS:
+            while _q < _e and data[_q] == 0x5A:
+                _sz = int.from_bytes(data[_q + 3 : _q + 7], "little")
+                if _sz <= 0 or _q + 7 + _sz > _e:
+                    break
+                _kids.append(int.from_bytes(data[_q + 7 : _q + 9], "little"))
+                _q += 7 + _sz
+        if _c in _RULER_CONTENT:
+            _want = _RULER_CONTENT[_c]
+            if _kids.count(0x2619) != 1 or _kids.count(_want) != 1:
+                note("ruler-shape",
+                     f"the 0x{_c:04x} ruler at {_z} does not hold exactly one 0x2619 name and "
+                     f"one 0x{_want:04x} content block -- every ruler does, in 645 measured")
+                break
+        elif _c in _ONE_2011_HOLDERS and _kids.count(0x2011) != 1:
+            note("one-2011-child",
+                 f"0x{_c:04x} at {_z} holds {_kids.count(0x2011)} 0x2011 children, not 1 -- the "
+                 f"{len(_ONE_2011_HOLDERS)} known holders each hold exactly one, 2,040 measured")
             break
 
     _dupids = sorted({v for v in _idr if _idr.count(v) > 1})
