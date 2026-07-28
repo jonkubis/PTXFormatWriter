@@ -5212,3 +5212,64 @@ only by the corpus battery (7/7 clean). Recorded rather than papered over with a
 video that quietly skips.
 
 247 tests green.
+
+## 2026-07-27 — the "saved twice" experiment, run on the corpus instead of on Pro Tools
+
+Dozens of spec entries say a purpose cannot be settled from the corpus and name the experiment that
+would: *one session, saved twice, one setting changed*. The corpus **already contains** it — PT
+writes numbered `Session File Backups`, so every `.bak` chain is that experiment repeated:
+
+    156 chains with >=2 generations, 2,103 consecutive pairs available
+    330 pairs analysed (10 chains / 340 files, size-capped)
+
+Per pair: which OBSERVABLES moved (tracks, names, markers, tempo, meter, regions, placements per
+kind, playlists, rate/depth/start bar) vs which CONTENT TYPES changed count or bytes. Then both
+directions of the implication.
+
+### The first run was worthless and looked excellent
+
+It "validated" the method against ground truth: `0x2629 <-> n_regions` 147/147 both ways,
+`0x2077 <-> n_markers` 55/55, `0x1050 <-> place_audio` 140/140, `0x1014 <-> n_tracks`. Every one of
+those is **CIRCULAR** — `region_list` READS `0x2628`/`0x2629`, `markers` reads `0x2077`,
+`placement_lanes` counts `0x1050`. An observable computed FROM a type is not evidence ABOUT it.
+
+Caught by asking why `0x1056 <-> place_midi` was exactly 21/21 before writing it down as settled.
+The fix introspects each observable's reader for the types it mentions and drops those pairings
+before scoring; 22 pairings went.
+
+### What survives
+
+**Non-circular, both directions >=0.90 — the per-track subtree, via a second method.** All track
+`n_tracks`, which comes from `0x1014`/`0x1057` only:
+
+    0x1052 0x2619 0x251A 0x2434 0x2015 0x200A 0x102D 0x2627 0x2626 0x261C 0x261B 0x200B
+    P(type|tracks) 0.91-0.96, P(tracks|type) 0.98-1.00, n=50-55
+
+Corroboration of what the structural walk already says, from "what moves when a user adds a track"
+rather than "what is nested in what". First output of a new instrument should be the known answer.
+
+**One-directional, hypotheses only:** `0x4403`->regions (18/18), `0x262F`->audio placements (47/47),
+`0x261E`, `0x258E`, `0x202C`, `0x202A`, `0x200D` (13-15 each), all with weak converse (0.09-0.34).
+10 chains from a few projects, and at n=13 this is close to the multiple-comparison budget. NOT
+settled, and not written into the entries as settled.
+
+**Two findings needing no correlation:**
+
+  * **161 of 330 pairs changed NOTHING this library can read.** Half of all real saves alter mixer
+    state, automation, plug-in or view state that the reimplementation does not see. That is a
+    measurement of the remaining gap, not a guess at it.
+  * **87 unsettled types never changed across any of the 330 saves.** Byte-stable across 330
+    consecutive saves of 10 projects: they cannot encode anything those users touched. That is why
+    corpus reading keeps failing on exactly these, and it is a real constraint on what they can be.
+
+**Bonus, from a direction it was not designed for:** the types churning most in the 161 quiet pairs
+are `0x2f00`, `0xb300`, `0x3300`, `0xaf00`, `0x5300`, `0x02c0`, `0x2ab0`... — the arithmetic shapes
+of the phantom catalogue. Phantom counts fluctuate between saves of ONE session while the real
+structure holds still, because the leaf payloads they live in are audio and plug-in data PT
+rewrites. Independent evidence for the phantom classification.
+
+### Does this close the PT gap?
+
+No, and it should not be reported as if it did. It is a second instrument that makes some unsettled
+entries narrower and tells us which ones are hopeless from the corpus (the 87). The 53 entries that
+name a PT experiment still need one. What changed is that we can now say WHY for most of them.

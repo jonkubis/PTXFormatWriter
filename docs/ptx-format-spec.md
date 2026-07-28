@@ -4326,6 +4326,77 @@ happens to hold 346 files (`0x0000015A`). A session with 345 or 347 files produc
 all, which is why n=1. This is the only phantom in the corpus whose existence is a property of a
 *count* rather than of text.
 
+### Differential analysis over `.bak` chains — running the "saved twice" experiment on the corpus
+
+Dozens of entries in this document say a type's purpose cannot be settled by reading the corpus and
+name the experiment that would settle it: *one session, saved twice, with exactly one setting
+changed*. **The corpus already contains that experiment, thousands of times.** Pro Tools writes
+numbered `Session File Backups`, so a `.bak` chain is the same session saved over and over by a real
+user who changed something in between:
+
+| | |
+|---|---:|
+| `.bak` chains with ≥2 generations | **156** |
+| consecutive pairs available | **2,103** |
+| pairs analysed in the pass below | 330 (10 chains, 340 files) |
+
+For each consecutive pair the pass records which OBSERVABLES moved (track count and names, markers,
+tempo, meter, regions, placements per kind, playlists, rate/depth/start bar) and which CONTENT TYPES
+changed instance count or total bytes. Then both directions of the implication, per (type,
+observable) pair.
+
+> **THE TRAP, and it is fatal if unnoticed: most of these relations are CIRCULAR.**
+> The first run produced a beautiful validation — `0x2629 ↔ n_regions` at 147/147 both ways,
+> `0x2077 ↔ n_markers` at 55/55, `0x1050 ↔ place_audio` at 140/140 — and every one of those is the
+> reader confirming itself. `region_list` **reads** `0x2628`/`0x2629`; `markers` reads `0x2077`;
+> `placement_lanes` counts `0x1050`. An observable computed FROM a type cannot be evidence ABOUT
+> that type.
+>
+> The circular pairs are now excluded by construction: each observable's reader is introspected for
+> the content types it mentions, and those pairings are dropped before scoring. 22 pairings went.
+> Anything below survived that filter.
+
+**Non-circular, both directions ≥0.90 — the per-track subtree, confirmed by a second method.**
+Every one of these tracks `n_tracks`, which is derived from `0x1014`/`0x1057` alone:
+
+`0x1052`, `0x2619`, `0x251A`, `0x2434`, `0x2015`, `0x200A`, `0x102D`, `0x2627`, `0x2626`, `0x261C`,
+`0x261B`, `0x200B` — P(type|tracks) 0.91–0.96, P(tracks|type) 0.98–1.00, n = 50–55.
+
+This is the per-track subtree membership the document derives structurally, arrived at from a
+completely different direction: not "what is nested inside what" but "what moves when a user adds a
+track". Corroboration, not discovery — which is exactly what a new instrument should produce first.
+
+**Non-circular, one direction only — narrowing, NOT settling.** These change *only* in pairs where
+the named observable also changed, but the converse is weak (0.09–0.34), i.e. they are sub-features
+of a larger edit rather than counters of it:
+
+| type | implies | n |
+|---|---|---:|
+| `0x4403` | regions changed | 18/18 |
+| `0x262F` | audio placements changed | 47/47 |
+| `0x261E` | audio placements / regions / markers changed | 13/13 |
+| `0x258E`, `0x202C`, `0x202A`, `0x200D` | audio placements or regions changed | 13–15 |
+
+Treat these as **corpus-generated hypotheses**, not results. The sample is 10 chains from a handful
+of projects, and with ~200 types against ~10 observables a one-directional hit at n=13 is not far
+above what the multiple-comparison budget allows.
+
+**Two findings that need no correlation at all:**
+
+- **161 of the 330 pairs changed NOTHING this library can read** — the user altered mixer state,
+  automation, plug-in settings or view state between saves. That is a direct measurement of how
+  much of a session the reimplementation still does not see, and it is roughly half of all saves.
+- **87 of the unsettled types never changed once across all 330 saves.** A type that is byte-stable
+  across 330 consecutive saves of 10 different projects cannot encode anything those users touched.
+  That does not name its purpose, but it is a real constraint on what the purpose can be — and it
+  explains why corpus reading alone keeps failing on exactly these types.
+
+The types that churned *most* in the 161 quiet pairs are `0x2f00`, `0xb300`, `0x3300`, `0xaf00`,
+`0x5300`, `0x02c0`, `0x12c0`, `0x2ab0`, `0x22b0` … — the arithmetic shapes of the phantom
+catalogue. **Phantom counts fluctuate between saves of one session while the real structure holds
+still**, because the leaf payloads they live in are audio and plug-in data that PT rewrites. That is
+independent evidence for the phantom classification, from a direction it was not designed for.
+
 #### The three phantom signatures, and why the list is 5 and not 171
 
 A raw size-driven walk over those 832 sessions reports 482 content-types, 171 of them undocumented.
