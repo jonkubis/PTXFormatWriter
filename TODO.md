@@ -5827,3 +5827,53 @@ docstring case earlier. Both now parse the AST and compare `ast.unparse` output,
 comments and docstrings.
 
 265 tests green.
+
+## 2026-07-28 — swept every scan-parser user; found a second wrong-index bug
+
+`clip_positions` was bitten by the `flat_blocks` undercount, so rather than wait to trip over the
+next one I measured the whole exposure.
+
+### How bad is the undercount, per type
+
+    types UNDERCOUNTED by flat_blocks           80
+      of them, in >=50% of sessions             35
+    100% cases: 0x258C 372/372 · 0x2037 354/354 · 0x2580 333/333 · 0x2038 314/314
+                0x203B 312/312 · 0x2555 284/284 · 0x4807 282/282
+
+The undercount is not marginal — for several types the scan parser is short in EVERY session.
+
+### It only matters where a POSITION is returned
+
+Harmless when a function asks "does this exist". A silent data bug when it hands back an INDEX,
+because a missing block shifts every later one. Two shipped functions did that, neither able to
+report the error:
+
+  * `clip_positions` / `set_clip_position` — 0x104F short in 2/402 sessions, so `lanes=(i,)` moved
+    the WRONG CLIP (fixed in the previous commit);
+  * **`selected_tracks` — 0x261C short in 9 of 312 sessions**, and it returns `i + 1`, so it handed
+    back the WRONG TRACK NUMBERS. Fixed here. After: all returned indices lie within the track
+    range on 342/342 sessions.
+
+### Static analysis was not enough, three times over
+
+  1. Searching sources for `flat_blocks` flagged `rename_track` and `set_clip_position` — both
+     FALSE, the hits were in a COMMENT ("SIZE-DRIVEN throughout...") and a docstring. That is the
+     THIRD time today a source-string search matched prose (after two tests). The fix each time is
+     `ast.unparse`, which drops comments and docstrings.
+  2. Matching hex literals missed everything, because the types arrive via constants
+     (`_AUDIO_HDR`) or by argument.
+  3. Instrumenting `_by_type` caught nothing — these functions iterate `flat_blocks` and compare
+     `content_type` inline.
+
+What worked was empirical: compare the scan count against the size-driven count per type, then
+check the functions that return positions. Recorded because the wrong tool was tried three times
+before the obvious one.
+
+### Remaining users, deliberately not changed
+
+18 private helpers still use `flat_blocks`, plus `overview_extent`, `session_name`,
+`move_click_to_top`, `set_clip_wav`, `set_clip_wavs`, `track_types`. `track_types` is verified clean
+(417/417). The others read single blocks or operate on synthesized donor data, and none returns a
+positional index. Left alone rather than churned; the new test pins the rule for the three that do.
+
+267 tests green.

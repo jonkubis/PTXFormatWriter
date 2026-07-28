@@ -3849,3 +3849,53 @@ class MoveClipTests(unittest.TestCase):
             self.assertIn("_size_driven_blocks", body)
             self.assertNotIn("flat_blocks", body,
                              "the scan parser undercounts and these index positionally into it")
+
+
+class ScanParserIndexRiskTests(unittest.TestCase):
+    """Positional indices must never be derived from the scan parser.
+
+    `flat_blocks` UNDERCOUNTS on real sessions — measured over the corpus, 80 content types are
+    affected and 35 of them in more than half of all sessions (`0x258C` 372/372, `0x2037` 354/354,
+    `0x2580` 333/333). That is harmless where a function only asks "does this exist", and a silent
+    data bug where a function hands back a POSITION: a missing block shifts every later index.
+
+    Two shipped functions did exactly that, and neither could report the error:
+      * `clip_positions`/`set_clip_position` — 0x104F short in 2 of 402 sessions, so
+        `lanes=(i,)` moved the WRONG CLIP;
+      * `selected_tracks` — 0x261C short in 9 of 312 sessions, so it returned the WRONG TRACK
+        NUMBERS.
+    """
+
+    POSITIONAL = ("clip_positions", "set_clip_position", "selected_tracks")
+
+    def test_positional_readers_do_not_use_the_scan_parser(self):
+        import ast, inspect
+        for name in self.POSITIONAL:
+            fn = getattr(BS, name)
+            tree = ast.parse(inspect.getsource(fn).lstrip())
+            f = tree.body[0]
+            if (f.body and isinstance(f.body[0], ast.Expr)
+                    and isinstance(f.body[0].value, ast.Constant)):
+                f.body = f.body[1:]
+            body = ast.unparse(f)          # drops comments AND docstring
+            self.assertNotIn("flat_blocks", body, f"{name} indexes positionally")
+            self.assertIn("_size_driven_blocks", body, f"{name} must use the size-driven walk")
+
+    def test_selected_track_indices_are_within_the_track_range(self):
+        """The property the undercount broke: an index past the last track is impossible."""
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            n = len(BS.track_types(d))
+            for i in BS.selected_tracks(d):
+                self.assertGreaterEqual(i, 1)
+                self.assertLessEqual(i, max(n, 1), f"{path.name}: index {i} > {n} tracks")
+            checked += 1
+            if checked >= 12:
+                break
+        self.assertTrue(checked, "no control session was checked")

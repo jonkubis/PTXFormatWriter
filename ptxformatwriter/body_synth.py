@@ -3171,11 +3171,14 @@ def _sel_flag_positions(block_bytes: bytes) -> tuple[int, int] | None:
 
 def selected_tracks(data: bytes) -> list[int]:
     """1-based indices of tracks whose 0x261c selection flag is set."""
-    ptf = parse(data)
-    a1c = sorted((b for b in flat_blocks(ptf) if b.content_type == 0x261c), key=lambda b: b.offset)
+    # SIZE-DRIVEN. The scan parser undercounts 0x261C in 9 of 312 corpus sessions, and the value
+    # returned here is `i + 1` -- a POSITIONAL index into this very list. A missing 0x261C shifts
+    # every later index, so the caller is handed the wrong TRACK NUMBERS with nothing to show it.
+    # Same defect class as clip_positions/set_clip_position and the 0x251A lane count.
     out: list[int] = []
-    for i, b in enumerate(a1c):
-        blk = data[b.offset : b.offset + b.block_size]
+    for i, (z, e, _c) in enumerate(
+            [b for b in _size_driven_blocks(data) if b[2] == 0x261C and b[0] >= 31]):
+        blk = data[z + 7 : e]
         fp = _sel_flag_positions(blk)
         if fp and blk[fp[0]] == 0x01:
             out.append(i + 1)
