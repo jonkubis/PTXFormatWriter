@@ -5410,3 +5410,46 @@ clips.
 
 Leads at n=4, NOT settled. And stated plainly: at n=1 "changed in every pair" means "changed once",
 which is no evidence; n=2 is weak; only the region (7) and MIDI (4) rows carry weight.
+
+## 2026-07-27 — wider harvest: MIDI removal CONFIRMS remove_clip; two byte-level claims RETRACTED
+
+Re-harvested controlled pairs for breadth: **34 pairs across 25 chains** (was 16 across ~6).
+
+### STRENGTHENED — and it settles remove_clip's MIDI design
+
+`0x2628`/`0x2629`/`0x2633` split now rests on 11 region-only and 7 MIDI-only pairs, still with zero
+exceptions in either direction.
+
+**The decisive pair: PT removes 35 MIDI clips at once.** `0x104F` -35, `0x1056` -35, and
+`0x2628` **+1**, `0x2633` **+1**. The region records go UP, not down. Across all 7 MIDI pairs the
+placement types equal the clip delta exactly (7/7, including the -35), while the region records
+never follow it down.
+
+`remove_clip`'s docstring says the clip's region records are "intentionally left untouched ... which
+matches deleting a clip from the timeline" — PT-confirmed for AUDIO, assumed for MIDI. Pro Tools
+deleting 35 MIDI clips without deleting one region record settles the assumption. This is the
+strongest evidence yet obtained for the MIDI write path without running PT.
+
+### RETRACTED — both from the commit I made an hour ago
+
+  1. **"Twelve types PT rewrites on every save"** -> the real number is **4** (`0x2067`, `0x261B`,
+     `0x261C`, `0x2624`). The other eight change on most saves but not all; they were an artifact
+     of 16 pairs from ~6 chains. The weaker reading survives (PT rewrites a substantial background
+     every save, which is why 51% of pairs look quiet), but the MEMBERSHIP was over-claimed.
+  2. **"First behavioural evidence about 0x2000 — it moves with MIDI clips"** -> WITHDRAWN. At n=7
+     its bytes change in every MIDI pair AND elsewhere, so it discriminates nothing. `0x203A` is not
+     even in every MIDI pair. `0x2000` remains the type with no behavioural evidence of any kind.
+
+I hedged that one explicitly ("leads at n=4, not settled") and the hedge was correct — but the
+commit TITLE said "the first evidence about 0x2000", which was not hedged. A caveat in the body does
+not rescue an over-claimed headline.
+
+### SURVIVES
+
+`0x1058` is unique to MIDI at n=7, alongside the known `0x1056`/`0x1057` chain. Genuinely new.
+
+### NEW, on the same provisional terms
+
+Playlist-count pairs (n=6) uniquely touch `0x2434`, `0x2515`, `0x2626`, `0x4420`. Offered on exactly
+the terms the `0x2000` lead was offered on — which is the reason to treat it as provisional until a
+wider harvest keeps or kills it.

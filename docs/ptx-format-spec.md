@@ -4428,8 +4428,23 @@ Measured on 4 MIDI-only and 7 region-only pairs, with no exceptions in either di
 
 | | `0x2628` | `0x2629` | `0x2633` |
 |---|---|---|---|
-| 7 pairs where only the region count moved | +N | **+N, always equal** | never present |
-| 4 pairs where only the MIDI clip count moved | +1 | **never present** | +1 |
+| **11** pairs where only the region count moved | +N | **+N, always equal** | never present |
+| **7** pairs where only the MIDI clip count moved | +1 or +2 | **never present** | same as `0x2628` |
+
+*(Counts raised from 7 and 4 by the wider harvest — 34 controlled pairs across 25 chains. Unlike
+the byte-level claims below, this one strengthened: still zero exceptions in either direction.)*
+
+**On a MIDI clip REMOVAL, Pro Tools does not delete the region records.** One pair removes **35**
+MIDI clips at once: `0x104F` −35, `0x1056` −35 — and `0x2628` **+1**, `0x2633` **+1**. The regions
+go up, not down. Across all 7 MIDI pairs the placement types track the clip delta exactly
+(`0x104F` and `0x1056` equal it in 7/7, including the −35), while `0x2628`/`0x2633` never follow it
+down and move by +1/+2 on additions regardless of how many clips were added — four clips of one
+region create one region record.
+
+This is the direct confirmation `remove_clip`'s design needed. Its docstring says the clip's region
+records are "intentionally left untouched … which matches deleting a clip from the timeline", and
+that was PT-confirmed for audio and merely assumed for MIDI. Pro Tools removing 35 MIDI clips
+without removing a single region record settles the assumption.
 
 So a region record `0x2628` is shared, and the detail record that accompanies it depends on the
 clip's kind. PT's complete footprint for **adding one MIDI clip** is exactly
@@ -4439,9 +4454,9 @@ clip's kind. PT's complete footprint for **adding one MIDI clip** is exactly
     0x2628 + 1     the region record
     0x2633 + 1     the MIDI region detail
 
-in **4 of 4** controlled pairs. `remove_clip` reverses only the first two, by design — it leaves the
-region in the clips bin, which is PT-confirmed correct for audio. This measurement says the MIDI
-case has the same shape, with `0x2633` in the role `0x2629` plays for audio.
+in **6 of 6** controlled additions. `remove_clip` reverses only the first two, by design — it
+leaves the region in the clips bin, which is PT-confirmed correct for audio. This measurement says
+the MIDI case has the same shape, with `0x2633` in the role `0x2629` plays for audio.
 
 **A divergence in `rename_track`, found without Pro Tools.** Two pairs are pure renames — nothing
 else in the session changed. In both, PT touched **`0x2097`**, the I/O routing element handle; one
@@ -4457,39 +4472,42 @@ controlled pairs at byte level — blocks aligned by `(content_type, ordinal)`, 
 useless when blocks slide — gives a much wider footprint: a pure rename touches 40+ types. Most of
 that is not the rename.
 
-**Twelve types change on EVERY controlled pair, whatever the user did:**
+> **CORRECTED the same day, by a wider harvest.** This section first reported **twelve** types as
+> the always-rewritten background, and offered `0x2000`/`0x1058`/`0x203A` as MIDI-specific leads at
+> n=4 — with a note that n=4 was under-powered. It was. Re-harvested at **34 controlled pairs
+> across 25 chains** (from 16 pairs across ~6), and the results below replace the earlier ones.
+> Both retractions are recorded rather than edited away, because the failure mode — narrow sample,
+> confident claim, wider sample refutes — is the one this project keeps repeating.
 
-`0x1038` `0x2015` `0x2016` `0x2067` `0x2613` `0x2615` `0x2616` `0x261B` `0x261C` `0x261E` `0x2624`
-`0x2627`
+**Four types change on every controlled pair, whatever the user did:** `0x2067`, `0x261B`,
+`0x261C`, `0x2624`.
 
-Plug-in state, the view blobs, and per-track view records. **Pro Tools rewrites these on every save
-no matter what changed**, which is worth knowing twice over: it explains the 159 "quiet" pairs —
-those saves altered only background — and it tells an editor which types are pointless to try to
-preserve byte-exactly, because PT will not preserve them either.
+The other eight originally listed (`0x1038`, `0x2015`, `0x2016`, `0x2613`, `0x2615`, `0x2616`,
+`0x261E`, `0x2627`) do **not** survive: with 25 chains rather than 6 they change on most saves but
+not all. They are common, not universal. The useful reading stands in weaker form — PT rewrites a
+substantial background on every save, which is why 51% of pairs look "quiet" and why byte-diffing
+two sessions is noisy — but the *membership* of that background was over-claimed.
 
-Subtracting that background leaves the discriminating sets:
+Discriminating sets at the wider sample:
 
 | observable | n | types touched in every one of ITS pairs and in **no** other observable's |
 |---|---:|---|
-| markers | 2 | `0x2030`, `0x2077` |
-| MIDI clip count | **4** | `0x1056`, `0x1057`, `0x1058`, `0x2000`, `0x203A`, `0x2633`, `0x2634` |
-| region count | 7 | *(none unique — regions share `0x104F`/`0x1050`/`0x1052` with clip edits)* |
-| track rename | 2 | *(none unique)* |
-| audio clip count | 1 | `0x262F`, `0x2630` — but n=1, so this is not evidence |
+| MIDI clip count | **7** | `0x1056`, `0x1057`, `0x1058` |
+| playlist count | **6** | `0x2434`, `0x2515`, `0x2626`, `0x4420` |
+| region count | 11 | *(none unique)* |
+| track rename | 5 | *(none unique)* |
+| audio clip count | 4 | *(none unique)* |
+| markers | 1 | *(none unique — n=1 is not evidence)* |
 
-The marker row is a check on the method, not a discovery: `0x2030` and `0x2077` are the marker
-types, and they are exactly what falls out.
+**`0x1058` survives and strengthens** (unique to MIDI at n=7) alongside the known `0x1056`/`0x1057`
+chain. **`0x2000` and `0x203A` do not.** `0x2000`'s bytes do change in every MIDI pair, but they
+also change elsewhere, so it discriminates nothing; `0x203A` is not even in every MIDI pair. The
+claim that `0x2000` "moves with MIDI clips" was an n=4 artifact and is **withdrawn** — it remains
+the type with no behavioural evidence of any kind.
 
-The MIDI row is the useful one, at n=4. `0x1056`/`0x1057` are the known MIDI chain and
-`0x2633`/`0x2634` the MIDI region records — the byte-level pass recovers the count-level result
-above independently. **`0x1058`, `0x2000` and `0x203A` are new**: their bytes moved in all four
-MIDI-clip pairs and in none of the other twelve controlled pairs. For `0x2000` that is the first
-behavioural evidence of any kind — it occurs once per session in all 832, always top-level, and
-nothing until now distinguished what it was for.
-
-> Treat `0x1058`/`0x2000`/`0x203A` as leads at n=4, not as settled. And note the small numbers
-> honestly: with n=1 "changed in every pair" means "changed once", which is no evidence at all, and
-> n=2 is weak. Only the region (7) and MIDI (4) rows carry weight.
+`0x2434`/`0x2515`/`0x2626`/`0x4420` as playlist-count-specific is new, at n=6, and is offered on
+exactly the same terms the `0x2000` lead was — which is reason to treat it as provisional until a
+wider harvest either keeps it or kills it.
 
 > **CAVEAT that bounds every footprint above: these are COUNT deltas.** A type whose BYTES changed
 > while its count held still does not appear — which is exactly what a rename does to the `0x2519`
