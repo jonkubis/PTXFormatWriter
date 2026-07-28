@@ -4386,15 +4386,48 @@ Measured over 60 sessions and 44,870 container instances, the true shape is weak
    \___________________ 9-byte block header ____/
 ```
 
-- the **first child sits at a per-type constant offset `h`** past the 9-byte header — **119 of 129
-  container types**;
-- the **trailer is a per-type constant length** — **114 of 129 types**;
-- the 10 types whose `h` varies are exactly the ones carrying a **variable-length name in the
-  header**: `0x251A` (55/56/57), `0x2619` (91/92/93), `0x2602` (53/57/60), `0x2553`, `0x1041`,
-  `0x202A`, `0x2633`. The variation is the name length; the rule is not violated, it is
-  parameterised.
+- the **first child sits at a per-type constant offset `h`** past the 9-byte header — for **136 of
+  260 container types** (unanimous across every session holding the type, n ≥ 50, ≥ 10 sessions);
+- where `h` is constant it is nearly always small: **`h = 0` for 85 types and `h = 4` for 29**,
+  with the rest scattered over 1–64;
+- the **trailer is a per-type constant length** for a similar majority.
 
-Measured constants for the commonest containers (`h`, trailer):
+> **CORRECTED 2026-07-27, same day it was written.** This section first claimed **119 of 129**
+> container types (92%). That was measured on 60 sessions from `control_files` alone. Re-measured
+> across all four corpora and 832 sessions, it is **136 of 260 (52%)** — the wider corpus has twice
+> as many container types and far more of them vary.
+>
+> Worse for the rule: the containers with the **most instances all vary** — `0x2602` (73,387
+> instances across all 832 sessions), `0x251A` (48,592), `0x2106` (36,849), `0x2628`, `0x1052`,
+> `0x2619`, `0x2077`. The law fails exactly where it would be most useful.
+>
+> This is the **fourth** rule this project has confirmed on `control_files` and then watched a
+> wider corpus refute. `control_files` is ONE machine running ONE Pro Tools generation; a rule
+> measured there is a hypothesis, never a result.
+
+**Not adopted as a validator invariant, and that is the point of measuring it.** The plan was to
+check after an edit that a container's first child still sits at its expected `h` — a natural guard
+given that two out-of-bounds writes this project has fixed (`0x251A`, `0x2107`) worked by clobbering
+a neighbouring header. The corpus does not support it: at 52%, with the highest-traffic containers
+excluded, such a check would fire on ordinary untouched sessions.
+
+Two further cautions the numbers make plain:
+
+- `h` as measured is *"the first offset that begins a valid block chain"*, which inside an **opaque
+  payload is a false zmark, not a child**. `0x4501` locks at `h = 6023` and `0x2023` at `h = 111`
+  across every session — unanimous, and almost certainly a fixed-position `0x5A` in fixed-layout
+  data rather than a child list.
+- The types whose `h` varies by a few bytes (`0x251A` 54–57, `0x2619` 93–97, `0x2553`, `0x1041`)
+  are the ones carrying a **variable-length name in the header**, so their variation is explained
+  even though it is not constant.
+
+**One line of this measurement is worth more than the rest of it**: `0x1004` has `h = 4` in **831
+of 832 sessions**, and the single exception has `h = 0`. That exception is exactly the session that
+produced the `0x2757` phantom — the one whose file-descriptor count is `346 = 0x0000015A`, so the
+"first child" was found at the count itself. The count-field explanation above is therefore
+confirmed corpus-wide, not just on the one file it was dissected from.
+
+Measured constants for common containers, from the 60-session pass (`h`, trailer):
 
 | type | `h` | trailer | | type | `h` | trailer |
 |---|---:|---:|---|---|---:|---:|

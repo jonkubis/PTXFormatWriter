@@ -5093,3 +5093,30 @@ blocks on the chain from `h` are real children). `_size_driven_blocks` is load-b
 PT-confirmed edit primitive, and I have just been wrong once today about a walk change. It is
 recorded as measured data, to be adopted behind the same before/after corpus diff that caught the
 `core.parsestring` regression.
+
+## 2026-07-27 — the container-`h` law, corrected within the hour by a wider corpus
+
+Recorded above as "119/129 container types have a constant first-child offset `h`", measured on 60
+`control_files` sessions, with a note that it was worth adopting as a validator invariant.
+
+Re-measured across all four corpora / 832 sessions: **136 of 260 (52%)**, not 92%. The wider corpus
+holds twice as many container types and far more of them vary. And the containers with the MOST
+instances all vary — `0x2602` (73,387 instances, every session), `0x251A` (48,592), `0x2106`
+(36,849), `0x2628`, `0x1052`, `0x2619`, `0x2077`. The rule fails precisely where it would pay.
+
+**NOT adopted.** The validator check would fire on ordinary untouched sessions, and "inert on
+untouched sessions" has been the bar for every check added to `validate_pt_invariants`.
+
+Also: `h` means "the first offset that begins a valid block chain", which inside an opaque payload
+is a false zmark rather than a child — `0x4501` locks at h=6023 and `0x2023` at h=111, unanimously,
+and neither is plausibly a child list. Unanimity is not realness.
+
+**This is the FOURTH rule this session confirmed on `control_files` and refuted on a wider corpus**
+(after the `0x2506` mono/stereo bit, `0x2628`'s parent set, and the `0x2011` class size). Standing
+rule, earned four times over: a rule measured on `control_files` alone is a hypothesis. It is one
+machine and one Pro Tools generation.
+
+WHAT SURVIVES, and it is worth the pass on its own: **`0x1004` has h=4 in 831 of 832 sessions**,
+and the one exception has h=0 — that exception being exactly the session whose file-descriptor
+count is 346 = 0x0000015A, i.e. the session that produced the `0x2757` phantom. The count-field
+explanation is confirmed corpus-wide, not just on the file it was dissected from.
