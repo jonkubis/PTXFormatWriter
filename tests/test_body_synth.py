@@ -3476,3 +3476,151 @@ class LaneBlockSelectionTests(unittest.TestCase):
         lanes = [(10, 20), (20, 30)]
         self.assertEqual(BS._lane_blocks({0x251A: lanes}), lanes)          # no 0x2519
         self.assertEqual(BS._lane_blocks({0x2519: [(0, 5)], 0x251A: lanes}), lanes)
+
+
+class ThreeChainClipRemovalTests(unittest.TestCase):
+    """`remove_clip` selects its placement chain from the holder's own content type.
+
+    The splice arithmetic was never audio-specific -- the three chains differ only in the two OUTER
+    content types, and the 0x104F placement record is shared -- but two constants were hardwired,
+    so a MIDI or video holder was rejected.
+    """
+
+    def _a_session(self):
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) < 600_000 and BS.placement_lanes(d):
+                return d
+        self.skipTest("no control session with placements")
+
+    def test_the_chain_table_covers_all_three_kinds(self):
+        kinds = {k for _h, _w, k in BS._PLACEMENT_CHAINS}
+        self.assertEqual(kinds, {"audio", "midi", "video"})
+        holders = [h for h, _w, _k in BS._PLACEMENT_CHAINS]
+        self.assertEqual(len(set(holders)), 3, "a holder type must select exactly one chain")
+
+    def test_a_non_holder_zmark_is_refused_by_name(self):
+        """The error must say what was passed; "no 0x1052 lane" was a lie for a MIDI holder."""
+        d = self._a_session()
+        holders = {h for h, _w, _k in BS._PLACEMENT_CHAINS}
+        z = next(z for z, _e, c in BS._size_driven_blocks(d) if z >= 31 and c not in holders)
+        with self.assertRaises(ValueError) as cm:
+            BS.remove_clip(d, z, 0)
+        self.assertIn("not a placement holder", str(cm.exception))
+        for kind in ("audio", "midi", "video"):
+            self.assertIn(kind, str(cm.exception), "the error should list the chains it accepts")
+
+    def test_an_absent_zmark_is_refused(self):
+        d = self._a_session()
+        with self.assertRaises(ValueError) as cm:
+            BS.remove_clip(d, 999_999_999, 0)
+        self.assertIn("no block at zmark", str(cm.exception))
+
+    def _a_session_with(self, kind):
+        """A control session holding a placement of `kind`, and one such holder."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            for z, nm, n, k in BS.placement_lanes(d):
+                if k == kind:
+                    return d, z, nm, n
+        self.skipTest("no control session holds a %s placement" % kind)
+
+    def test_removing_an_AUDIO_clip_drops_exactly_one_placement(self):
+        d, z, _nm, _n = self._a_session_with("audio")
+        before = sum(1 for _a, _b, c in BS._size_driven_blocks(d) if c == 0x104F)
+        out = BS.remove_clip(d, z, 0)
+        after = sum(1 for _a, _b, c in BS._size_driven_blocks(out) if c == 0x104F)
+        self.assertEqual(after, before - 1)
+        self.assertLess(len(out), len(d))
+
+    def test_removing_a_MIDI_clip_works_at_all(self):
+        """THE test for this change. `control_files` holds 36 MIDI placement holders, so this runs
+        locally -- and it fails outright against the old audio-only hardwiring, which raised
+        `no 0x1052 lane`. An earlier version of this class picked `placement_lanes(d)[0]`, which is
+        an audio holder on every local session, so it passed with the fix reverted and tested
+        nothing."""
+        d, z, _nm, _n = self._a_session_with("midi")
+        holder_ct = next(c for zz, _e, c in BS._size_driven_blocks(d) if zz == z)
+        self.assertEqual(holder_ct, 0x1057, "MIDI holders are 0x1057")
+        before = sum(1 for _a, _b, c in BS._size_driven_blocks(d) if c == 0x104F)
+        out = BS.remove_clip(d, z, 0)
+        after = sum(1 for _a, _b, c in BS._size_driven_blocks(out) if c == 0x104F)
+        self.assertEqual(after, before - 1)
+        self.assertLess(len(out), len(d))
+
+    def test_a_MIDI_removal_keeps_the_index_resolvable_and_the_counts_honest(self):
+        """Corruption an rc=0 reader would miss: index targets that no longer land on a block, and
+        a stale placement count."""
+        d, z, _nm, _n = self._a_session_with("midi")
+        out = BS.remove_clip(d, z, 0)
+        zs = {bz for bz, _be, _bc in BS._size_driven_blocks(out)}
+        holes, _zm = BS._index_offset_holes(out)
+        self.assertEqual([t for _a, t in holes if t and t not in zs], [],
+                         "every master-index offset must still land on a block")
+        base = {(e["invariant"], e["severity"]) for e in BS.validate_pt_invariants(d)
+                if e["severity"] == "error"}
+        now = {(e["invariant"], e["severity"]) for e in BS.validate_pt_invariants(out)
+               if e["severity"] == "error"}
+        self.assertEqual(now - base, set(), "no NEW validator errors")
+
+    # NOTE: video (0x1053 -> 0x1051) is NOT covered by a local test -- `control_files` contains
+    # zero video placements. It is exercised only by the corpus battery, which found 7 video
+    # holders across the external drives and removed from all 7 cleanly. Saying so is better than
+    # a test named for video that quietly skips.
+
+
+class PlacementCountInvariantTests(unittest.TestCase):
+    """A holder's declared placement count must equal the number of wrappers inside it.
+
+    Nothing structural could catch a stale count: `placement_lanes` counts wrappers by walking
+    blocks, so a holder with a wrong u32 reads back perfectly. That is this project's recurring
+    failure shape -- every reader returns rc=0 and Pro Tools is the one that objects.
+
+    Measured at the FIXED offset (first wrapper - 4), which matches the real count in 9423 of 9423
+    corpus holders (9235 audio / 185 MIDI / 3 video), so the check is inert on untouched sessions.
+    """
+
+    def _holder(self):
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            by = BS._blocks_by_type(d)
+            for hct, wct, _kind in BS._PLACEMENT_CHAINS:
+                for hz, he in sorted(by.get(hct, ())):
+                    ins = [wz for wz, _we in sorted(by.get(wct, ())) if hz < wz < he]
+                    if ins:
+                        return d, min(ins), len(ins)
+        self.skipTest("no control session with a placement holder")
+
+    def test_a_stale_placement_count_is_an_error(self):
+        d, fp, n = self._holder()
+        self.assertEqual([e for e in BS.validate_pt_invariants(d)
+                          if e["invariant"] == "placement-count"], [],
+                         "must be inert on an unmodified session")
+        bad = bytearray(d)
+        bad[fp - 4:fp] = (n + 7).to_bytes(4, "little")
+        hit = [e for e in BS.validate_pt_invariants(bytes(bad))
+               if e["invariant"] == "placement-count"]
+        self.assertTrue(hit, "a stale placement count must be reported")
+        self.assertEqual(hit[0]["severity"], "error")
+
+    def test_the_count_field_position_is_fixed_not_searched(self):
+        """`_lane_count_pos` searches backwards for a u32 equal to the count it was given, so it
+        can only ever find a field that already agrees -- it cannot detect a wrong one. The
+        invariant reads the fixed position instead."""
+        import inspect
+        vsrc = inspect.getsource(BS.validate_pt_invariants)
+        self.assertIn("placement-count", vsrc)
+        self.assertIn("_fp - 4", vsrc, "the invariant must read the FIXED offset")

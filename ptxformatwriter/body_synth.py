@@ -4487,9 +4487,11 @@ def placement_lanes(data: bytes, kinds=("audio", "midi", "video")) -> "list[tupl
 
     Each chain is holder -> wrapper -> placement, differing only in the two outer content types.
     Read-only and additive: `clip_lanes` is unchanged, so nothing that edits by lane zmark is
-    affected. The `kind` field is returned so a caller can tell which chain a zmark came from --
-    passing a MIDI holder to `remove_clip` would not work, and the caller needs to be able to
-    avoid that."""
+    affected. The `kind` field is returned so a caller can tell which chain a zmark came from.
+
+    A zmark from here can be passed straight to `remove_clip`, which selects the chain from the
+    holder's own content type. (Until 2026-07-27 that was not true and this docstring said so;
+    `remove_clip` was hardwired to the audio pair.)"""
     want = {k for k in kinds}
     bl = _size_driven_blocks(data)
     by_type: "dict[int, list[tuple[int, int]]]" = {}
@@ -4525,22 +4527,44 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     """Remove one clip from the lane at `lane_zmark` in an ARBITRARY existing
     session, leaving every other track/clip/plugin/automation byte-exact.
 
+    Works on ALL THREE placement chains — audio (`0x1052`→`0x1050`), MIDI
+    (`0x1057`→`0x1056`) and video (`0x1053`→`0x1051`). The chain is chosen from the content
+    type of the block at `lane_zmark`, so a caller passes a zmark from `clip_lanes` (audio) or
+    `placement_lanes` (any kind) and does not have to say which it is.
+
     `clip_index` is the placement's rank in file order within the lane. Splices
-    out the placement (its 0x1050 wrapper + the 0x104f position child), decrements
+    out the placement (its wrapper + the `0x104F` position child), decrements
     the lane's u32 placement count, shrinks every enclosing block size, and slides
     every master-index offset that sits past the cut. The clip's region/audio-file
     records are intentionally left untouched (they linger in the clips bin, which
-    is harmless and matches deleting a clip from the timeline)."""
+    is harmless and matches deleting a clip from the timeline).
+
+    None of the splice arithmetic was ever audio-specific: the three chains differ only in the two
+    OUTER content types, and the `0x104F` placement record itself is shared. Only the two constants
+    were audio-specific, and they are now looked up.
+
+    **Confirmed in Pro Tools for AUDIO only.** MIDI and video pass the same corpus battery the
+    audio path passed before its PT run, but a reader returning `rc=0` is not the oracle here — PT
+    is. Treat the MIDI/video paths as unconfirmed until a session edited this way has been opened.
+    """
     # One `final_index_ref` (the slow scan parser lives there); everything else is
     # derived from the fast size-driven walk + the index it points at.
     ref = _FI.final_index_ref(data)
     bl = sorted(_raw_block_bounds(data, ref.start))
-    lane = next((b for b in bl if b[0] == lane_zmark and b[2] == 0x1052), None)
+    lane = next((b for b in bl if b[0] == lane_zmark), None)
     if lane is None:
-        raise ValueError(f"no 0x1052 lane at zmark {lane_zmark}")
+        raise ValueError(f"no block at zmark {lane_zmark}")
+    chain = next((ch for ch in _PLACEMENT_CHAINS if ch[0] == lane[2]), None)
+    if chain is None:
+        holders = ", ".join("0x%04x (%s)" % (h, k) for h, _w, k in _PLACEMENT_CHAINS)
+        raise ValueError(
+            f"block at zmark {lane_zmark} is 0x{lane[2]:04x}, not a placement holder; "
+            f"expected one of {holders}"
+        )
+    wrapper_ct = chain[1]
     lane_end = lane[1]
     placements = sorted(
-        (pz, pe) for pz, pe, c in bl if c == 0x1050 and lane_zmark < pz < lane_end
+        (pz, pe) for pz, pe, c in bl if c == wrapper_ct and lane_zmark < pz < lane_end
     )
     if not 0 <= clip_index < len(placements):
         raise ValueError(
@@ -6279,6 +6303,35 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
 
     bl = _size_driven_blocks(data)
     by = _blocks_by_type(data)
+
+    # PLACEMENT COUNT vs reality. Every placement holder declares its clip count in a u32 that sits
+    # immediately before its first wrapper, and `remove_clip` decrements it. Nothing else checked
+    # it, and nothing structural could: `placement_lanes` counts wrappers by walking blocks, so a
+    # holder whose declared count is stale reads back perfectly while carrying a number Pro Tools
+    # would act on. That is the project's recurring failure shape -- every reader says rc=0 and PT
+    # is the one that objects.
+    #
+    # Non-circular by construction, which `_lane_count_pos` is NOT: that helper SEARCHES backwards
+    # for a u32 equal to the count it was handed, so it can only ever find a field that already
+    # agrees. Measured at the FIXED offset instead: `u32 at (first wrapper - 4)` equals the actual
+    # wrapper count in **9423 of 9423** holders across the corpus -- 9235 audio, 185 MIDI, 3 video,
+    # 100.00%. So the fixed position is the rule, the backward scan has never once been needed, and
+    # this check is inert on any untouched session.
+    for _hct, _wct, _kind in _PLACEMENT_CHAINS:
+        _wr = sorted(by.get(_wct, ()))
+        for _hz, _he in sorted(by.get(_hct, ())):
+            _ins = [wz for wz, _we in _wr if _hz < wz < _he]
+            if not _ins:
+                continue
+            _fp = min(_ins)
+            if _fp - 4 < _hz:
+                continue
+            _decl = int.from_bytes(data[_fp - 4 : _fp], "little")
+            if _decl != len(_ins):
+                err("placement-count",
+                    "0x%04x %s holder at %d declares %d placements, %d present"
+                    % (_hct, _kind, _hz, _decl, len(_ins)))
+
     nt = [(z, e) for z, e, c in bl if c == 0x2519]
     if not nt:
         return [{"severity": "error", "invariant": "name-table", "detail": "no 0x2519 block"}]

@@ -5158,3 +5158,57 @@ Verified the way the `core.parsestring` regression taught:
 
 Note the shape of this one: the bug was found by asking what today's DOCUMENTATION finding implied
 for the CODE. The phantom catalogue was not written to find bugs.
+
+## 2026-07-27 — remove_clip now works on all three placement chains
+
+`remove_clip` was hardwired to the audio pair (`0x1052`→`0x1050`) and refused MIDI and video with
+"no 0x1052 lane". None of the splice arithmetic was ever audio-specific: the three chains differ
+only in the two OUTER content types and the `0x104F` placement record is shared. Only the two
+constants were, and they are now looked up from `_PLACEMENT_CHAINS` via the holder's own type.
+
+    audio   0x1052 -> 0x1050 -> 0x104F
+    MIDI    0x1057 -> 0x1056 -> 0x104F
+    video   0x1053 -> 0x1051 -> 0x104F
+
+CORPUS BATTERY, 462 sessions, six structural properties per edit (index findable; every index
+offset lands on a real block; exactly one lane's count changes; total `0x104F` drops by exactly 1;
+no new validator error; the file shrinks):
+
+    audio  373 clean / 0 failed / 0 refused
+    midi    97 clean / 0 failed / 0 refused
+    video    7 clean / 0 failed / 0 refused
+
+**PT-CONFIRMED FOR AUDIO ONLY.** MIDI and video pass what audio passed BEFORE its PT run. `rc=0`
+is not the oracle; PT is.
+
+### The battery had a blind spot, and finding it was the useful part
+
+477 clean edits and zero failures is exactly when to ask whether the battery can fail. Breaking
+`remove_clip` three ways on purpose: skipping the enclosing-size shrink and skipping the
+index-offset shift were both CAUGHT — but **skipping the count decrement was not**. Nothing
+structural could catch it: `placement_lanes` counts wrappers by walking blocks, so a holder with a
+stale u32 reads back perfectly.
+
+That is this project's recurring failure shape — every reader returns `rc=0` and Pro Tools is the
+one that objects.
+
+NEW INVARIANT `placement-count`: a holder's declared count must equal the wrappers nested in it.
+Read at the FIXED offset `first_wrapper - 4`, which equals the real count in **9423 of 9423** corpus
+holders (9235 audio / 185 MIDI / 3 video, 100.00%). Fires on **0 of 432** untouched sessions.
+
+Non-circular, unlike `_lane_count_pos`, which SEARCHES BACKWARDS for a u32 equal to the count it was
+handed and so can only ever find a field that already agrees — it cannot detect a wrong one. The
+100% fixed-position result also means its backward-scan fallback has never once been needed.
+
+### A test that tested nothing
+
+The first version of `ThreeChainClipRemovalTests` picked `placement_lanes(d)[0]`, which is an AUDIO
+holder on every local session — so it passed with the fix reverted. Caught by running the bite check
+rather than assuming it. `control_files` does hold 36 MIDI holders, so the test now selects a MIDI
+holder explicitly and fails outright against the old hardwiring.
+
+Video is NOT covered by a local test: `control_files` has zero video placements. It is exercised
+only by the corpus battery (7/7 clean). Recorded rather than papered over with a test named for
+video that quietly skips.
+
+247 tests green.
