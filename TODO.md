@@ -5453,3 +5453,32 @@ not rescue an over-claimed headline.
 Playlist-count pairs (n=6) uniquely touch `0x2434`, `0x2515`, `0x2626`, `0x4420`. Offered on exactly
 the terms the `0x2000` lead was offered on — which is the reason to treat it as provisional until a
 wider harvest keeps or kills it.
+
+## 2026-07-27 — widest harvest (74 pairs / 45 chains): playlist claim killed, 0x1058 confirmed
+
+Ran the harvest I said would keep or kill the provisional playlist finding.
+
+**KILLED.** `0x2434`/`0x2515`/`0x2626`/`0x4420` as playlist-specific: at 74 pairs across 45 chains,
+not one is present in every playlist pair. Withdrawn.
+
+That is the process working exactly as intended — flagged provisional, test named in advance, test
+run, came back negative. It is also the second n=4-to-n=6 "finding" this instrument has produced
+and then lost (after `0x2000`), which is a fact about the instrument worth remembering.
+
+**CONFIRMED across three independent harvests** (n=16/34/74; 6/25/45 chains):
+
+  * background is FOUR types: `0x2067` `0x261B` `0x261C` `0x2624` (stable at n=34 and n=74; the
+    original twelve were an n=16 artifact);
+  * `0x1056` `0x1057` `0x1058` MIDI-unique in all three. `0x1056`/`0x1057` are the known chain —
+    **`0x1058` is the one genuinely new type this entire instrument has produced.**
+
+**CALIBRATION, not discovery.** The tempo pairs (n=25, the largest group) uniquely select `0x2028`;
+meter pairs (n=4) uniquely select `0x2029` and `0x2719`. All three are CIRCULAR — `tempo_map` reads
+`0x2028`, `meter_map` reads BOTH `0x2029` and `0x2719`. I nearly wrote up `0x2719` as a new meter
+association before checking. They prove nothing about those types, but they show the instrument
+returning exactly the right answer and nothing else, at the largest n available, on a question whose
+answer is known. That is calibration the circularity filter otherwise denies us.
+
+**HONEST YIELD:** across 74 controlled pairs the instrument's only non-circular discovery is
+`0x1058`. It mostly recovers what is already documented — reasonable for a new instrument, and a bad
+reason to trust its outliers.

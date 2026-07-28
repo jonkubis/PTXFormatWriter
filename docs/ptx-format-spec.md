@@ -4505,9 +4505,32 @@ also change elsewhere, so it discriminates nothing; `0x203A` is not even in ever
 claim that `0x2000` "moves with MIDI clips" was an n=4 artifact and is **withdrawn** — it remains
 the type with no behavioural evidence of any kind.
 
-`0x2434`/`0x2515`/`0x2626`/`0x4420` as playlist-count-specific is new, at n=6, and is offered on
-exactly the same terms the `0x2000` lead was — which is reason to treat it as provisional until a
-wider harvest either keeps it or kills it.
+`0x2434`/`0x2515`/`0x2626`/`0x4420` as playlist-count-specific was offered here at n=6, on exactly
+the same terms the `0x2000` lead was, with the note that a wider harvest should keep or kill it.
+
+> **KILLED, by the harvest it asked for.** At **74 controlled pairs across 45 chains**, not one of
+> the four is present in every playlist pair. The finding is withdrawn. Recorded rather than
+> deleted: it was flagged provisional, the test was named in advance, the test was run, and it
+> came back negative — which is the only part of this process that makes the surviving claims worth
+> anything.
+
+**What three independent harvests agree on** (n=16/34/74, 6/25/45 chains):
+
+- the always-rewritten **background is four types** — `0x2067`, `0x261B`, `0x261C`, `0x2624`
+  (stable across the n=34 and n=74 harvests; the original twelve were an n=16 artifact);
+- **`0x1056`, `0x1057`, `0x1058` are MIDI-unique in all three.** `0x1056`/`0x1057` are the known
+  chain; **`0x1058` is the one genuinely new type this whole instrument has produced.**
+
+**Calibration, not discovery — and worth separating.** At the widest harvest the tempo pairs (n=25,
+the largest single group) uniquely select `0x2028`, and the meter pairs (n=4) uniquely select
+`0x2029` and `0x2719`. All three are **circular**: `tempo_map` reads `0x2028`, and `meter_map` reads
+both `0x2029` *and* `0x2719`. They prove nothing about those types — but they show the instrument
+returning exactly the right answer and nothing else on a question whose answer is known, at the
+largest n available. That is the calibration the circularity filter otherwise denies us.
+
+Stated plainly, so the instrument is not oversold: **across 74 controlled pairs its only
+non-circular discovery is `0x1058`.** It mostly recovers what is already documented. That is a
+reasonable thing for a new instrument to do, and a bad reason to trust its outliers.
 
 > **CAVEAT that bounds every footprint above: these are COUNT deltas.** A type whose BYTES changed
 > while its count held still does not appear — which is exactly what a rename does to the `0x2519`
