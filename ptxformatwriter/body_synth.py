@@ -162,6 +162,16 @@ _NAME_ENTRY_SUFFIX_SHORT = 21  # the same, with a 2-byte ordinal instead of 4
 # Tools actually emits: real clip names reach 100 bytes, and the cap silently ENDED the walk
 # there. Observed maximum is 100 across 288 sessions; 255 leaves headroom while still rejecting
 # wild lengths. The real discriminator is UTF-8 validity (see `_name_entry_head`), not this.
+# Wrapper -> the child it carries in 100% of untouched corpus instances (§5c). Used by
+# `validate_pt_invariants` to catch a splice that dropped a child.
+_MANDATED_CHILD = {
+    0x1050: 0x104F, 0x1056: 0x104F, 0x1051: 0x104F,   # the three placement chains
+    0x2629: 0x2628, 0x2625: 0x2626, 0x2038: 0x2037, 0x203B: 0x2037,
+    0x261C: 0x261B, 0x200B: 0x200A, 0x2104: 0x2103,
+}
+# The empty-terminator types and their fixed spans -- byte-constant in every instance measured.
+_TERMINATOR_SPAN = {0x2037: 9, 0x2626: 9, 0x4301: 41, 0x4420: 11, 0x1048: 13, 0x1600: 8}
+
 _NAME_ENTRY_MAX_BYTES = 255
 
 
@@ -6181,6 +6191,39 @@ def validate_pt_invariants(data: bytes) -> "list[dict]":
                  f"marker should carry exactly one row per playlist; a track add/remove that "
                  f"skipped the row leaves it short. (1 of 386 real sessions is legitimately "
                  f"ragged, so this is a note rather than an error)")
+
+    # MANDATED CHILD and TERMINATOR SPAN, both measured over 792,373 checks on untouched corpus
+    # sessions with ZERO violations (§5c). A splice that drops a wrapper's child, or that resizes
+    # an empty terminator, produces exactly these signatures -- and neither is visible to the
+    # count-container or name-table checks above.
+    #
+    # NOTE severity, not error: 100% on PT-authored files says the rule is real, but it does NOT
+    # say Pro Tools REJECTS a file that breaks it, and "error" in this validator means a
+    # PT-confirmed rejection. Promote only if PT is observed refusing one.
+    for _z, _e, _c in bl:
+        _want = _MANDATED_CHILD.get(_c)
+        if _want is not None:
+            _q, _seen = _z + 9, False
+            while _q < _e and data[_q] == 0x5A:
+                _sz = int.from_bytes(data[_q + 3 : _q + 7], "little")
+                if _sz <= 0 or _q + 7 + _sz > _e:
+                    break
+                if int.from_bytes(data[_q + 7 : _q + 9], "little") == _want:
+                    _seen = True
+                    break
+                _q += 7 + _sz
+            if not _seen:
+                note("mandated-child",
+                     f"0x{_c:04x} at {_z} has no 0x{_want:04x} child -- every one of the "
+                     f"{len(_MANDATED_CHILD)} wrapper types carries its child in 100% of "
+                     f"untouched corpus instances, so a missing one means a splice dropped it")
+                break
+        _span = _TERMINATOR_SPAN.get(_c)
+        if _span is not None and _e - _z != _span:
+            note("terminator-span",
+                 f"0x{_c:04x} at {_z} spans {_e - _z}, not {_span} -- the empty-terminator types "
+                 f"are byte-constant in every untouched instance measured")
+            break
 
     _dupids = sorted({v for v in _idr if _idr.count(v) > 1})
     if _dupids:

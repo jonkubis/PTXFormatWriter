@@ -4881,3 +4881,29 @@ the MIDI/video coverage rests on the corpus measurement above, since the control
 
 THIS CLOSES THE LAST BUILDABLE GAP I FOUND TODAY. Remaining implementation work (editing MIDI or
 video clips, not just reading them) would need PT confirmation, since it writes.
+
+## SHIPPED: today's measured structure turned into VALIDATOR CHECKS
+The documentation side is exhausted, but ~20 relations measured today were sitting in the spec
+doing nothing. Two are now enforced in `validate_pt_invariants`:
+
+  * **mandated-child** -- ten wrapper types each carry a specific child in 100% of untouched
+    instances: the three placement chains (0x1050/0x1056/0x1051 -> 0x104F), 0x2629->0x2628,
+    0x2625->0x2626, 0x2038/0x203B->0x2037, 0x261C->0x261B, 0x200B->0x200A, 0x2104->0x2103.
+  * **terminator-span** -- the six empty-terminator types are byte-constant:
+    0x2037=9, 0x2626=9, 0x4301=41, 0x4420=11, 0x1048=13, 0x1600=8.
+
+CALIBRATION: **792,373 checks across 240 untouched corpus sessions, ZERO violations**, so the
+rules are real and the checks cannot false-positive on PT-authored files. Verified silent on 240
+sessions, and verified to BITE on both corruption shapes:
+    widen one 0x2037 by 1 byte   -> "0x2037 at 36495 spans 10, not 9"
+    blank a 0x1050's 0x104F child -> "0x1050 at 22034 has no 0x104f child"
+
+WHY THESE TWO: they catch a splice that drops a child or resizes a terminator -- neither of which
+the existing count-container or name-table checks can see. That is precisely the failure mode of
+the 0x2107 bounds bug fixed this morning, which corrupted a neighbouring block's header and was
+invisible to every check then in place.
+
+NOTE SEVERITY, DELIBERATELY. 100% on PT-authored files says the rule is REAL; it does not say Pro
+Tools REJECTS a file that breaks it, and "error" in this validator means a confirmed rejection.
+Promote only if PT is observed refusing one. Edit audit unchanged (dup 72 clean, rm 105 clean),
+233 tests green.
