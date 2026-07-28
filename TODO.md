@@ -4935,3 +4935,33 @@ cry wolf. **Calibrate, then add** -- and a candidate that FAILS calibration is n
 experiment, it is a documentation correction.
 
 233 tests green, silent on all 240 untouched sessions.
+
+## SHIPPED: three readers turning today's decodes into API
+Today decoded several things that never became callable. Now they are:
+
+  * **session_product(data)** -- the Pro Tools EDITION that wrote the session, from the 0x0003
+    header string. **Resolves on 240/240 sessions**: Pro Tools HD 106, Studio 61, Ultimate 56,
+    plain "Pro Tools" 17. This is the field to branch on when synthesizing, because nine block
+    types appear ONLY in Studio sessions.
+  * **volumes(data)** -- every disk/VOLUME name the session references, from 0x0F3C.
+    `ABTB ROAD 1`, `Macintosh HD`, `Arts T1 SSD`, ... Nothing else in the format names a volume.
+  * **midi_devices(data)** -- `(name, kind)` for the session's MIDI devices.
+
+THE MIDI READER NEEDED A CORRECTION BEFORE IT WAS RIGHT, and the correction is the interesting
+part. My first version read every 0x208C and called them all "input devices", on the strength of
+this morning's 0x206F decode. Checking parentage first showed **0x208C is used by TWO different
+lists**:
+
+    parent 0x206F   kind "input"   11 measured    Alesis Vi61, OXYGEN 8      -- physical controllers
+    parent 0x2086   kind "port"   407 measured    Stylus RMX 1, Blue Cat's PatchWork Synth 1,
+                                                  Network, M1 Mac            -- destinations
+
+Conflating them mixes hardware you PLAY with destinations you SEND TO. The reader now returns the
+kind, and the docstring records both parents (0x2086 itself hangs off 0x2050 or 0x2006).
+
+**That is the same mistake shape as the morning's `0x206F` "invariant sentinel"**: a record type
+that looks like one thing because the sample was dominated by one of its uses. The input list is
+empty in all but 26 of 1,532 sessions, so a reader written from that population alone sees 11
+instances and misses 407.
+
+233 tests green.

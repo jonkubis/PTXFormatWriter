@@ -4213,6 +4213,92 @@ def session_start_bar(data: bytes) -> int:
     return 1
 
 
+def _first_prefixed_string(data: bytes, z: int, e: int, limit: int = 96) -> "str | None":
+    """The first length-prefixed printable-ASCII run in `[z+9, z+9+limit)`, or None.
+
+    The workhorse behind the readers below. A `u32` length followed by that many printable bytes
+    is how Pro Tools writes every name in this format, and a name it wrote is the one kind of
+    field the corpus can decode without the application (§5c)."""
+    q = z + 9
+    while q + 4 < min(e, z + 9 + limit):
+        n = int.from_bytes(data[q : q + 4], "little")
+        if 3 <= n <= 64 and q + 4 + n <= e:
+            b = data[q + 4 : q + 4 + n]
+            if all(0x20 <= x < 0x7F for x in b):
+                return _decode_name(b)
+        q += 1
+    return None
+
+
+def session_product(data: bytes) -> "str | None":
+    """The Pro Tools EDITION that wrote this session, e.g. `Pro Tools Studio`, `Pro Tools HD`,
+    `Pro Tools Ultimate`.
+
+    Read from the length-prefixed string in the top-level `0x0003` header — present in 90/90
+    sessions measured. This is the block `core.parse_version` reads its version number from, and
+    the edition is why that number's meaning varies: a version field is only interpretable
+    alongside the product that wrote it.
+
+    It also predicts structure. Nine block types (`0x4808`, `0x4820`, `0x4824`, `0x4826`,
+    `0x4828`, `0x4829`, `0x4834`, `0x4501`, `0x2567`) appear only in `Pro Tools Studio` sessions,
+    so this is the field to branch on when synthesizing for a specific edition."""
+    for z, e, c in _size_driven_blocks(data):
+        if c == 0x0003:
+            return _first_prefixed_string(data, z, e)
+    return None
+
+
+def volumes(data: bytes) -> "list[str]":
+    """Every disk/VOLUME name the session references — `Macintosh HD`, an external SSD, etc.
+
+    From the `0x0F3C` records (34/34 instances carried a name when measured). Nothing else in
+    this format names a volume, which is also why these blocks differ more between machines than
+    almost anything else in a session."""
+    out: "list[str]" = []
+    for z, e, c in _size_driven_blocks(data):
+        if c != 0x0F3C:
+            continue
+        nm = _first_prefixed_string(data, z, e)
+        if nm and nm not in out:
+            out.append(nm)
+    return out
+
+
+def midi_devices(data: bytes) -> "list[tuple[str, str]]":
+    """The session's MIDI devices as `(name, kind)`, kind being `"input"` or `"port"`.
+
+    `0x208C` is a NAMED-DEVICE record, and it is used by **two different lists** — a distinction
+    worth keeping, because conflating them mixes hardware you play with destinations you send to:
+
+    | parent | kind | measured | examples |
+    |---|---|---|---|
+    | `0x206F` | `input` | 11 | `Alesis Vi61`, `OXYGEN 8` — physical controllers |
+    | `0x2086` | `port` | 407 | `Stylus RMX 1`, `Blue Cat's PatchWork Synth 1`, `Network, M1 Mac` |
+
+    The `input` list is the one that reads as a constant in most corpora: it is EMPTY in all but
+    26 of 1,532 sessions, which is why `0x206F`'s payload was long recorded as an invariant
+    sentinel (`u16` form, `u16` device count, then one `0x208C` per device). `0x2086` itself hangs
+    off `0x2050` or `0x2006`.
+
+    Names are returned in file order, duplicates included — a session legitimately lists the same
+    port more than once."""
+    kinds = {0x206F: "input", 0x2086: "port"}
+    bl = sorted(_size_driven_blocks(data))
+    out: "list[tuple[str, str]]" = []
+    stack: "list[tuple[int, int, int]]" = []
+    for z, e, c in bl:
+        while stack and stack[-1][1] <= z:
+            stack.pop()
+        if c == 0x208C:
+            kind = kinds.get(stack[-1][2]) if stack else None
+            if kind:
+                nm = _first_prefixed_string(data, z, e)
+                if nm:
+                    out.append((nm, kind))
+        stack.append((z, e, c))
+    return out
+
+
 def session_sample_rate(data: bytes) -> int:
     """The session sample rate in Hz, from the `0x1028` INFO block (`u32` at block +11).
     PT-corpus-confirmed across all 26 sessions (44100 / 48000 / 96000)."""
