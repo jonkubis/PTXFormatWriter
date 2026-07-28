@@ -3,9 +3,14 @@
 Sessions are built by growing and splicing byte-exact content from known-good control
 sessions — the approach Pro Tools itself round-trips cleanly. High-level surface:
 
-- ``ptxformatwriter.workbench`` — the curated session-construction toolkit: add/rename audio &
-  MIDI clips, tempo/meter/marker maps, a click track, track names, and from-scratch
-  mono/stereo/mixed synthesis (all re-exported here for ``import ptxformatwriter as ptx``).
+- ``ptxformatwriter.workbench`` — the curated toolkit, re-exported here for
+  ``import ptxformatwriter as ptx``. Two halves:
+  **construct/edit** — add/rename audio & MIDI clips, tempo/meter/marker maps, a click track,
+  track names, and from-scratch mono/stereo/mixed synthesis;
+  **read/inspect** — ``session_info`` for a whole-session snapshot, plus ``clips``,
+  ``placement_lanes`` (audio *and* MIDI *and* video), ``markers``, ``region_names``,
+  ``tempo_map``, ``meter_map``, ``session_product``, ``volumes``, ``midi_devices`` and
+  ``validate_pt_invariants``.
 - ``ptxformatwriter.wavecache`` — generate Pro Tools waveform-overview caches (``WaveCache.wfm``)
   so sessions open with waveforms drawn.
 - ``ptxformatwriter.donorpack`` — bundle the donors a build needs into one regenerable file.

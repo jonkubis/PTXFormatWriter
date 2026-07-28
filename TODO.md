@@ -4990,3 +4990,30 @@ doing every time a reader assigns a KIND to something, because the kind is the p
 trust without re-deriving.
 
 233 tests green.
+
+## THE ENTIRE READ LAYER WAS MISSING FROM THE PUBLIC API
+Checking whether today's new readers reached the public surface turned up something bigger:
+**none of the read layer was exported — not the new functions, and not the long-standing ones
+either.** `clips`, `markers`, `tempo_map`, `meter_map`, `region_names`, `validate_pt_invariants`
+were all reachable only as `ptxformatwriter.body_synth.<name>`.
+
+The package docstring described workbench as "the curated session-construction toolkit", and
+that was literally accurate: construction was curated and exported, INSPECTION was not. Half the
+reimplementation -- the half that reads an arbitrary session and tells you what is in it -- was
+effectively private.
+
+FIXED: 22 readers now imported and exported by `workbench`, so they reach `ptx.<name>`:
+
+    session_info, session_product, session_sample_rate, session_bit_depth, session_start_bar,
+    clips, clip_lanes, clip_names, placement_lanes, playlist_names, track_playlists,
+    region_list, region_names, markers, tempo_map, meter_map, base_tempo, base_meter,
+    volumes, midi_devices, validate, validate_pt_invariants
+
+`ptx.__all__` 82 -> 104, every export resolves, 233 tests green. The package docstring now
+describes both halves instead of one.
+
+WHY THIS MATTERED MORE THAN IT LOOKED: an API surface is part of the reimplementation, not
+decoration. A caller following the package docstring would have concluded the library can BUILD
+sessions but not INSPECT them -- which is wrong, and has been wrong for as long as the read layer
+has existed. The test suite never caught it because the tests import from `body_synth` directly.
+**Tests that import internals cannot detect a missing public export.**
