@@ -5770,3 +5770,60 @@ containing `fela`" — and `com.avid.aax.fela.2sola` is in almost every session,
 ubiquitous Avid plug-in rather than Elastic Audio use. Any conclusion resting on it would have been
 "session has plug-ins" under a different name. None did, but only by luck — the overlap matrix is
 now the check that would have caught it deliberately.
+
+## 2026-07-27/28 — the EDIT layer was private too, and clip_positions had a live index bug
+
+Fixed the reader exports earlier today and never checked the editors. **13 of 30 session-mutating
+functions were not on the public surface**, including the flagship in-place primitives:
+
+    duplicate_track  remove_track  remove_clip  move_clip  replace_clip_region
+    replace_tempo_map  replace_meter_map  set_region_length  duplicate_region
+    retarget_audio_file  duplicate_audio_file  set_waveform_view
+
+The project's stated goal is surgically editing arbitrary existing sessions, and `duplicate_track`
+was reachable only as `ptxformatwriter.body_synth.duplicate_track`. 13 now exported (2 kept
+internal: `grow_one_midi_track`, `sync_marker_playlist_rows`). `ptx.__all__` 107 -> 119.
+
+New test `test_no_session_mutating_function_is_accidentally_private` guards the CLASS, not the
+list: any `body_synth` function whose signature is `(data: bytes, ...) -> bytes` must be exported or
+named in an INTERNAL set with a reason. A new editor that nobody exports now fails a test.
+
+### A live index bug in clip_positions / set_clip_position
+
+Both used `flat_blocks`, the scan parser known to undercount. **Measured on 402 corpus sessions it
+misses one 0x104F in `Tree Lighting 2019_R5` and three in `DWTS PT 2603 h.bak.006`.**
+
+That is not cosmetic: `set_clip_position(lanes=(i,))` indexes POSITIONALLY into that list, so a
+placement missing from the middle shifts every later index and the caller silently moves **the wrong
+clip**, with nothing in the result to show it. Same defect class as the 0x251A lane count.
+
+FIXED: both switched to `_size_driven_blocks`. Verified 402/402 count agreement, and an identity
+rewrite (write every placement back its own value) is **byte-exact on all 402**.
+
+### I wrote a function that already existed
+
+I audited the edit surface, saw no `move_clip`, and wrote one — with lane+index addressing,
+size-neutral, tests and all. **`move_clip` already existed at line 5188**, along with
+`replace_clip_region`; my definition was silently shadowed by the later one, and the first sign was
+a test failing with an error message my code could not produce.
+
+Deleted mine. What the existing pair actually needed was not writing but two fixes:
+
+  * **the export** (neither was public), and
+  * **generalising `_locate_placement_104f` to all three chains** — it was hardwired to
+    `0x1052`/`0x1050`, so `move_clip` and `replace_clip_region` refused every MIDI and video clip
+    with a message naming the audio type. Same fix `remove_clip` needed. Verified by bite: with the
+    locator reverted to audio-only a MIDI move is refused; with the fix it succeeds, size-neutral,
+    and the position reads back.
+
+The lesson is cheap to state and I paid for it anyway: **grep before you write.** The audit I ran
+listed `move_clip` as unexported, which was true — I read it as absent.
+
+### Two more tests of mine that checked the wrong text
+
+`test_clip_positions_uses_the_size_driven_walk` searched `inspect.getsource` for `flat_blocks` and
+found it in my own COMMENT explaining why it is not used. Same class as the `audio_file_count`
+docstring case earlier. Both now parse the AST and compare `ast.unparse` output, which drops
+comments and docstrings.
+
+265 tests green.

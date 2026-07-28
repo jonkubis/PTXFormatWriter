@@ -3763,3 +3763,89 @@ class AudioFileTableTests(unittest.TestCase):
         self.assertIs(ptx.audio_file_count, BS.audio_file_count)
         for n in ("audio_files", "audio_file_count"):
             self.assertIn(n, ptx.__all__)
+
+
+class MoveClipTests(unittest.TestCase):
+    """`move_clip` addresses a clip the way the rest of the edit surface does: lane + index.
+
+    It already EXISTED and was simply not exported — I wrote a second one before finding it, and
+    the duplicate was shadowed by the original. What it needed was not writing but two fixes: the
+    export, and generalising `_locate_placement_104f` to all three placement chains (it was
+    hardwired to 0x1052/0x1050, so `move_clip` and `replace_clip_region` refused every MIDI and
+    video clip with a message naming the audio type).
+
+    `set_clip_position` is the older, cruder relative: PT-confirmed, but it indexes placements
+    GLOBALLY across every 0x104F in the session, so on a 2,000-placement session a caller cannot
+    tell which index is which clip.
+    """
+
+    def _lane(self, kind=None):
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            for z, nm, n, k in BS.placement_lanes(d):
+                if kind is None or k == kind:
+                    return d, z, n
+        self.skipTest("no control session has a %s placement" % (kind or "any"))
+
+    def test_moving_a_clip_is_size_neutral(self):
+        d, z, _n = self._lane()
+        out = BS.move_clip(d, z, 0, 123_456)
+        self.assertEqual(len(out), len(d), "the timeline start is one field; nothing is spliced")
+
+    def test_the_position_reads_back(self):
+        d, z, _n = self._lane()
+        out = BS.move_clip(d, z, 0, 987_654)
+        self.assertIn(987_654, BS.clip_positions(out))
+
+    def test_moving_to_its_own_position_is_byte_exact(self):
+        """The identity property. If a no-op move changes any byte, the write is not confined."""
+        d, z, _n = self._lane()
+        bl = BS._size_driven_blocks(d)
+        lane = next(b for b in bl if b[0] == z)
+        wrap = next(ch[1] for ch in BS._PLACEMENT_CHAINS if ch[0] == lane[2])
+        pz, pe = sorted((a, b) for a, b, c in bl if c == wrap and z < a < lane[1])[0]
+        tgt = [a for a, b, c in bl if c == 0x104F and pz < a and b <= pe][0]
+        import struct
+        here = struct.unpack_from("<Q", d, tgt + 16)[0]
+        self.assertEqual(BS.move_clip(d, z, 0, here), d)
+
+    def test_only_the_addressed_clip_moves(self):
+        d, z, n = self._lane()
+        if n < 2:
+            self.skipTest("need a lane with two clips")
+        before = BS.clip_positions(d)
+        out = BS.move_clip(d, z, 0, 555_555)
+        after = BS.clip_positions(out)
+        self.assertEqual(len(before), len(after))
+        moved = sum(1 for a, b in zip(before, after) if a != b)
+        self.assertLessEqual(moved, 2, "a stereo clip has two lanes; nothing else may move")
+
+    def test_a_non_holder_zmark_is_refused(self):
+        d, _z, _n = self._lane()
+        holders = {h for h, _w, _k in BS._PLACEMENT_CHAINS}
+        bad = next(a for a, _b, c in BS._size_driven_blocks(d) if a >= 31 and c not in holders)
+        with self.assertRaises(ValueError) as cm:
+            BS.move_clip(d, bad, 0, 0)
+        self.assertIn("not a placement holder", str(cm.exception))
+
+    def test_clip_positions_uses_the_size_driven_walk(self):
+        """It used `flat_blocks`, which UNDERCOUNTS: measured on 402 corpus sessions it missed one
+        0x104F in one session and three in another. `set_clip_position(lanes=...)` indexes
+        positionally into that list, so a missing placement shifts every later index and the caller
+        silently moves the wrong clip."""
+        import ast, inspect
+        for fn in (BS.clip_positions, BS.set_clip_position):
+            tree = ast.parse(inspect.getsource(fn).lstrip())
+            f = tree.body[0]
+            if (f.body and isinstance(f.body[0], ast.Expr)
+                    and isinstance(f.body[0].value, ast.Constant)):
+                f.body = f.body[1:]                 # drop the docstring
+            body = ast.unparse(f)                   # ast.unparse also drops comments
+            self.assertIn("_size_driven_blocks", body)
+            self.assertNotIn("flat_blocks", body,
+                             "the scan parser undercounts and these index positionally into it")

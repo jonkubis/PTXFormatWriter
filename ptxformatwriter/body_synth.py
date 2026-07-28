@@ -1827,10 +1827,9 @@ def clip_positions(data: bytes) -> "list[int]":
     in body order. A single stereo clip has two (lane .L, lane .R) with equal values."""
     import struct
     out = []
-    for b in flat_blocks(parse(data)):
-        if b.content_type == 0x104F:
-            pos = b.offset + 9  # full[16] = (offset-7)+16 = offset+9
-            out.append(struct.unpack_from("<Q", data, pos)[0])
+    for z, _e, c in _size_driven_blocks(data):
+        if c == 0x104F and z >= 31:
+            out.append(struct.unpack_from("<Q", data, z + 16)[0])
     return out
 
 
@@ -1852,12 +1851,16 @@ def set_clip_position(data: bytes, position_file_samples: int,
     tuple of lane indices (body order) to move one clip's lane-pair. Returns unxored bytes."""
     import struct
     out = bytearray(data)
-    blocks = [b for b in flat_blocks(parse(bytes(out))) if b.content_type == 0x104F]
+    # SIZE-DRIVEN, not `flat_blocks`. The scan parser UNDERCOUNTS on real sessions -- measured on
+    # 402 corpus files, it misses one 0x104F in `Tree Lighting 2019_R5` and three in
+    # `DWTS PT 2603 h.bak.006` -- and `lanes` indexes positionally into this very list. A placement
+    # missing from the middle shifts every later index, so the caller silently moves THE WRONG
+    # CLIP, with nothing in the result to show it. Same defect class as the 0x251A lane count.
+    zs = [z for z, _e, c in _size_driven_blocks(data) if c == 0x104F and z >= 31]
     field = struct.pack("<Q", int(position_file_samples))
-    sel = range(len(blocks)) if lanes is None else lanes
+    sel = range(len(zs)) if lanes is None else lanes
     for i in sel:
-        pos = blocks[i].offset + 9
-        out[pos:pos + 8] = field
+        out[zs[i] + 16 : zs[i] + 24] = field
     return bytes(out)
 
 
@@ -5116,11 +5119,22 @@ def add_clip(data: bytes, lane_zmark: int, position: int,
 def _locate_placement_104f(data: bytes, lane_zmark: int, clip_index: int) -> int:
     """The 0x104F zmark of the `clip_index`-th clip in the lane at `lane_zmark`."""
     bl = _size_driven_blocks(data)
-    lane_end = next((e for z, e, c in bl if z == lane_zmark and c == 0x1052), None)
-    if lane_end is None:
-        raise ValueError(f"no 0x1052 lane at zmark {lane_zmark}")
+    lane = next((b for b in bl if b[0] == lane_zmark), None)
+    if lane is None:
+        raise ValueError(f"no block at zmark {lane_zmark}")
+    # ALL THREE CHAINS, chosen from the holder's own content type -- the same generalisation
+    # `remove_clip` needed. Hardwiring 0x1052/0x1050 made `move_clip` and `replace_clip_region`
+    # refuse every MIDI and video clip with a message naming the audio type.
+    chain = next((ch for ch in _PLACEMENT_CHAINS if ch[0] == lane[2]), None)
+    if chain is None:
+        holders = ", ".join("0x%04x (%s)" % (h, k) for h, _w, k in _PLACEMENT_CHAINS)
+        raise ValueError(
+            f"block at zmark {lane_zmark} is 0x{lane[2]:04x}, not a placement holder; "
+            f"expected one of {holders}"
+        )
+    wrapper_ct, lane_end = chain[1], lane[1]
     placements = sorted(
-        (pz, pe) for pz, pe, c in bl if c == 0x1050 and lane_zmark < pz < lane_end
+        (pz, pe) for pz, pe, c in bl if c == wrapper_ct and lane_zmark < pz < lane_end
     )
     if not 0 <= clip_index < len(placements):
         raise ValueError(f"clip_index {clip_index} out of range ({len(placements)} clips)")

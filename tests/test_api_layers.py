@@ -50,6 +50,53 @@ class PublicSurfaceTests(unittest.TestCase):
         "validate", "validate_pt_invariants",
     )
 
+    #: The in-place EDIT layer. The project's stated goal is surgically editing arbitrary existing
+    #: sessions, and until 2026-07-27 `duplicate_track`, `remove_track`, `remove_clip`,
+    #: `replace_tempo_map` and `replace_meter_map` were reachable only as
+    #: `ptxformatwriter.body_synth.<name>` -- the flagship primitives, private. The reader gap was
+    #: fixed earlier the same day and the editors were not checked, which is why this list exists.
+    EDIT_LAYER = (
+        "duplicate_track", "remove_track", "remove_clip", "move_clip",
+        "replace_tempo_map", "replace_meter_map",
+        "set_region_length", "duplicate_region",
+        "retarget_audio_file", "duplicate_audio_file", "set_waveform_view",
+    )
+
+    def test_every_editor_is_reachable_from_the_package_root(self):
+        import ptxformatwriter as ptx
+        from ptxformatwriter import body_synth
+        missing = [n for n in self.EDIT_LAYER if not hasattr(ptx, n)]
+        self.assertEqual(missing, [], f"not exported from the package root: {missing}")
+        undeclared = [n for n in self.EDIT_LAYER if n not in ptx.__all__]
+        self.assertEqual(undeclared, [], f"missing from __all__: {undeclared}")
+        for n in self.EDIT_LAYER:
+            self.assertIs(getattr(ptx, n), getattr(body_synth, n))
+
+    def test_no_session_mutating_function_is_accidentally_private(self):
+        """A guard against the whole class, not just today's list.
+
+        Any `body_synth` function whose signature is `(data: bytes, ...) -> bytes` edits a session
+        and is public API unless deliberately internal. Listing the exceptions here means a NEW
+        editor that nobody exports fails this test instead of shipping invisible.
+        """
+        import inspect
+        import ptxformatwriter as ptx
+        from ptxformatwriter import body_synth
+        INTERNAL = {"grow_one_midi_track", "sync_marker_playlist_rows"}
+        mutators = []
+        for name, fn in vars(body_synth).items():
+            if name.startswith("_") or not inspect.isfunction(fn):
+                continue
+            if fn.__module__ != body_synth.__name__:
+                continue
+            sig = inspect.getsource(fn).split("\n")[0]
+            if "data: bytes" in sig and "-> bytes" in sig:
+                mutators.append(name)
+        unexported = sorted(set(mutators) - INTERNAL - set(ptx.__all__))
+        self.assertEqual(unexported, [],
+                         f"session-mutating but not public: {unexported} "
+                         f"(add to workbench, or to INTERNAL here with a reason)")
+
     def test_every_reader_is_reachable_from_the_package_root(self):
         import ptxformatwriter as ptx
         from ptxformatwriter import body_synth
