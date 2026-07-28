@@ -5017,3 +5017,79 @@ decoration. A caller following the package docstring would have concluded the li
 sessions but not INSPECT them -- which is wrong, and has been wrong for as long as the read layer
 has existed. The test suite never caught it because the tests import from `body_synth` directly.
 **Tests that import internals cannot detect a missing public export.**
+
+---
+
+## 2026-07-27 — the coverage tracker's "work queue" was 13/14 garbage
+
+`gen_coverage.py` applied `is_phantom()` **only to UNDOCUMENTED types**. A phantom that happened
+to be *mentioned* in the spec skipped the filter entirely and was reported as outstanding work.
+
+That is self-defeating here, because **a phantom's mention is usually the spec explaining it as a
+phantom.** The sentence deriving `0x0c00` from `256×12` is the very reason `0x0c00` counted as
+"documented", and therefore the very reason it appeared on the list of things left to document.
+
+Of the 14 types in the queue, **13 are phantoms and 1 (`0x2557`) is real.**
+
+FIXED: `is_phantom` hoisted above the queue computation, and the tracker now splits the
+mention-only list into phantoms and real types, reporting the real ones as the queue.
+
+### Each phantom traced to the byte that produced it
+
+Filters say *that* something is noise; they do not say *why*, and the missing "why" let a wrong
+explanation stand: signature 3 claimed `0x0024`/`0x0033`/`0x0034`/`0x001c` came from the
+`2A 00 00 00` GUID tag. They do not. All four are the **`ZY` in a track named `BASS CAB FUZZY`** —
+one phantom, not four, in one session saved repeatedly.
+
+The rest, all verified rather than asserted:
+
+  * `0x2a00` (38 sessions) — the last letter of a name ending in `Z`. **38/38** confirmed: the
+    zmark is the final byte of a length-prefixed string and `d[z+8] == 0x2A`. Two names produce
+    every instance in the corpus: `DRUMZ` (31) and `ST PIZZ` (7).
+  * `0x0c00` (34) — the `Z` in `iZotope`, plus a 12-byte string length.
+  * `0x1900` (25) — a `Z` in an Antares Auto-Tune descriptor, plus the 25-byte length of
+    `com.Antares.AutoTune81AAX`.
+  * `0x0700` (1) — the 6th byte of a GUID, plus the 7-byte length of `Audio 6`.
+  * `0x2757` (1) — the low byte of the file-descriptor COUNT (346) at the head of the `0x1004`
+    payload. Proven: 347 children tile that payload exactly, and 346 of them are `0x1003`.
+
+**A phantom's type number is a function of the user's text.** `0x2a00` exists because somebody
+named a track `DRUMZ`. That is the deepest reason an unfiltered coverage number is meaningless:
+it partly measures the corpus's naming habits.
+
+## 2026-07-27 — REFUTED: "a container's children tile its payload exactly"
+
+The `0x1004` result made this look like a general law, and a general law would have been worth a
+lot: **phantoms could be eliminated structurally instead of filtered heuristically.**
+
+They cannot. Only **28.5%** of container instances have an empty trailer. `0x261C` carries a
+**542-byte trailer** after its single child. A walk that descends only where the payload tiles
+exactly drops **80% of blocks** and **3,360 master-index targets**, and of the 59 types it
+eliminates **0 are phantoms** — it deletes only real documented types.
+
+**The first measurement said the opposite** ("83 of 88 container types tile at a constant `h`").
+Two artifacts, both easy to repeat:
+
+  1. **A degenerate solution that always succeeds.** `h = payload_length` tiles trivially with zero
+     children, so the search never really failed — and for fixed-size blocks that meaningless `h`
+     is a per-type constant, which got counted as confirmation. Fix: require ≥ 1 child.
+  2. **A cap masquerading as a result.** The search stopped at `h ≤ 96`, so "never tiles" only
+     meant "payload longer than 96 bytes".
+
+Both inflated the same conclusion. It survived exactly as long as it was not asked to do any work.
+
+### What survives — the real container law
+
+    5A | block_type u16 | size u32 | content_type u16 | h header bytes | children… | trailer
+
+  * first child at a per-type CONSTANT offset `h` — **119/129 container types**
+  * trailer a per-type CONSTANT length — **114/129**
+  * the 10 exceptions are exactly the types carrying a VARIABLE-LENGTH NAME in the header
+    (`0x251A` 55/56/57, `0x2619` 91/92/93, `0x2602`, `0x2553`, `0x1041`, `0x202A`, `0x2633`) —
+    the rule is parameterised by name length, not violated.
+
+NOT acted on yet, deliberately: this `h` table would allow a stricter child enumeration (only
+blocks on the chain from `h` are real children). `_size_driven_blocks` is load-bearing for every
+PT-confirmed edit primitive, and I have just been wrong once today about a walk change. It is
+recorded as measured data, to be adopted behind the same before/after corpus diff that caught the
+`core.parsestring` regression.

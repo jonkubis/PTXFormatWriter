@@ -4289,9 +4289,42 @@ region records (`0x2628`/`0x2629`) is suggestive and nothing more.
 **`0x255c`** (4 blocks / 4 sessions, sizes 563–572) and **`0x2557`** (1 block, size 56) both sit
 under **`0x2551`**. Two children of one sparse container; n is far too small to say more.
 
-**`0x2757`** — a single 88,583-byte "block" under `0x1004`, the file-descriptor list. Almost
-certainly a phantom framed inside filename data rather than a type, but it survives all three
-phantom signatures, so it is listed honestly rather than filtered by assertion. n=1.
+### 0x2557 — a real type, n=1, purpose UNKNOWN
+
+Rarity had left this filed alongside `0x2757`, which turned out to be noise, so the two were worth
+separating. `0x2557` is **real**. Measured on its single corpus instance
+(`20230208 GENE MARVIN GAYE.ptx` @ 961078):
+
+- well framed — block_type `0x0001`, declared size 49, span 56;
+- parent **`0x2551`**, alongside its one sibling type `0x255C`;
+- children are the real types **`0x2552`** and **`0x2011`**;
+- its span ends **exactly** on the zmark of a real **`0x258B`** — a genuine sibling, not a byte
+  that happens to follow.
+
+A phantom is a false `0x5A` inside somebody else's payload; it does not land on real boundaries at
+*both* ends with real children in between. Three independent framing facts agree here, which is as
+strong as n=1 can be made.
+
+**Purpose UNKNOWN and not settleable from this corpus** — one instance cannot distinguish a field
+layout from a coincidence. It needs a session that uses whatever feature emits it.
+
+**`0x2757` — NOT A TYPE. Resolved 2026-07-27, and it documents the `0x1004` payload header.**
+
+The "single 88,583-byte block under `0x1004`" is the first byte of a `u32` at the very head of the
+file-descriptor list's payload. Measured on the one session that produced it
+(`DWTS PT 2603 a plus.bak.012`):
+
+- the phantom zmark sits at **exactly** `parent_z + 9`, i.e. the first payload byte of the `0x1004`;
+- the `u32` there is **346**;
+- walking blocks from `parent_z + 13` — four bytes on, past that `u32` — yields **347 children that
+  tile the payload exactly to the byte** (the chain ends on 145383, the parent's end, with nothing
+  left over);
+- of those 347, **exactly 346 are `0x1003`** file descriptors, plus one `0x103A`.
+
+So the `u32` is the **file-descriptor count**, and its low byte is `0x5A` only because this session
+happens to hold 346 files (`0x0000015A`). A session with 345 or 347 files produces no phantom at
+all, which is why n=1. This is the only phantom in the corpus whose existence is a property of a
+*count* rather than of text.
 
 #### The three phantom signatures, and why the list is 5 and not 171
 
@@ -4304,12 +4337,95 @@ before it:
    `0x2616` view blobs, `0x1003`, `0x1017`. Catches the bulk.
 2. **Low byte `0x00`, never index-referenced** — the `256 × k` arithmetic of a string LENGTH or
    first letter read as a type: `0x1600` = 256×22, `0x0c00` = 256×12, `0x4100` = 256×`'A'`.
-3. **Declared size 8, parent `0x1014`** — the 8-byte identity id following the `2A 00 00 00` tag in
-   a track-list entry, whose last byte lands where a size field would be. Catches `0x0024`,
-   `0x0033`, `0x0034`, `0x001c`, each in 1–2 sessions.
+3. **Declared size 8, parent `0x1014`** — an 8-byte field in a track-list entry whose last byte
+   lands where a size field would be. Catches `0x0024`, `0x0033`, `0x0034`, `0x001c`, each in 1–2
+   sessions. *(The cause was mis-stated here until 2026-07-27; see the catalogue below.)*
 
 Reporting the unfiltered 171 would hand the next reader a work list that is mostly garbage — the
 same error as the FALSE `100%` this project's tracker once carried, pointing the other way.
+
+#### Phantom catalogue — every remaining phantom traced to the byte that produced it
+
+The three signatures above are *filters*: they say a type is noise without saying why. That is one
+assertion short of proof, and it let a wrong explanation sit in item 3 above for weeks. Each phantom
+that had survived into the coverage tracker's "work queue" was therefore dissected to the byte.
+
+**Every one is caused by a `0x5A` in DATA, and in most cases the data is a name the user typed.**
+
+| phantom | sessions | the actual cause |
+|---|---:|---|
+| `0x2a00` | 38 | the **final letter of a name that ends in `Z`**, inside a `0x2619`. The `2A 00 00 00` GUID tag that follows every name supplies the content-type bytes 8 on. Verified on **38/38**: in every instance the zmark is the last byte of a length-prefixed string and `d[z+8] == 0x2A`. The corpus contains exactly two such names — **`DRUMZ`** (31 sessions) and **`ST PIZZ`** (7). |
+| `0x0c00` | 34 | the `Z` in **`iZotope`**, inside a `0x1017` plug-in descriptor, plus the `u32` length **12** of the string 8 bytes on. This is the `256×12` the filter above derives arithmetically — same number, now with a cause. |
+| `0x1900` | 25 | a `Z` in an **Antares Auto-Tune** descriptor inside `0x1017`, plus the `u32` length **25** of `com.Antares.AutoTune81AAX`. |
+| `0x0024`, `0x0033`, `0x0034`, `0x001c` | 1–2 each | **NOT the GUID tag.** All four are the `ZY` in a track named **`BASS CAB FUZZY`** in a `0x1014` entry: the second `Z` is the zmark and `Y` (`0x59`) becomes the block_type. They are **one** phantom, not four — the differing content byte is a field six bytes past the name that changes between `.bak` generations of the same session. |
+| `0x0700` | 1 | the **sixth byte of an 8-byte GUID** happening to be `0x5A`, plus the `u32` length **7** of the following track name `Audio 6`. |
+| `0x2002`, `0x0800`, `0xe196` | 31 each | curve/automation data inside `0x1038` plug-in state. **31/31 nested in a leaf** — signature 1, no further explanation needed or possible. |
+| `0x0000` | 19 | mixed; mostly runs of zero bytes inside `0x2028`, where a lone `0x5A` in a preceding field frames a "block" of zeros. |
+| `0x2757` | 1 | the low byte of the **file-descriptor count** `346` at the head of the `0x1004` payload — see that entry above. |
+
+Two things follow that are worth more than the catalogue itself:
+
+1. **A phantom's *type number* is a function of the user's text.** `0x2a00` exists in this corpus
+   because somebody named a track `DRUMZ`. Rename it and the type disappears; name a track `JAZZ`
+   and it reappears. A coverage number computed from an unfiltered walk is therefore partly a
+   measure of the corpus's *naming habits*, which is the deepest reason the FALSE `100%` was
+   possible at all.
+2. **Phantom counts are not independent observations.** `0x0024`/`0x0033`/`0x0034`/`0x001c` looked
+   like four rare types in "1–2 sessions each"; they are one track name in one session saved
+   repeatedly. Any per-type rarity statistic over unfiltered types inherits this inflation.
+
+#### Container layout — header, contiguous children, trailer
+
+The `0x1004` result above (a count, then children tiling the payload to the byte) looked like it
+might be the general law, and a general law would be worth a great deal: **if children exactly
+tiled every payload, phantoms could be eliminated structurally instead of filtered heuristically.**
+Measured over 60 sessions and 44,870 container instances, the true shape is weaker:
+
+```
+5A | block_type u16 | size u32 | content_type u16 | h header bytes | children… | trailer
+   \___________________ 9-byte block header ____/
+```
+
+- the **first child sits at a per-type constant offset `h`** past the 9-byte header — **119 of 129
+  container types**;
+- the **trailer is a per-type constant length** — **114 of 129 types**;
+- the 10 types whose `h` varies are exactly the ones carrying a **variable-length name in the
+  header**: `0x251A` (55/56/57), `0x2619` (91/92/93), `0x2602` (53/57/60), `0x2553`, `0x1041`,
+  `0x202A`, `0x2633`. The variation is the name length; the rule is not violated, it is
+  parameterised.
+
+Measured constants for the commonest containers (`h`, trailer):
+
+| type | `h` | trailer | | type | `h` | trailer |
+|---|---:|---:|---|---|---:|---:|
+| `0x2038` | 0 | 1 | | `0x2104` | 0 | 28 |
+| `0x2625` | 0 | 0 | | `0x2589` | 6 | 232 |
+| `0x203b` | 0 | 4 | | `0x2601` | 4 | 0 |
+| `0x260c` | 1 | 13 | | `0x2552` | 2 | 2 |
+| `0x2627` | 2 | 0 | | `0x203a` | 0 | 2 |
+| `0x102d` | 0 | 7 | | `0x2581` | 37 | 218 |
+
+> **REFUTED 2026-07-27 — "children tile the payload exactly".** They do not. **Only 28.5%** of
+> container instances have an empty trailer; `0x261C` carries a **542-byte trailer** after its
+> single child, and `0x261B` carries ~1,144. A walk that descends only where the payload tiles
+> exactly drops **80% of all blocks** and **3,360 master-index targets**, and — the decisive
+> number — of the 59 types it eliminates, **0 are phantoms**: it deletes only real, documented
+> types (`0x2037`, `0x2626`, `0x251A`, `0x2015`, …). There is no phantom-free walk here.
+>
+> The first version of this measurement appeared to support the strong law (*"83 of 88 container
+> types tile at a constant `h`"*). Two artifacts produced that number, and both are worth naming
+> because they are easy to repeat:
+>
+> - **A degenerate solution that always succeeds.** `h = payload_length` tiles trivially, with zero
+>   children. The search therefore never genuinely failed, and for fixed-size blocks that
+>   meaningless `h` is a per-type constant — so it was counted as confirmation. The fix is to
+>   require **≥ 1 child**.
+> - **A cap masquerading as a result.** The search stopped at `h ≤ 96`, so *"never tiles"* only ever
+>   meant *"payload longer than 96 bytes"*, not *"no header length works"*.
+>
+> Both inflated the same conclusion, and the strong law survived only until it was asked to do
+> real work. The weaker law above is what remains after removing them, and it is measured with the
+> degenerate solution rejected.
 
 ### 0x2612 — I/O routing-path entry (single output/bus signal path)
 

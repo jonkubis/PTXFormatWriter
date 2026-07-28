@@ -24,38 +24,58 @@ assembly, not Pro Tools sessions. Different `.ptx` entirely.
 
 **323/482 content-types have a spec entry = 67.0%**, covering 99.93% of block instances.
 
+## The strongest form of the coverage claim — measured per INSTANCE
+
+The phantom signatures classify **types**, on a ≥50% rule. But phantom-ness is a property
+of an **instance**: a type can be perfectly real *and* be manufactured as noise inside a
+leaf payload, and a type-level rule then writes its real instances off with the noise.
+
+That is not hypothetical. The signatures fire on **14 types that have their own spec
+entry**, including `0x1000` (226242 instances), `0x1001` (80991) and `0x1033` (80621). Read
+type-level, those would be "phantoms"; they are nothing of the kind.
+
+So the same question is asked per instance instead. An instance is structural noise if it
+is nested inside a leaf payload, or is the size-8 field under a `0x1014`, or is a count
+field at a payload head (signatures 1, 3, 4 — all per-instance). Signature 2 is
+irreducibly type-level and zeroes its type outright.
+
+> **302 of the 482 observed types have at least one structurally clean instance,
+> and of those, 0 are undocumented.**
+
+The remaining 180 types have **no** clean instance anywhere in 832 sessions — they exist
+only inside other blocks' payloads. This is a considerably harder claim than the
+type-level one above, and it is the one worth quoting: not *"the leftovers look like
+noise"*, but *"every type with even a single unexplained instance is written down"*.
+
 ## Three standards, not one — mentioned, entered, settled
 
-**309 of the 482 observed content types have their OWN `### ` spec entry.** A further
-**14 are counted as "documented" only because their hex string appears somewhere in
+**310 of the 482 observed content types have their OWN `### ` spec entry.** A further
+**13 are counted as "documented" only because their hex string appears somewhere in
 another type's prose.** That weaker standard is the one this tracker reported alone until
 2026-07-27, and it flatters the result: `0x2000` occurs in **every one of the 832 sessions**,
 always as a TOP-LEVEL block, and has no entry at all — it qualified on four incidental
-mentions. The mention-only list is the honest work queue:
+mentions.
 
-| type | instances | sessions |
-|---|---|---|
-| `0x2a00` | 38 | 38 |
-| `0x0c00` | 34 | 34 |
-| `0x2002` | 31 | 31 |
-| `0x0800` | 31 | 31 |
-| `0xe196` | 31 | 31 |
-| `0x1900` | 25 | 25 |
-| `0x0000` | 67 | 19 |
-| `0x0024` | 2 | 2 |
-| `0x0033` | 2 | 2 |
-| `0x0034` | 2 | 2 |
-| `0x0700` | 1 | 1 |
-| `0x2757` | 1 | 1 |
-| `0x2557` | 1 | 1 |
-| `0x001c` | 1 | 1 |
+But a mention-only list is not yet a work list. Running the same phantom signatures used
+below over it splits the 13 into **13 phantoms** and **0 real types**. Most of the phantoms
+are mentioned *because the spec explains them as phantoms* — the sentence deriving
+`0x0c00` from 256×12 is the very reason `0x0c00` counts as mentioned. Listing those as
+outstanding work is this file's original error wearing a different hat.
+
+**Real types with no entry of their own — the actual queue:**
+
+*(none — every mention-only type is a phantom)*
+
+**Phantoms that were sitting in the queue** (each traced to the byte that produced it in
+the spec's phantom catalogue): `0x2a00`, `0x0c00`, `0x2002`, `0x0800`, `0xe196`, `0x1900`, `0x0000`, `0x0024`, `0x0033`, `0x0034`, `0x0700`, `0x2757`, `0x001c`.
+
 
 ## Described vs settled — two different numbers
 
 **323 types are DESCRIBED** (framing, parent/child, per-session counts, payload layout
 where decodable) and **0 real types are undocumented**.
 
-Of the 196 typed sections in the spec, **53 still say the PURPOSE is unproven** —
+Of the 197 typed sections in the spec, **54 still say the PURPOSE is unproven** —
 `purpose UNKNOWN`, `UNPROVEN`, `INFERRED, not proven`, or `cannot be settled`. That is
 the remaining semantic work, and it is deliberately visible: most of those entries name
 the Pro Tools experiment that would settle them (typically *one session, saved twice,
@@ -83,14 +103,22 @@ fix is to state exactly what was measured and what was not.
 
 `0x5A` is `'Z'` and occurs freely inside leaf payloads and binary id fields, so the
 size-driven walk frames
-noise there. **159 of the 159 undocumented types are phantoms** by one of two measured
-signatures: ≥50%% of instances nested inside a leaf payload (`0x1038` plug-in state,
-`0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`), or a type whose low byte is
+noise there. **159 of the 159 undocumented types are phantoms** by one of FOUR measured
+signatures: ≥50% of instances nested inside a leaf payload (`0x1038` plug-in state,
+`0x2613`/`0x2615`/`0x2616` view blobs, `0x1003`, `0x1017`); a type whose low byte is
 `0x00` that the master index never references — the `256 × k` arithmetic of a string
-LENGTH or first letter being read as a type (`0x1600` = 256×22, `0x0c00` = 256×12).
+LENGTH or first letter being read as a type (`0x1600` = 256×22, `0x0c00` = 256×12); an
+8-byte field under a `0x1014`; or a `u32` COUNT at the head of a container's payload
+whose low byte is `0x5A` (`0x2757`, the only one, is the number 346).
+
+The spec's phantom catalogue goes further and traces each one to the byte that produced
+it — mostly text the user typed: `0x2a00` is the last letter of a track named `DRUMZ`,
+`0x0c00` is the `Z` in `iZotope`. **A phantom's type number is a function of the
+corpus's naming habits**, which is the deepest reason an unfiltered coverage count means
+nothing.
 
 Reporting them as undocumented would hand the next reader a work list that is mostly
-garbage — the same mistake, in the other direction, as the FALSE 100%% this file once
+garbage — the same mistake, in the other direction, as the FALSE 100% this file once
 carried.
 
 **0 content-types remain genuinely undocumented.**
