@@ -5372,3 +5372,41 @@ was slightly wrong and is corrected in the spec.**
 These footprints are COUNT deltas. A type whose BYTES changed while its count held still does not
 appear — exactly what a rename does to the 0x2519 name table. Absence means "count unchanged",
 never "untouched". A byte-level version of this pass is the obvious next instrument.
+
+## 2026-07-27 — byte-level footprints, and the 12 types PT rewrites on every save
+
+Built the byte-level pass I said was the obvious next instrument. Blocks aligned by
+`(content_type, ordinal)` — position is useless, blocks slide — over the same 16 controlled pairs.
+
+Raw result is noisy: a pure rename touches 40+ types. Most of that is not the rename.
+
+**TWELVE TYPES CHANGE ON EVERY CONTROLLED PAIR, whatever the user did:**
+
+    0x1038 0x2015 0x2016 0x2067 0x2613 0x2615 0x2616 0x261B 0x261C 0x261E 0x2624 0x2627
+
+Plug-in state, view blobs, per-track view records. Useful twice: it EXPLAINS the 159 quiet pairs
+(those saves changed only background), and it tells an editor which types are pointless to preserve
+byte-exactly, because PT does not preserve them either.
+
+Subtracting the background:
+
+    markers        n=2   0x2030 0x2077                                      <- method check, correct
+    MIDI clips     n=4   0x1056 0x1057 0x1058 0x2000 0x203A 0x2633 0x2634
+    regions        n=7   (none unique -- shares 0x104F/0x1050/0x1052)
+    rename         n=2   (none unique)
+    audio clips    n=1   0x262F 0x2630                                      <- n=1, NOT evidence
+
+The marker row is the method checking itself: 0x2030/0x2077 are the marker types and they are
+exactly what falls out.
+
+The MIDI row is the useful one. 0x1056/0x1057 are the known chain and 0x2633/0x2634 the MIDI region
+records — the byte pass independently recovers the count-level finding. **0x1058, 0x2000 and 0x203A
+are NEW**: bytes moved in all 4 MIDI pairs and in none of the other 12 controlled pairs.
+
+For **0x2000** that is the first behavioural evidence of ANY kind. It occurs once per session in all
+832, always top-level, and was the type this project's coverage tracker was caught calling
+"documented" on four incidental mentions. Now there is something to say about it: it moves with MIDI
+clips.
+
+Leads at n=4, NOT settled. And stated plainly: at n=1 "changed in every pair" means "changed once",
+which is no evidence; n=2 is weak; only the region (7) and MIDI (4) rows carry weight.

@@ -4452,6 +4452,45 @@ bytes and changes **no** block count at all.
 > minds on reload is precisely the question only PT can answer — but it is now a *specific, named*
 > question instead of a general doubt about the rename path.
 
+**BYTE-level footprints, and the background PT rewrites regardless.** Repeating the same 16
+controlled pairs at byte level — blocks aligned by `(content_type, ordinal)`, since position is
+useless when blocks slide — gives a much wider footprint: a pure rename touches 40+ types. Most of
+that is not the rename.
+
+**Twelve types change on EVERY controlled pair, whatever the user did:**
+
+`0x1038` `0x2015` `0x2016` `0x2067` `0x2613` `0x2615` `0x2616` `0x261B` `0x261C` `0x261E` `0x2624`
+`0x2627`
+
+Plug-in state, the view blobs, and per-track view records. **Pro Tools rewrites these on every save
+no matter what changed**, which is worth knowing twice over: it explains the 159 "quiet" pairs —
+those saves altered only background — and it tells an editor which types are pointless to try to
+preserve byte-exactly, because PT will not preserve them either.
+
+Subtracting that background leaves the discriminating sets:
+
+| observable | n | types touched in every one of ITS pairs and in **no** other observable's |
+|---|---:|---|
+| markers | 2 | `0x2030`, `0x2077` |
+| MIDI clip count | **4** | `0x1056`, `0x1057`, `0x1058`, `0x2000`, `0x203A`, `0x2633`, `0x2634` |
+| region count | 7 | *(none unique — regions share `0x104F`/`0x1050`/`0x1052` with clip edits)* |
+| track rename | 2 | *(none unique)* |
+| audio clip count | 1 | `0x262F`, `0x2630` — but n=1, so this is not evidence |
+
+The marker row is a check on the method, not a discovery: `0x2030` and `0x2077` are the marker
+types, and they are exactly what falls out.
+
+The MIDI row is the useful one, at n=4. `0x1056`/`0x1057` are the known MIDI chain and
+`0x2633`/`0x2634` the MIDI region records — the byte-level pass recovers the count-level result
+above independently. **`0x1058`, `0x2000` and `0x203A` are new**: their bytes moved in all four
+MIDI-clip pairs and in none of the other twelve controlled pairs. For `0x2000` that is the first
+behavioural evidence of any kind — it occurs once per session in all 832, always top-level, and
+nothing until now distinguished what it was for.
+
+> Treat `0x1058`/`0x2000`/`0x203A` as leads at n=4, not as settled. And note the small numbers
+> honestly: with n=1 "changed in every pair" means "changed once", which is no evidence at all, and
+> n=2 is weak. Only the region (7) and MIDI (4) rows carry weight.
+
 > **CAVEAT that bounds every footprint above: these are COUNT deltas.** A type whose BYTES changed
 > while its count held still does not appear — which is exactly what a rename does to the `0x2519`
 > name table. Absence in these tables means *"count unchanged"*, never *"untouched"*.
