@@ -4855,3 +4855,29 @@ name PT wrote (15 types + the 5 rulers), and a value meaningful outside the form
 SO THE REMAINING DOCUMENTATION WORK IS NOW FULLY CHARACTERISED: 50 types permanently opaque,
 152 needing an external anchor (in practice, Pro Tools), 19 too rare to judge, 2 with a single
 instance, and 13+61 phantoms. There is no longer a category of "corpus work I have not done".
+
+## SHIPPED: placement_lanes() — the reader now sees all THREE placement chains
+The corpus documentation work is exhausted, but today's findings left a buildable IMPLEMENTATION
+gap that needs no Pro Tools, so I built it.
+
+    audio   0x1052 -> 0x1050 -> 0x104F     (what clip_lanes covers)
+    MIDI    0x1057 -> 0x1056 -> 0x104F     (invisible before today)
+    video   0x1053 -> 0x1051 -> 0x104F     (invisible before today)
+
+`placement_lanes(data, kinds=(...))` returns `(zmark, name, n_placements, kind)` for all three.
+
+MEASURED: accounts for **every 0x1050+0x1056+0x1051 wrapper in 120/120 sessions**, and recovers
+**1,628 MIDI and 8 video placements** across the 38 sessions that have any. Before this, those
+were simply not visible to the read layer -- `clips()` returned 511 of 696 placements on one
+session and there was no function that could see the rest.
+
+DELIBERATELY ADDITIVE: `clip_lanes` is untouched, so nothing that edits by lane zmark changes
+behaviour. The `kind` field is returned precisely so a caller can avoid handing a MIDI holder to
+`remove_clip`, which takes an AUDIO lane zmark. Making the existing function polymorphic would
+have been the tempting change and the wrong one -- it feeds PT-confirmed editors.
+
+233 tests green. The test pins the API and the audio-path equivalence on a local control file;
+the MIDI/video coverage rests on the corpus measurement above, since the controls are audio-only.
+
+THIS CLOSES THE LAST BUILDABLE GAP I FOUND TODAY. Remaining implementation work (editing MIDI or
+video clips, not just reading them) would need PT confirmation, since it writes.

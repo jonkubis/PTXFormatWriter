@@ -3359,6 +3359,46 @@ class NameTablePreambleTests(unittest.TestCase):
                          "duplicating an accented-name track must not corrupt the session")
         self.assertIn("ZZDUP", [t.name for t in BS.track_types(out)])
 
+    @unittest.skipUnless(_mono_available(), "mono control files not present")
+    def test_placement_lanes_covers_all_three_chains(self):
+        """There are THREE placement chains, and `clip_lanes` enumerates one of them.
+
+            audio   0x1052 -> 0x1050 -> 0x104F
+            MIDI    0x1057 -> 0x1056 -> 0x104F
+            video   0x1053 -> 0x1051 -> 0x104F
+
+        Each is `holder -> wrapper -> placement`, differing only in the two OUTER content types.
+        `clip_lanes` covers `0x1052` only — correct for the edit functions it feeds, but it means
+        neither it nor `clips()` sees a MIDI or video clip. Measured on the corpus: a session
+        with 185 MIDI placements had `clips()` return 511 of the 696 `0x104F` records present.
+
+        `placement_lanes` is additive and read-only, so nothing that edits by lane zmark changes.
+        Corpus-verified: it accounts for every `0x1050`+`0x1056`+`0x1051` wrapper in 120/120
+        sessions, and recovers 1,628 MIDI and 8 video placements across the 38 sessions that have
+        any. This test pins the API and the audio-path equivalence on a local control file (the
+        controls are audio-only, so the MIDI/video coverage is what the corpus measurement above
+        establishes)."""
+        data = _load_path(_mono_control(sorted(_mono_available())[0]))
+        audio_only = BS.clip_lanes(data)
+        every = BS.placement_lanes(data)
+        self.assertEqual([(z, n, k) for z, n, k, _kind in every if _kind == "audio"],
+                         list(audio_only),
+                         "the audio rows must be exactly what clip_lanes returns")
+        for _z, _n, _k, kind in every:
+            self.assertIn(kind, ("audio", "midi", "video"))
+        # the kinds filter selects, and asking for nothing returns nothing
+        self.assertEqual(BS.placement_lanes(data, kinds=("audio",)), every if all(
+            k == "audio" for *_r, k in every) else
+            [r for r in every if r[3] == "audio"])
+        self.assertEqual(BS.placement_lanes(data, kinds=()), [])
+        # every reported holder really is a block of the chain's holder type
+        bl = BS._size_driven_blocks(data)
+        holders = {z: c for z, _e, c in bl}
+        want = {"audio": 0x1052, "midi": 0x1057, "video": 0x1053}
+        for z, _n, _k, kind in every:
+            self.assertEqual(holders.get(z), want[kind],
+                             f"a {kind} row must point at a 0x{want[kind]:04X} block")
+
     def test_the_writer_validates_its_own_output_across_its_parameter_space(self):
         """Everything `synthesize` can produce must satisfy the invariants the validator knows.
 

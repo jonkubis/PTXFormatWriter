@@ -4359,6 +4359,51 @@ def clip_lanes(data: bytes) -> "list[tuple[int, str, int]]":
     return out
 
 
+# The three parallel placement chains, measured over the corpus (§5c). Each is
+# `holder -> wrapper -> 0x104F placement`, and only the two OUTER types differ; the placement
+# record itself (position, region ref, timebase) is shared by all three.
+_PLACEMENT_CHAINS = (
+    (0x1052, 0x1050, "audio"),
+    (0x1057, 0x1056, "midi"),
+    (0x1053, 0x1051, "video"),
+)
+
+
+def placement_lanes(data: bytes, kinds=("audio", "midi", "video")) -> "list[tuple[int, str, int, str]]":
+    """Every placement holder of the requested KINDS, as `(zmark, name, n_placements, kind)`.
+
+    `clip_lanes` covers audio only -- it enumerates `0x1052` -- which is correct for the edit
+    functions it feeds, but means neither it nor `clips()` can see a MIDI or video clip. Measured:
+    on a session with 185 MIDI placements `clips()` returns 511 of the 696 `0x104F` records
+    present. This is the enumerator that sees all three:
+
+        audio   0x1052 -> 0x1050 -> 0x104F
+        MIDI    0x1057 -> 0x1056 -> 0x104F
+        video   0x1053 -> 0x1051 -> 0x104F
+
+    Each chain is holder -> wrapper -> placement, differing only in the two outer content types.
+    Read-only and additive: `clip_lanes` is unchanged, so nothing that edits by lane zmark is
+    affected. The `kind` field is returned so a caller can tell which chain a zmark came from --
+    passing a MIDI holder to `remove_clip` would not work, and the caller needs to be able to
+    avoid that."""
+    want = {k for k in kinds}
+    bl = _size_driven_blocks(data)
+    by_type: "dict[int, list[tuple[int, int]]]" = {}
+    for z, e, c in bl:
+        by_type.setdefault(c, []).append((z, e))
+    out: "list[tuple[int, str, int, str]]" = []
+    for holder_ct, wrapper_ct, kind in _PLACEMENT_CHAINS:
+        if kind not in want:
+            continue
+        wrappers = sorted(by_type.get(wrapper_ct, ()))
+        for z, e in sorted(by_type.get(holder_ct, ())):
+            n = sum(1 for wz, _we in wrappers if z < wz < e)
+            if n:
+                out.append((z, _lane_track_name(data, z, e), n, kind))
+    out.sort()
+    return out
+
+
 def _lane_count_pos(data: bytes, lane_zmark: int, first_placement: int,
                     n_placements: int) -> "int | None":
     """Offset of the lane's u32 placement-count field. It sits just before the
