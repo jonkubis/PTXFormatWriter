@@ -5877,3 +5877,43 @@ before the obvious one.
 positional index. Left alone rather than churned; the new test pins the rule for the three that do.
 
 267 tests green.
+
+## 2026-07-28 — validator is 100.00% inert on PT-authored sessions; its 6 hits were our own stale files
+
+Audited the safety net itself. `validate_pt_invariants` guards every write path, so a false positive
+there is worse than useless.
+
+First pass, filtering our own output with an ad-hoc filename regex: **398 sessions, 392 clean, 6
+firing `per-track-subtree-ordinal`**. The six looked like ours (`test_clickbottom_3stereo.ptx`,
+`mixedmidi_click_top.ptx`) but my regex did not catch them.
+
+**`session_is_probably_ours(data, path)` already existed** and is the sharp test — it compares the
+session's self-recorded `.ptx` name in `0x2067` against the name on disk. Re-run with it:
+
+    filtered out as OUR OWN output      85
+    PT-authored checked                377
+    zero errors                        377   ->  100.00%
+
+**Every error invariant is perfectly inert on Pro Tools-authored sessions.** The 6 hits were all
+our own output, which is exactly what a validator should do.
+
+### Were the 6 a live bug? No — stale pre-fix artifacts
+
+Each is the CLICK track taking per-track subtree ordinal 3 and colliding with a real track:
+`[1,2,3,3]`, `[1..12,3]`, `[1,2,5,3,4,3]`. The validator's own comment already records the
+calibration — *"strictly increasing in 1609/1609 Hack-drive, 250/250 Samples and 255/255 PT-authored
+controls, and never repeat; only our own output does"* — so the check is right.
+
+Tested the CURRENT path: `synthesize(spec, click=...)` for 3-stereo/12-stereo, click top and bottom,
+and with no click — **ordinals distinct in every case**. Commit `09700fc` ("repeated 0x2015 ordinal
+is now a validator ERROR, and it found the click path") is where this was caught and fixed. The six
+files are untracked local artifacts predating it.
+
+Worth leaving written down, because the next person to run the validator over `control_files` will
+see 6 errors and needs to know they are historical.
+
+### Second time today I rebuilt something that already existed
+
+The ad-hoc `ours` regex was a worse `session_is_probably_ours`; earlier I wrote a `move_clip` that
+was already there. Both cost a round trip. The check is cheap — grep the module for the concept
+before writing it — and I did not do it either time.
