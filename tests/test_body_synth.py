@@ -4361,3 +4361,57 @@ class SelectedTracksHonestyTests(unittest.TestCase):
             self.assertIn("strict=False", msg, "the refusal must name the escape hatch")
             return
         self.skipTest("every local session is fully readable")
+
+
+class DuplicateRemoveRoundTripTests(unittest.TestCase):
+    """`remove_track(duplicate_track(d, src, new), new)` must return `d` byte for byte.
+
+    It did not when `src` was the LAST name-table entry: the round trip lost 2 bytes of the
+    `0x2519` table (106859 -> 106857 on `robust_audio_mixed12.ptx`).
+
+    Cause: `remove_track` truncated the predecessor's ordinal from 4 bytes to 2 on the assumption
+    that the last entry always carries the SHORT special-last form, so removing it strands the
+    predecessor with a full-width one. That form is not universal. In these sessions the last
+    entry's tail is the full `0c 00 00 00 00` and `duplicate_track` preserves it, so the truncation
+    cut 2 bytes that nothing restored.
+
+    The form is DETECTABLE rather than assumable — compare the last entry's tail against its
+    predecessor's, and truncate only when the last one is genuinely shorter.
+    """
+
+    FIXTURES = ("robust_audio_mixed12.ptx", "synth_4mono_8stereo.ptx")
+
+    def test_duplicating_the_last_track_round_trips_byte_exactly(self):
+        ran = 0
+        for name in self.FIXTURES:
+            hits = sorted(ROOT.glob("control_files/**/" + name))
+            if not hits:
+                continue
+            d = _load_path(hits[0])
+            tracks = [t.name for t in BS.track_types(d)]
+            if not tracks:
+                continue
+            src = tracks[-1]                       # the LAST entry: where the bug lived
+            dup = BS.duplicate_track(d, src, "ZZROUNDTRIP")
+            back = BS.remove_track(dup, "ZZROUNDTRIP")
+            self.assertEqual(len(back), len(d),
+                             f"{name}: round trip changed length by {len(back) - len(d)}")
+            self.assertEqual(back, d, f"{name}: round trip is not byte-exact")
+            ran += 1
+        if not ran:
+            self.skipTest("neither fixture is present")
+
+    def test_every_track_of_the_fixtures_round_trips(self):
+        ran = 0
+        for name in self.FIXTURES:
+            hits = sorted(ROOT.glob("control_files/**/" + name))
+            if not hits:
+                continue
+            d = _load_path(hits[0])
+            for i, src in enumerate([t.name for t in BS.track_types(d)]):
+                dup = BS.duplicate_track(d, src, "ZZRT%d" % i)
+                self.assertEqual(BS.remove_track(dup, "ZZRT%d" % i), d,
+                                 f"{name}: src={src!r} does not round-trip")
+                ran += 1
+        if not ran:
+            self.skipTest("neither fixture is present")

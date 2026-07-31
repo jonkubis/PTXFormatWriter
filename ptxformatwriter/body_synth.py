@@ -7351,7 +7351,23 @@ def remove_track(data: bytes, track_name: str) -> bytes:
     if _entries and _entries[-1][0] == track_name and len(_entries) > 1:
         prev_name, prev_name_pos = _entries[-2][0], _entries[-2][1]
         ord_pos = prev_name_pos + len(prev_name.encode()) + 18   # name_end +6 fixed +4 tag +8 guid
-        nt_ranges.append((ord_pos + 2, ord_pos + 4))
+        # ONLY WHEN THE TABLE ACTUALLY USES THE SPECIAL-LAST FORM. The truncation above assumes the
+        # last entry carries a SHORT 2-byte ordinal, so that removing it strands the predecessor
+        # with a full 4-byte one. That is not universal: measured on `robust_audio_mixed12.ptx` and
+        # `synth_4mono_8stereo.ptx`, the last entry's tail is the FULL `0c 00 00 00 00` and
+        # `duplicate_track` preserves it -- so truncating cut 2 bytes nothing restored and the
+        # duplicate->remove round trip lost them (106859 -> 106857).
+        #
+        # The form is detectable rather than assumable: compare the LAST entry's tail with the
+        # PREDECESSOR's. Special-last is in use only when the last one is genuinely shorter.
+        _last_name, _last_pos = _entries[-1]
+        _last_ord = _last_pos + len(_last_name.encode()) + 18
+        _kids = [a for a, _b, _c in bl if z2519 < a and _b <= e2519]
+        _tab_end = min(_kids) if _kids else e2519
+        _last_tail = _tab_end - _last_ord
+        _prev_tail = (_last_pos - 4) - ord_pos
+        if 0 < _last_tail < _prev_tail:
+            nt_ranges.append((ord_pos + 2, ord_pos + 4))
 
     # (c) `next_kind` chain repair -- the exact INVERSE of duplicate_track's. Entry i's `next_kind`
     # u16 names the KIND of entry i+1 (0 audio / 1 MIDI / 2 click / 5 folder-VCA / 7 instrument /

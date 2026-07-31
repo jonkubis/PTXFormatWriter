@@ -6181,3 +6181,42 @@ That is the third distinct way a test in this suite has failed to test its subje
 **if the subject were broken, which line fails?**
 
 290 tests green.
+
+## 2026-07-28 — duplicate->remove lost 2 bytes when the source was the LAST name-table entry
+
+Queue item #6, and the one that touches a stated correctness property: the inverse
+`remove_track(duplicate_track(d, src, new), new) == d` must hold byte for byte.
+
+It did not when `src` was the last entry: `robust_audio_mixed12.ptx` 106859 -> 106857, block-type
+counts unchanged, the entire 2 bytes lost from the `0x2519` name table.
+
+### Cause: an invariant assumed instead of detected
+
+`remove_track` truncated the PREDECESSOR's ordinal from 4 bytes to 2 whenever the removed entry was
+last, reasoning that the last entry carries the SHORT special-last form and removing it strands the
+predecessor with a full-width one.
+
+**That form is not universal.** In these sessions the last entry's tail is the full
+`0c 00 00 00 00`, and `duplicate_track` preserves it (`0d 00 00 00 00` after duplication). So the
+truncation cut 2 bytes that nothing ever restored.
+
+FIX: detect the form rather than assume it — compare the last entry's tail against its
+predecessor's, and truncate only when the last one is genuinely shorter
+(`0 < last_tail < prev_tail`).
+
+    fixtures, every track      24/24 byte-exact  (was 22/24)
+    corpus sweep, first+last   601 byte-exact, 0 differ, 23 refused, over 312 sessions
+
+### The harness lied to me first
+
+My first reproduction reported "dup refused 12/12, TypeError" and I nearly recorded the bug as
+unreproducible. The TypeError was mine — `duplicate_track(data, source, new_name)` takes three
+arguments and I passed two. Fifth harness artifact mistaken for a result in this project, after
+`duplicate_track`'s "40% refusal rate", the allowlist sample, and `reorder_tracks`' permutation
+length and meaning.
+
+The tell was uniformity: 12 of 12 refusing with the SAME exception is a caller bug, not a data
+property. Worth making the standing check — **when every case fails identically, suspect the
+harness before the subject.**
+
+292 tests green.
