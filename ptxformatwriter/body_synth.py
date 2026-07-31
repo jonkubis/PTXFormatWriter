@@ -4573,13 +4573,35 @@ def session_sample_rate(data: bytes) -> int:
 
 
 def session_bit_depth(data: bytes) -> int:
-    """The session recording bit depth, from the `0x1028` INFO block: a `u8` 5 bytes
-    before the payload end (block +(size+2)). 0x18 -> 24-bit, 0x20 -> 32-bit float;
-    other values pass through. PT-corpus-confirmed across all 26 sessions."""
+    """The session recording bit depth, from the `0x1028` INFO block.
+
+    `0x10` -> 16-bit, `0x18` -> 24-bit, `0x20` -> 32-bit float; other values pass through.
+
+    The field sits at block `+(size+2)` in one layout and `+(size+1)` in another, so the first is
+    preferred and the second used when it reads zero -- 0 is not a bit depth. Measured over 432
+    sessions: `size+2` is zero in 318 of them and `size+1` carries `0x18` in exactly those, the two
+    sets being complementary.
+
+    > This previously read `+(size+2)` only, on the strength of "PT-corpus-confirmed across all 26
+    > sessions" -- which was true, and true of one layout. On 432 sessions it returned **0** on
+    > 314, including every Pro Tools Studio session sampled.
+    """
     for z, _e, c in _size_driven_blocks(data):
         if c == 0x1028:
             size = int.from_bytes(data[z + 3 : z + 7], "little")
-            return {0x18: 24, 0x20: 32}.get(data[z + size + 2], data[z + size + 2])
+            # TWO LAYOUTS, and the field is one byte earlier in the commoner one. Measured over
+            # 432 sessions carrying a `0x1028`: the byte at `size+2` is 0x00 in 318 of them -- and
+            # 0 is not a bit depth -- while `size+1` holds 0x18 in exactly those 318. The two sets
+            # are complementary (114 + 318 = 432), so preferring `size+2` and falling back to
+            # `size+1` when it is zero yields a plausible depth in all 432.
+            #
+            # The docstring said "PT-corpus-confirmed across all 26 sessions". It was: 26 sessions
+            # all had the same layout. On 432 it returned 0 -- not a depth at all -- on 314,
+            # including every Pro Tools Studio session in the sample.
+            b = data[z + size + 2]
+            if b == 0:
+                b = data[z + size + 1]
+            return {0x18: 24, 0x20: 32, 0x10: 16}.get(b, b)
     raise ValueError("no 0x1028 sample-rate block")
 
 

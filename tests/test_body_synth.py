@@ -4231,3 +4231,59 @@ class SynthesisWriterBlockLossTests(unittest.TestCase):
             except Exception:
                 continue
         self.skipTest("no local session makes set_tempo_map refuse")
+
+
+class SessionBitDepthTests(unittest.TestCase):
+    """`session_bit_depth` must return a bit depth, and 0 is not one.
+
+    The `0x1028` field sits at block `+(size+2)` in one layout and `+(size+1)` in another. The
+    reader knew only the first, and its docstring said "PT-corpus-confirmed across all 26
+    sessions".
+
+    Measured: over 432 sessions it returned **0** on 314 — and over `control_files` specifically it
+    returned 0 on **282 of 282**, i.e. every local control session, because they are all the layout
+    it did not know. A claim of corpus confirmation survived a reader that produced a non-value on
+    the entire local corpus, which says the confirmation checked that the call did not raise rather
+    than what it returned.
+    """
+
+    PLAUSIBLE = (16, 24, 32)
+
+    def test_never_returns_zero_on_a_control_session(self):
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            try:
+                v = BS.session_bit_depth(d)
+            except ValueError:
+                continue                       # no 0x1028 at all is a different matter
+            self.assertNotEqual(v, 0, f"{path.name}: 0 is not a bit depth")
+            self.assertIn(v, self.PLAUSIBLE, f"{path.name}: implausible depth {v}")
+            checked += 1
+            if checked >= 25:
+                break
+        self.assertTrue(checked, "no control session was checked")
+
+    def test_session_info_reports_the_same_depth(self):
+        """The snapshot must not carry a different answer from the reader it summarises."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            try:
+                v = BS.session_bit_depth(d)
+            except ValueError:
+                continue
+            info = BS.session_info(d)
+            if "bit_depth" in info:
+                self.assertEqual(info["bit_depth"], v)
+            return
+        self.skipTest("no control session with a 0x1028")

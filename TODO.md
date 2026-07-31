@@ -6114,3 +6114,35 @@ an existing test *encoded* the `retarget_audio_file` bug. The suite is not unifo
 or a trap — it depends entirely on whether the test asserts a MEASURED property or a remembered one.
 
 285 tests green.
+
+## 2026-07-28 — session_bit_depth returned 0 on EVERY local control session
+
+Queue item #4. The `0x1028` bit-depth field has TWO layouts: `+(size+2)` in one, `+(size+1)` in the
+other. The reader knew only the first.
+
+    over 432 corpus sessions      returned 0 on 314
+    over control_files            returned 0 on 282 of 282   <- every local control session
+
+The two offsets are complementary — `size+2` is zero in 318 of 432 and `size+1` carries `0x18` in
+exactly those 318 — so preferring `size+2` and falling back to `size+1` when it reads zero yields a
+plausible depth in **all 432**: 24-bit x416, 16-bit x16, and **0 x0**.
+
+### What the old docstring claimed
+
+*"PT-corpus-confirmed across all 26 sessions."* Meanwhile the function returned `0` — not a bit
+depth, not a value of any kind — for all 282 sessions in `control_files`.
+
+A confirmation that survives that cannot have looked at the RETURN VALUE. It checked that the call
+did not raise. This is the same shape as the `retarget_audio_file` test that asserted the sample
+count landed at `+15`: a claim of verification standing on something other than the answer.
+
+Third recorded instance today of a "confirmed" number that was never really checked, after
+`plugins()`'s 96.8% (per-block on 25 sessions from one drive) and that test.
+
+### The test bites hard here
+
+`control_files` is 282/282 the layout the old code got wrong, so reverting the fallback makes the
+new test fail on the first session it touches — the rare case where the local corpus is the ideal
+fixture rather than the obstacle it has been five times today.
+
+287 tests green.
