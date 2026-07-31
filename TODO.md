@@ -6440,3 +6440,78 @@ Plus `plugins()` (empty on 31.4% of sessions) found and fixed during the same pa
 `session_is_probably_ours` globbing the entire filesystem, found while chasing #11.
 
 314 tests green.
+
+## 2026-07-28 — AUDIT ROUND 2: 26 more confirmed defects on six new dimensions
+
+The first audit covered identity, inverses, self-checking readers, positional indices, validator
+calibration and robustness, and its twelve items are all closed. Round 2 took six dimensions it
+never touched. **35 agents, 3.8M tokens, 26 confirmed at high confidence, 1 refuted.**
+
+### FIXED IMMEDIATELY — a docstring I invalidated myself, today
+
+`set_markers` still advertised *"`set_markers(d, markers(d))` composes"*. That sentence outlived the
+guard I added hours earlier to stop the function destroying data: of 59 PT-authored sessions, 48
+carry a marker and the call now raises on **48 of 48**. The composition it advertised works on
+exactly the sessions where it is a no-op. Docstring corrected to say one-playlist-only and why.
+
+### CONFIRMED, QUEUED — highest severity first
+
+**Silent corruption**
+ 1. `set_track_channels` — no bounds validation; appends past EOF and writes into an unrelated block.
+ 2. `rename_track` with an empty `old_name` rewrites ~every string in the session; the result does
+    not parse. (12,208 empty-name matches on one session, 54,577 -> 87,553 bytes.)
+ 3. `duplicate_region` / `duplicate_audio_file` splice the copy INSIDE the previous last entry, so
+    the container's declared count diverges from its contents; `duplicate_audio_file` never
+    increments the `0x1004` file count.
+ 4. `add_clip_to_track` / `add_clips_to_tracks` silently DROP clips on an out-of-range track index.
+ 5. The duplicate family never checks `new_name` is free, so the identity round-trip can remove the
+    wrong object.
+
+**Wrong answers**
+ 6. `clips()`/`clip_names()` and `region_list()` use DIFFERENT region index spaces — every clip name
+    is wrong when they disagree.
+ 7. `markers()` de-dupes by (name, position) and collapses genuinely distinct markers: 209 -> 112.
+ 8. `session_info()['n_tracks']` counts `0x261B`, which PT never writes for MIDI, instrument, VCA or
+    folder tracks.
+ 9. `_lane_track_name()` returns the literal `'Z'` for any lane whose name length is 0.
+10. **`validate()` fires on 33% of PT-authored sessions** while its docstring claims "no false
+    positives". VERIFIED MYSELF: 0 of 197 in `control_files`, **25 of 75 on the external drives**.
+    All are `0x2519` name-entry misframings whose reported `name_length` is an exact multiple of
+    `0x10000` (1245184, 1769472, 458752) — the walker reads a **u32 over a field whose high half is
+    not part of the length**. This is the pre-write gate the write paths cite as evidence.
+
+**Synthesis**
+11. `synthesize()` raises `ValueError` at exactly **82 tracks**; the synthesized master index
+    genuinely contains a NULL pointer, so it is not a reader artifact.
+12. From **n=83** every stereo synthesis trips the validator's CONTAINMENT error — the tier whose
+    own docstring says "PT is known to REJECT these... CRASHED PT ON LOAD (bug #22)" — including
+    2 errors at n=418, the count this project records as PT-confirmed. Those two claims cannot both
+    be right.
+13. **Every click-bearing synthesis produces duplicated `0x2589` view-chain ordinals** (39/39 click
+    cases; 0/35 non-click). I checked `per-track-subtree-ordinal` earlier today and found the click
+    path clean — a DIFFERENT ordinal, so that check did not cover this.
+14. `click='top'` silently reinterprets `display_order` against the post-click order.
+15. `duplicate_track`->`remove_track` is not byte-identical on synthesized mono+stereo mixed specs,
+    nor pure mono at N=41..64 (byte-exact at N=8..40).
+
+**Documentation**
+16. `set_region_length`: "2 bytes in ~94% of corpus records" — measured **6.3%**; 84.7% are 3 bytes,
+    over 53,927 records. And it promises twice that it "raises rather than guessing" / is
+    "size-neutral" while silently WIDENING the field and growing the body, 21 of 21.
+17. `track_name_occurrences`: "a track name lives in 8 places" — true for 36 of 784 names (4.6%);
+    the mode is 5.
+
+**Verified CLEAN, worth recording**
+ - `duplicate_track`->`remove_track` byte-identity on real sessions **170/170** (today's fix holds)
+ - `replace_tempo_map` identity 59/59 · `plugin_count` 390/390 · `region_names` 342,767/342,767
+ - the three-chain placement arithmetic 390/390 · the nine Studio-only types 0 violations in 390
+ - `plugins()` non-empty 390/390 and `session_bit_depth` plausible 390/390 — both fixed today
+
+### The shape of it
+
+Round 1 found defects in the EDIT paths. Round 2 found them mostly in the SYNTHESIS path and in the
+DOCUMENTATION — the two places least covered by the corpus-diffing habits this project has built,
+because neither can be checked against a real session.
+
+Nothing here is speculative: each survived an independent agent instructed to refute it, and the
+two I re-measured by hand (`validate()`'s false positives, the `set_markers` docstring) both held.

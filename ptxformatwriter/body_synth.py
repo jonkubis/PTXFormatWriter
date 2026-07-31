@@ -2566,8 +2566,19 @@ def _marker_rows_per_record(blocks) -> int:
 
 def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> bytes:
     """Write session markers onto `data`. `markers` = list of (name, position_in_ticks) in
-    time order, OR the dicts `markers()` returns (its "name"/"tick" keys are used), so
-    `set_markers(d, markers(d))` composes. Markers live SOLELY in the 0x2030 marker list: a count + one 0x2077 record
+    time order, OR the dicts `markers()` returns (its "name"/"tick" keys are used).
+
+    > **ONE-PLAYLIST SESSIONS ONLY.** The guard below REFUSES any session whose markers carry more
+    > than one `0x2506` row per `0x2077` record, because the inlined `0x2030` template holds exactly
+    > one and splicing it would destroy the rest. Measured: of 59 PT-authored sessions, 48 carry a
+    > marker and `set_markers(d, markers(d))` raises on **48 of 48** — rows-per-record runs 5..195.
+    > The 11 that "succeed" have no markers at all and take the `if not markers` early exit.
+    >
+    > This docstring used to say `set_markers(d, markers(d))` **composes**, and that sentence
+    > outlived the guard that was added on 2026-07-28 to stop the function destroying data. The
+    > composition it advertised now works on exactly the sessions where it is a no-op. Use
+    > `replace_tempo_map`-style in-place editing when one is written for markers; until then this is
+    > a synthesis writer, not an editor. Markers live SOLELY in the 0x2030 marker list: a count + one 0x2077 record
     per marker (ordinal, length-prefixed name, position = ZERO_TICKS + ticks, a unique GUID).
 
     The 0x2030 template is INLINED (`_templates.MARKER_BLOCK_TEMPLATE`, a minimal 1-record
