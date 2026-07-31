@@ -4739,3 +4739,72 @@ class TrackTypesUnnamedHeaderTests(unittest.TestCase):
                                "track_types must still enumerate headers with no master index")
             return
         self.skipTest("no suitable control session")
+
+
+class SessionProvenanceScopeTests(unittest.TestCase):
+    """`session_is_probably_ours` must not glob the filesystem.
+
+    It defaulted `siblings` by walking UP to the filesystem root — `while root.parent != root and
+    root.name not in ("control_files",)` — and then `rglob("*.ptx")` from there. Inside
+    `control_files` that stops at the corpus; ANYWHERE ELSE it stops at `/`.
+
+    A corpus sweep hung for over half an hour on `12 120 E.ptx`, a 0.09 MB session from
+    `/Volumes/Samples`. The file is innocent: it records its own name as `12 120 E .ptx` — with a
+    stray space — so `recorded != p.name` and the unbounded walk fired. Every other session it had
+    already passed records its name exactly and returned early, which is why the cost was rare and
+    catastrophic rather than uniform.
+
+    Exactly the failure `tools/gen_coverage.py` documents for `glob("**/*.ptx")` on an external
+    volume: *"it stalls for HOURS at ~0% CPU, indistinguishable from a hang."*
+    """
+
+    def test_a_name_mismatch_outside_control_files_is_fast(self):
+        """The bug: only a MISMATCH reaches the sibling search, so only a mismatch was slow."""
+        import time
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            recorded = BS.session_self_name(d)
+            if recorded is None:
+                continue
+            # force the mismatch branch by asking about a name the file cannot match
+            t0 = time.time()
+            BS.session_is_probably_ours(d, "/nonexistent/dir/definitely not the name.ptx")
+            self.assertLess(time.time() - t0, 5.0,
+                            "the sibling search must be bounded, not a walk to the filesystem root")
+            return
+        self.skipTest("no control session with a recorded name")
+
+    def test_the_control_files_split_is_unchanged(self):
+        """The bounded scope must not change the measurement it was calibrated on: 85 ours / 197 PT."""
+        ours = pt = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if BS.session_is_probably_ours(d, str(path)):
+                ours += 1
+            else:
+                pt += 1
+        if ours + pt < 200:
+            self.skipTest("control_files is not fully present")
+        self.assertEqual((ours, pt), (85, 197))
+
+    def test_an_explicit_siblings_set_is_still_honoured(self):
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            recorded = BS.session_self_name(d)
+            if recorded is None or recorded == path.name:
+                continue
+            self.assertTrue(BS.session_is_probably_ours(d, str(path), siblings={recorded}))
+            self.assertFalse(BS.session_is_probably_ours(d, str(path), siblings=set()))
+            return
+        self.skipTest("no control session with a differing recorded name")

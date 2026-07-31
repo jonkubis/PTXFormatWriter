@@ -6348,3 +6348,43 @@ the scan parser appears only in the except branch, checked structurally on the A
 still broke 114 tests, because none of those sessions is a half-built buffer.
 
 309 tests green.
+
+## 2026-07-28 — session_is_probably_ours globbed the ENTIRE FILESYSTEM
+
+Found while chasing the last validator false positive, and worth more than the thing I was chasing.
+
+`session_is_probably_ours(data, path)` defaulted `siblings` by walking UP:
+
+    root = p.parent
+    while root.parent != root and root.name not in ("control_files",):
+        root = root.parent
+    siblings = {q.name for q in root.rglob("*.ptx")}
+
+Inside `control_files` that stops at the corpus. **Anywhere else it stops at `/`** and rglobs the
+whole filesystem. Exactly the failure `tools/gen_coverage.py` documents for `glob("**/*.ptx")` on an
+external volume: *"it stalls for HOURS at ~0% CPU, indistinguishable from a hang."*
+
+A corpus sweep hung for **over half an hour** on `12 120 E.ptx` — a 0.09 MB session. The file is
+innocent: it records its own name as **`12 120 E .ptx`, with a stray space**, so `recorded !=
+p.name` and the unbounded branch fired. Every session before it recorded its name exactly and
+returned early, which is why the cost was rare and catastrophic rather than uniform.
+
+FIXED: the sibling set is now the file's own directory, its parent, and any
+`Session File Backups` subfolder of either — the scope the docstring already implies ("the donor is
+right there"). `control_files` keeps whole-corpus scope, since the 85-vs-4 separation was calibrated
+with it. Verified: **85 ours / 197 PT-authored, unchanged**, and the pathological call is 0.00s.
+
+### Three wrong diagnoses before the right one
+
+  1. "The validator has a pathological case" — it does not; validate runs in 0.0s on that file.
+  2. `signal.alarm` around the validate call — did not fire, so I concluded the hang was in
+     `PTFFormat.load`. Also wrong.
+  3. Alarm around the load too — still did not fire, because `alarm` cannot interrupt a long
+     C-level call, and `rglob` is one.
+
+What worked was the dullest possible instrument: **print the filename before touching it.** The same
+lesson `gen_coverage.py` already carries in a comment — *"a long job that cannot say where it is
+cannot be distinguished from a hung one"* — and I re-derived it the expensive way. I also misread
+the log once, blaming index 172 when the print happens BEFORE the work, so the culprit was 171.
+
+312 tests green.

@@ -4267,10 +4267,38 @@ def session_is_probably_ours(data: bytes, path, siblings=None) -> bool:
     if recorded is None or recorded == p.name:
         return False
     if siblings is None:
+        # BOUNDED. This used to walk UP to the filesystem root -- `while root.parent != root and
+        # root.name not in ("control_files",)` -- and then `rglob("*.ptx")` from there. Inside
+        # `control_files` that stops at the corpus; ANYWHERE ELSE it stops at `/` and globs the
+        # WHOLE FILESYSTEM. A corpus sweep hung for over half an hour on a 0.14 MB session from
+        # `/Volumes/Samples`, and it took per-file logging to find that the file was innocent and
+        # this call was the cost. Exactly the failure `tools/gen_coverage.py` documents for
+        # `glob("**/*.ptx")` on an external volume: "it stalls for HOURS at ~0% CPU,
+        # indistinguishable from a hang".
+        #
+        # The docstring already says what the scope should be -- the donor "is right there" -- so
+        # look beside the file and one level up, which covers a session folder and its
+        # `Session File Backups` sibling. `control_files` keeps its whole-corpus scope, since the
+        # 85-vs-4 separation quoted above was measured with it.
         root = p.parent
         while root.parent != root and root.name not in ("control_files",):
+            if root.name == "control_files":
+                break
             root = root.parent
-        siblings = {q.name for q in root.rglob("*.ptx")}
+        if root.name == "control_files":
+            siblings = {q.name for q in root.rglob("*.ptx")}
+        else:
+            here = p.parent
+            scope = [here, here.parent] if here.parent != here else [here]
+            siblings = set()
+            for base in scope:
+                try:
+                    siblings |= {q.name for q in base.glob("*.ptx")}
+                    for sub in base.iterdir():
+                        if sub.is_dir() and sub.name.lower().startswith("session file backup"):
+                            siblings |= {q.name for q in sub.glob("*.ptx")}
+                except OSError:
+                    pass
     return recorded in siblings
 
 
