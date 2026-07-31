@@ -3214,7 +3214,10 @@ def _clear_donor_window_markers(body: bytes, base_n: int) -> bytes:
 
 
 def _session_info_block(ptf: PTFFormat) -> Block:
-    return [b for b in flat_blocks(ptf) if b.content_type == 0x2067][0]
+    # `b.offset - 7 >= 31` excludes the file-header index-pointer record at body offset 20, whose
+    # misread content_type equals 0x2067 in 2 of 417 corpus sessions and would otherwise sort first.
+    return [b for b in flat_blocks(ptf)
+            if b.content_type == 0x2067 and b.offset - 7 >= 31][0]
 
 
 def _match_session_info_size(body: bytes, library_data: bytes) -> bytes:
@@ -8898,12 +8901,22 @@ def session_name(data: bytes) -> str | None:
     0x2067 session-info block). Pro Tools titles a session by its filesystem
     filename, so this is metadata, but a synthesized session should carry a
     sensible value. Returns None if not found."""
-    ptf = parse(data)
-    blocks = [b for b in flat_blocks(ptf) if b.content_type == 0x2067]
-    if not blocks:
+    # SIZE-DRIVEN, and the reason is the file-header INDEX-POINTER RECORD at body offset 20. It is
+    # framed like a block but is not one: the u16 read as its content_type is the low half of the
+    # stored index OFFSET, so it takes a session-specific value in every file. When that value
+    # happens to equal 0x2067 it sorts FIRST and `blocks[0]` reads the 11-byte pointer record
+    # instead of the session-info block. Measured: 2 of 417 sessions
+    # (`mixedmidi_reorder_SMm.ptx`, `multiple track types no click fresh.ptx`).
+    #
+    # `_raw_block_bounds` relabels that record -1 and `_size_driven_blocks` skips z < 31, so the
+    # size-driven walk cannot be fooled. Same defect and same fix as clip_positions,
+    # set_clip_position and selected_tracks; the hazard was already documented in
+    # `_blocks_by_type`, where the identical value collision wrote into the FILE HEADER.
+    spans = [(z, e) for z, e, c in _size_driven_blocks(data) if c == 0x2067 and z >= 31]
+    if not spans:
         return None
-    b = blocks[0]
-    blk = data[b.offset : b.offset + b.block_size]
+    _z, _e = spans[0]
+    blk = data[_z + 7 : _e]
     # 0x2067 can hold several `.ptx` references (save-as/template remnants); the
     # primary session name is the FIRST length-prefixed one.
     search = 0

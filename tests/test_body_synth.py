@@ -4512,3 +4512,66 @@ class AudioFileListWalkTests(unittest.TestCase):
             z, end, entries = BS._audio_file_list(d)
             for off, _n in entries:
                 self.assertEqual(d[off], 0x02, f"{name}: a non-file entry was listed")
+
+
+class SessionNamePseudoBlockTests(unittest.TestCase):
+    """`session_name` must not read the file-header index-pointer record.
+
+    The record at body offset 20 is framed like a block but is not one: the u16 read as its
+    content_type is the low half of the stored master-index OFFSET, so it takes a session-specific
+    value in every file. When that value happens to equal 0x2067 it sorts FIRST in a `flat_blocks`
+    scan and `blocks[0]` is the 11-byte pointer record instead of the session-info block.
+
+    Measured: 2 of 417 sessions — `mixedmidi_reorder_SMm.ptx` and
+    `multiple track types no click fresh.ptx`. Which sessions are hit is pure luck; it depends on
+    the low 16 bits of an intermediate offset, exactly as already documented in `_blocks_by_type`
+    where the same collision wrote into the FILE HEADER.
+    """
+
+    AFFECTED = ("mixedmidi_reorder_SMm.ptx", "multiple track types no click fresh.ptx")
+
+    def test_the_affected_sessions_still_yield_a_name(self):
+        ran = 0
+        for name in self.AFFECTED:
+            hits = sorted(ROOT.glob("control_files/**/" + name))
+            if not hits:
+                continue
+            d = _load_path(hits[0])
+            got = BS.session_name(d)
+            self.assertIsNotNone(got, f"{name}: read the pointer record instead of the 0x2067")
+            self.assertTrue(got.endswith(".ptx"), f"{name}: {got!r} is not a session name")
+            ran += 1
+        if not ran:
+            self.skipTest("neither affected fixture is present")
+
+    def test_the_pointer_record_is_never_the_source(self):
+        """Whatever session_name returns must come from a block at or past body offset 31."""
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            spans = [(z, e) for z, e, c in BS._size_driven_blocks(d) if c == 0x2067 and z >= 31]
+            got = BS.session_name(d)
+            if got is None:
+                continue
+            self.assertTrue(spans, f"{path.name}: a name was read with no real 0x2067 present")
+            self.assertGreaterEqual(spans[0][0], 31)
+            checked += 1
+            if checked >= 20:
+                break
+        self.assertTrue(checked, "no control session was checked")
+
+    def test_session_name_does_not_use_the_scan_parser(self):
+        import ast, inspect
+        tree = ast.parse(inspect.getsource(BS.session_name).lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        self.assertNotIn("flat_blocks", body)
+        self.assertIn("_size_driven_blocks", body)

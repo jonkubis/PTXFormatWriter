@@ -6259,3 +6259,30 @@ on a synthetic buffer containing a folder marker and a non-zero index. Verified 
 condition fails two tests.
 
 298 tests green.
+
+## 2026-07-28 — session_name read the file-header pointer record on 2 of 417 sessions
+
+Queue item #8. The record at body offset 20 is framed like a block but is not one: the u16 read as
+its content_type is the LOW HALF OF THE MASTER-INDEX OFFSET, so it takes a session-specific value in
+every file. When that value happens to equal `0x2067`, it sorts FIRST in a `flat_blocks` scan and
+`blocks[0]` is the 11-byte pointer record instead of the session-info block.
+
+Measured: **2 of 417** — `mixedmidi_reorder_SMm.ptx` and `multiple track types no click fresh.ptx`,
+both of which now return a name where they returned nothing.
+
+Which sessions are hit is pure luck; it depends on the low 16 bits of an intermediate offset. The
+hazard was ALREADY documented in `_blocks_by_type`, where the identical collision wrote into the
+FILE HEADER and broke duplicate->remove on 2 of 213 controls. The note was there; this call site
+just never got the same treatment.
+
+FIXED: `session_name` uses the size-driven walk (which skips `z < 31`), and `_session_info_block`
+filters `b.offset - 7 >= 31`.
+
+**That is now FOUR readers fixed for the same root cause** — `clip_positions`, `set_clip_position`,
+`selected_tracks` and `session_name` — all indexing `[0]` or `[i]` of a scan-parser list that can
+contain a block that is not one. Worth stating as a rule rather than a series of incidents:
+
+> **Never take `[0]` or `[i]` of a `flat_blocks` result.** The scan parser both undercounts real
+> types (80 of them) and prepends a pseudo-block whose type is data-dependent.
+
+301 tests green.
