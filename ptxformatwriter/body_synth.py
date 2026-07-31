@@ -3267,19 +3267,45 @@ def _sel_flag_positions(block_bytes: bytes) -> tuple[int, int] | None:
     return f1, f2
 
 
-def selected_tracks(data: bytes) -> list[int]:
-    """1-based indices of tracks whose 0x261c selection flag is set."""
+def selected_tracks(data: bytes, *, strict: bool = True) -> list[int]:
+    """1-based indices of tracks whose `0x261C` selection flag is set.
+
+    The flag is located by searching each `0x261C` for a fixed byte anchor, and **that anchor is
+    absent from most sessions**. Measured over 302 sessions carrying `0x261C` blocks:
+
+        anchor in EVERY block       53   the only case the answer can be trusted
+        anchor in SOME blocks       70   a partial read: tracks it cannot see are reported
+                                         as NOT SELECTED, which is indistinguishable from the truth
+        anchor in NO block         179   `[]`, indistinguishable from "nothing is selected"
+
+    So the old return value was trustworthy on 53 of 302 sessions and silently wrong on the rest.
+    The failures span every product -- Pro Tools Studio 160, HD 74, Ultimate 44, Pro Tools 16 --
+    so this is not a product gate; the anchor simply is not there.
+
+    `strict=True` (the default) raises rather than return an answer it cannot stand behind. Pass
+    `strict=False` for the old behaviour, with the caveat above.
+    """
     # SIZE-DRIVEN. The scan parser undercounts 0x261C in 9 of 312 corpus sessions, and the value
     # returned here is `i + 1` -- a POSITIONAL index into this very list. A missing 0x261C shifts
     # every later index, so the caller is handed the wrong TRACK NUMBERS with nothing to show it.
     # Same defect class as clip_positions/set_clip_position and the 0x251A lane count.
+    blocks = [b for b in _size_driven_blocks(data) if b[2] == 0x261C and b[0] >= 31]
     out: list[int] = []
-    for i, (z, e, _c) in enumerate(
-            [b for b in _size_driven_blocks(data) if b[2] == 0x261C and b[0] >= 31]):
+    unreadable = 0
+    for i, (z, e, _c) in enumerate(blocks):
         blk = data[z + 7 : e]
         fp = _sel_flag_positions(blk)
-        if fp and blk[fp[0]] == 0x01:
+        if fp is None:
+            unreadable += 1
+            continue
+        if blk[fp[0]] == 0x01:
             out.append(i + 1)
+    if strict and unreadable:
+        raise ValueError(
+            f"cannot read the selection flag in {unreadable} of {len(blocks)} 0x261C blocks: the "
+            f"byte anchor is absent, so any track among them would be reported as NOT SELECTED "
+            f"whether or not it is. Pass strict=False to accept a partial answer."
+        )
     return out
 
 

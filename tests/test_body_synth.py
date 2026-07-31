@@ -128,7 +128,15 @@ class BodySynthTests(unittest.TestCase):
                 _load(base), base, target, library_data=_load(target), library_total=target
             )
             self.assertEqual(
-                BS.selected_tracks(synth), [], msg=f"stray track selection for {base}->{target}"
+                # strict=False DELIBERATELY, and the assertion is weaker than it looks: the
+                # selection-flag anchor is absent from all 3 0x261C blocks of a synthesized
+                # session, so `selected_tracks` cannot read the flag and returns [] whatever
+                # the flag says. This test has therefore always passed VACUOUSLY -- it does
+                # not verify "no stray selection", it verifies that an UNREADABLE flag reads
+                # as unset. Kept because a regression that made the anchor appear with a set
+                # flag would still trip it, but it is not evidence for the property it names.
+                BS.selected_tracks(synth, strict=False), [],
+                msg=f"stray track selection for {base}->{target}"
             )
 
     def test_multidigit_names_no_phantom(self) -> None:
@@ -3977,7 +3985,10 @@ class ScanParserIndexRiskTests(unittest.TestCase):
             if len(d) > 600_000:
                 continue
             n = len(BS.track_types(d))
-            for i in BS.selected_tracks(d):
+            # strict=False: this test is about INDEX RANGE, not about whether the flag is
+            # readable. The anchor is absent in 179 of 302 corpus sessions, and a strict raise
+            # here would hide the index property the test exists to check.
+            for i in BS.selected_tracks(d, strict=False):
                 self.assertGreaterEqual(i, 1)
                 self.assertLessEqual(i, max(n, 1), f"{path.name}: index {i} > {n} tracks")
             checked += 1
@@ -4287,3 +4298,66 @@ class SessionBitDepthTests(unittest.TestCase):
                 self.assertEqual(info["bit_depth"], v)
             return
         self.skipTest("no control session with a 0x1028")
+
+
+class SelectedTracksHonestyTests(unittest.TestCase):
+    """`selected_tracks` must not answer when it cannot read the flag.
+
+    The selection flag is found by a fixed byte anchor inside each `0x261C`, and the anchor is
+    absent from most sessions. Measured over 302 sessions with `0x261C` blocks: present in EVERY
+    block in 53, in SOME in 70, in NONE in 179. So the old return value was trustworthy on 53 and
+    silently wrong on 249 — a track whose block lacks the anchor was reported as NOT SELECTED,
+    which is indistinguishable from the truth.
+
+    The failures span every product (Studio 160, HD 74, Ultimate 44, Pro Tools 16), so it is not a
+    product gate.
+    """
+
+    def _sessions(self, limit=12):
+        out = []
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            if any(c == 0x261C for _z, _e, c in BS._size_driven_blocks(d)):
+                out.append((path.name, d))
+            if len(out) >= limit:
+                break
+        return out
+
+    def test_strict_never_answers_from_an_unreadable_block(self):
+        checked = 0
+        for name, d in self._sessions():
+            blocks = [b for b in BS._size_driven_blocks(d) if b[2] == 0x261C and b[0] >= 31]
+            missing = sum(1 for z, e, _c in blocks
+                          if BS._sel_flag_positions(d[z + 7:e]) is None)
+            if missing:
+                with self.assertRaises(ValueError, msg=f"{name}: {missing} unreadable blocks"):
+                    BS.selected_tracks(d)
+            else:
+                BS.selected_tracks(d)          # fully readable -> must answer
+            checked += 1
+        self.assertTrue(checked, "no control session with 0x261C was checked")
+
+    def test_lax_preserves_the_old_behaviour(self):
+        for name, d in self._sessions(limit=4):
+            got = BS.selected_tracks(d, strict=False)
+            self.assertIsInstance(got, list)
+            for i in got:
+                self.assertGreaterEqual(i, 1)
+
+    def test_the_refusal_says_how_much_it_could_not_read(self):
+        for name, d in self._sessions():
+            blocks = [b for b in BS._size_driven_blocks(d) if b[2] == 0x261C and b[0] >= 31]
+            if not any(BS._sel_flag_positions(d[z + 7:e]) is None for z, e, _c in blocks):
+                continue
+            with self.assertRaises(ValueError) as cm:
+                BS.selected_tracks(d)
+            msg = str(cm.exception)
+            self.assertIn("0x261C", msg)
+            self.assertIn("strict=False", msg, "the refusal must name the escape hatch")
+            return
+        self.skipTest("every local session is fully readable")

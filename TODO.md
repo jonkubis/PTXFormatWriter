@@ -6146,3 +6146,38 @@ new test fail on the first session it touches — the rare case where the local 
 fixture rather than the obstacle it has been five times today.
 
 287 tests green.
+
+## 2026-07-28 — selected_tracks was trustworthy on 53 of 302 sessions and silent about the rest
+
+Queue item #5. The selection flag is located by a fixed byte anchor
+(`ef ff df bf ef ff df bf 02`) inside each `0x261C`, and the anchor is mostly absent.
+
+    anchor in EVERY block        53   the only case the answer can be trusted
+    anchor in SOME blocks        70   PARTIAL: tracks it cannot see are reported NOT SELECTED
+    anchor in NO block          179   [] -- indistinguishable from "nothing is selected"
+
+Trustworthy on 53 of 302; silently wrong on 249. The failures span every product — Studio 160,
+HD 74, Ultimate 44, Pro Tools 16 — so this is not a product gate, the anchor simply is not there.
+
+FIX: `strict=True` by default. It raises with the count of unreadable blocks rather than return an
+answer it cannot stand behind, and names `strict=False` for callers who want the old behaviour.
+
+    strict=True   answered 113, refused 249
+    strict=False  answered 362  (old behaviour preserved)
+
+### Two existing tests were passing VACUOUSLY
+
+`test_no_stray_selection` asserts a synthesized session has nothing selected. The anchor is absent
+from **all 3** of a synth session's `0x261C` blocks, so `selected_tracks` returned `[]` regardless of
+what the flag said. **The test never verified "no stray selection" — it verified that an unreadable
+flag reads as unset.** It has been green since it was written and proved nothing.
+
+Both tests now pass `strict=False` explicitly, with the reason written where the call is. The stray-
+selection one is kept because a regression that made the anchor APPEAR with a set flag would still
+trip it, but it is no longer described as evidence for the property in its name.
+
+That is the third distinct way a test in this suite has failed to test its subject today, after
+"skips instead of failing" and "asserts the buggy offset". Worth a standing question at review time:
+**if the subject were broken, which line fails?**
+
+290 tests green.
