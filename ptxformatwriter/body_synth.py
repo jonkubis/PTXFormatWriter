@@ -2491,6 +2491,26 @@ def _resize_marker_block(block: bytes, markers) -> bytes:
     return bytes(out)
 
 
+def _marker_rows_per_record(blocks) -> int:
+    """`0x2506` rows per `0x2077` marker record -- i.e. the session's playlist count, via markers.
+
+    The settled relation is `n(0x2506) == n(0x2077) x n_playlists` (§5c), so this is the playlist
+    count derived from the marker matrix itself rather than from `playlist_names()`. Returns 1 when
+    there are no markers, so a markerless session is never refused.
+
+    Extracted so it can be TESTED. `control_files` contains no multi-playlist session carrying
+    markers, so a test written against the local corpus cannot make `set_markers` destroy anything
+    and therefore cannot verify the guard -- removing the guard entirely left the corpus test
+    passing. That is the fourth time in this session that the local fixture pool could not express
+    a bug found on the wider corpus.
+    """
+    n77 = sum(1 for _z, _e, c in blocks if c == 0x2077)
+    n06 = sum(1 for _z, _e, c in blocks if c == 0x2506)
+    if not n77:
+        return 1
+    return max(1, n06 // n77)
+
+
 def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> bytes:
     """Write session markers onto `data`. `markers` = list of (name, position_in_ticks) in
     time order, OR the dicts `markers()` returns (its "name"/"tick" keys are used), so
@@ -2523,6 +2543,31 @@ def set_markers(data: bytes, markers, markers_ref: "bytes | None" = None) -> byt
         name, tick = tuple(m)[:2]
         return name, 0x4000000000000000 + _ZERO_TICKS + int(tick)
     markers = [_encode(m) for m in markers]
+    # REFUSE RATHER THAN DESTROY. The inlined 0x2030 template carries ONE 0x2506 row per 0x2077
+    # record, i.e. it assumes a ONE-PLAYLIST session. The settled relation is
+    # `n(0x2506) == n(0x2077) x n_playlists`, so splicing that template into a session with P
+    # playlists silently drops `n(0x2077) x (P-1)` rows -- and nothing notices: `markers()` still
+    # returns the right markers and `validate()` reports no new issue.
+    #
+    # Measured before this guard: `set_markers(d, markers(d))` -- the composition this docstring
+    # advertises -- was byte-identical on 0 of 58 PT-authored sessions carrying markers, and 56 of
+    # them LOST blocks: median -2,530 bytes, worst -227,176 bytes and -12,950 0x2506 records.
+    # M12 MAGIC CARPET RIDE_MIX: 189 playlists, 0x2506 756 -> 380, which is exactly the 376 rows
+    # one of its two 0x2030 blocks should have kept.
+    #
+    # Syncing the rows back afterwards is NOT a fix: `sync_marker_playlist_rows` adds to every
+    # marker in EVERY 0x2030, including the block that was never replaced, giving 1132 where 378
+    # is correct. The real fix is to rewrite the existing 0x2030 in place instead of splicing a
+    # template over it; until that exists, refusing is the only honest behaviour for a write that
+    # would otherwise destroy data it cannot restore.
+    _rows = _marker_rows_per_record(_size_driven_blocks(data))
+    if _rows > 1:
+        raise ValueError(
+            f"set_markers would destroy the marker/playlist matrix: this session carries "
+            f"{_rows} 0x2506 rows per 0x2077 record ({_rows} playlists), and the inlined 0x2030 "
+            f"template holds exactly one. Splicing it would drop every row but the first. "
+            f"set_markers currently supports one-playlist sessions only."
+        )
     if markers_ref is None:
         from . import _templates as _T
         template_2030 = _T.MARKER_BLOCK_TEMPLATE

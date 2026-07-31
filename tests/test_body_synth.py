@@ -3977,3 +3977,108 @@ class ScanParserIndexRiskTests(unittest.TestCase):
             if checked >= 12:
                 break
         self.assertTrue(checked, "no control session was checked")
+
+
+class SetMarkersDataLossTests(unittest.TestCase):
+    """`set_markers` must refuse a session it would corrupt, rather than corrupt it.
+
+    The inlined 0x2030 template carries ONE 0x2506 row per 0x2077 record — it assumes a
+    one-playlist session. The settled relation is `n(0x2506) == n(0x2077) x n_playlists`, so
+    splicing that template into a P-playlist session drops `n(0x2077) x (P-1)` rows.
+
+    Measured before the guard: `set_markers(d, markers(d))` — the composition the docstring
+    advertises — was byte-identical on 0 of 58 PT-authored sessions with markers and 56 LOST
+    blocks, worst case -227,176 bytes and -12,950 0x2506 records. Nothing noticed: `markers()`
+    returned the same markers and `validate()` reported no new issue.
+    """
+
+    def _sessions_with_markers(self, limit=14):
+        out = []
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 900_000:
+                continue
+            if BS.markers(d):
+                out.append((path.name, d))
+            if len(out) >= limit:
+                break
+        return out
+
+    def test_no_session_ever_loses_marker_rows(self):
+        """The property that matters: proceed or refuse, but never silently drop a row."""
+        checked = 0
+        for name, d in self._sessions_with_markers():
+            before = sum(1 for _z, _e, c in BS._size_driven_blocks(d) if c == 0x2506)
+            try:
+                out = BS.set_markers(d, BS.markers(d))
+            except ValueError:
+                checked += 1
+                continue                      # refusing is the correct outcome
+            after = sum(1 for _z, _e, c in BS._size_driven_blocks(out) if c == 0x2506)
+            self.assertGreaterEqual(after, before,
+                                    f"{name}: set_markers dropped 0x2506 rows {before} -> {after}")
+            checked += 1
+        self.assertTrue(checked, "no control session with markers was checked")
+
+    def test_the_rows_per_record_helper_is_the_playlist_count(self):
+        """Tested on synthetic block lists, because `control_files` cannot express the bug.
+
+        Removing the guard entirely left the corpus-driven test above PASSING — no local session
+        has multi-playlist markers, so nothing is destroyed locally. The helper is therefore
+        exercised directly.
+        """
+        B = lambda t, n: [(0, 0, t)] * n
+        self.assertEqual(BS._marker_rows_per_record(B(0x2077, 4) + B(0x2506, 4)), 1)
+        self.assertEqual(BS._marker_rows_per_record(B(0x2077, 4) + B(0x2506, 756)), 189)
+        self.assertEqual(BS._marker_rows_per_record(B(0x2077, 14) + B(0x2506, 364)), 26)
+        self.assertEqual(BS._marker_rows_per_record([]), 1, "no markers -> never refuse")
+        self.assertEqual(BS._marker_rows_per_record(B(0x2506, 9)), 1, "no 0x2077 -> never refuse")
+
+    def test_set_markers_refuses_when_rows_per_record_exceeds_one(self):
+        """The guard must be wired to the helper, not merely present beside it."""
+        import ast, inspect
+        tree = ast.parse(inspect.getsource(BS.set_markers).lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        self.assertIn("_marker_rows_per_record", body)
+        self.assertIn("raise ValueError", body)
+
+    def test_the_refusal_says_what_is_wrong(self):
+        """A refusal that does not explain itself just moves the confusion."""
+        multi = None
+        for _name, d in self._sessions_with_markers():
+            bl = BS._size_driven_blocks(d)
+            n77 = sum(1 for _z, _e, c in bl if c == 0x2077)
+            n06 = sum(1 for _z, _e, c in bl if c == 0x2506)
+            if n77 and n06 > n77:
+                multi = d
+                break
+        if multi is None:
+            self.skipTest("no local session has more than one playlist's marker rows")
+        with self.assertRaises(ValueError) as cm:
+            BS.set_markers(multi, BS.markers(multi))
+        msg = str(cm.exception)
+        self.assertIn("0x2506", msg)
+        self.assertIn("playlist", msg.lower())
+
+    def test_a_one_playlist_session_still_works(self):
+        """The guard must not break the synthesis path it was written for."""
+        ran = False
+        for _name, d in self._sessions_with_markers():
+            bl = BS._size_driven_blocks(d)
+            n77 = sum(1 for _z, _e, c in bl if c == 0x2077)
+            n06 = sum(1 for _z, _e, c in bl if c == 0x2506)
+            if n77 and n06 == n77:
+                out = BS.set_markers(d, BS.markers(d))
+                self.assertEqual([m["name"] for m in BS.markers(out)],
+                                 [m["name"] for m in BS.markers(d)])
+                ran = True
+                break
+        if not ran:
+            self.skipTest("no local one-playlist session with markers")

@@ -5982,3 +5982,52 @@ None of these is speculative: each was measured against the corpus and survived 
 refutation attempt. They are recorded here rather than half-fixed.
 
 272 tests green.
+
+## 2026-07-28 — set_markers no longer destroys the marker/playlist matrix (it refuses)
+
+Worst confirmed bug from the audit, now closed by refusal rather than corruption.
+
+### Mechanism, measured exactly
+
+A session carries TWO top-level `0x2030` blocks, each holding N `0x2077` records, and the settled
+relation `n(0x2506) == n(0x2077) x n_playlists` means each record owns one row PER PLAYLIST. The
+inlined `0x2030` template holds exactly ONE row per record, so `_grow_block_into` replacing one of
+the two blocks drops `N x (P-1)` rows.
+
+`M12 MAGIC CARPET RIDE_MIX`: 2 markers, 4 `0x2077` records, 189 playlists.
+`0x2506` 756 -> 380 — and 756 - 380 = 376 = 2 records x 188 lost playlists, exactly.
+
+Before the guard: `set_markers(d, markers(d))` — the composition the docstring advertises — was
+byte-identical on **0 of 58** PT-authored sessions with markers, and 56 LOST blocks. Median -2,530
+bytes, worst **-227,176 bytes / -12,950 rows**. `markers()` still returned the right markers and
+`validate()` reported no new issue, so nothing in the library noticed.
+
+### Why refusal and not repair
+
+Syncing the rows back afterwards is NOT a fix: `sync_marker_playlist_rows` adds to every marker in
+EVERY `0x2030`, including the block that was never replaced. Measured: 380 -> 1132 where 378 is
+correct. The real fix is to rewrite the existing `0x2030` IN PLACE instead of splicing a template
+over it. Until that exists, refusing is the only honest behaviour for a write that would otherwise
+destroy data it cannot restore.
+
+    sessions with markers        134
+    refused (would destroy)      132
+    proceeded, no row loss         2
+    proceeded and LOST rows        0   <- was 56
+
+### FOURTH time the local fixture pool could not express the bug
+
+`control_files` has no multi-playlist session carrying markers, so the corpus-driven test passed
+**with the guard removed entirely**. Same as `plugins()` (no identifier-less record), the MIDI
+clip-removal test (audio-only lanes) and the plug-in fixture search (skipped instead of failing).
+
+Fix, as with `_lane_blocks`: extract the decision into `_marker_rows_per_record(blocks)` and test
+THAT on synthetic block lists — `(4x 0x2077, 756x 0x2506) -> 189`. Verified to bite: stubbing the
+helper to `return 1` fails the test.
+
+**This is now a structural problem, not four coincidences.** `control_files` is one machine and one
+generation; most bugs this project finds live on the wider corpora, and regression tests for them
+cannot be written from the local pool. The workable pattern is the one used twice today: push the
+decision into a small pure helper and test the helper.
+
+277 tests green.
