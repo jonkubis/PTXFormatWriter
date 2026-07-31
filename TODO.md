@@ -8,6 +8,53 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Synthesis items 11/12: item 12 REFUTED, item 11 localized to one byte (DIAGNOSED, NOT FIXED)
+
+**Item 12 — "from n=83 every stereo synthesis trips the validator's CONTAINMENT error, including
+2 errors at n=418" — REFUTED.** Swept `synthesize([2]*n)` for every n in 8..140 plus 200 and 418:
+**zero validator issues at every n**, and no error at 418. The two claims the audit said "cannot
+both be right" are not in conflict — the n=418 PT-confirmed record stands, and the containment
+error does not occur. `synthesize_stereo_inline` is likewise clean at 10/50/81/82/83/84/120/418.
+
+**Item 11 — "`synthesize()` raises ValueError at exactly 82 tracks" — CONFIRMED as to the number,
+but NOT as a threshold.** Swept 8..140 for three specs:
+
+| spec | failing n |
+|---|---|
+| stereo `[2]*n` | none |
+| mono `[1]*n` | **82 only** |
+| mixed `[1,2]*(n//2)` | **82 only** (the "83" in the audit is the same 82-track spec — `83//2 == 41`) |
+
+n=81 and n=83 are clean. It is an isolated failure at exactly 82 tracks, mono and mixed only.
+
+**Root cause, localized.** `synthesize_mixed_session` emits a `0x2587` index record whose THIRD
+child ref — type `0x2501` — carries offset **0**, while all three `0x2501` blocks are present in
+the body (at n=82: 238801 / 242598 / 267301). The audit's "the synthesized master index genuinely
+contains a NULL pointer" is exactly right.
+
+The reported symptom is a downstream artifact of that null. In `parse_records`, `is_child_ref`
+requires the offset to be a known zmark; 0 is not, so the loop ends one ref early and reads the
+ref's own type bytes as `entry_count` (`01 25 00 00` = 0x2501 = 9473), then hits a zero element
+tag -> `bad element tag at 12257: 0000000000 (record type 0x2587 start 12216)`. Decoding by hand
+confirms the record parses perfectly if that third child ref is accepted: entry_count 1, one
+element with tag1=4, k=1, offset 0x0003b3a6.
+
+**Ruled out:** the scan parser. `final_index.block_layout` (scan) and `_size_driven_blocks` return
+IDENTICAL `0x2501` positions at n=81/82/83, so this is not the undercount/phantom defect that
+explained so many other readers.
+
+**NEXT STEP:** the null is already present in `synthesize_mixed_session`'s output — the raise
+happens in the folder-leaf `rename_track` that consumes it, not in the rename itself. Find where
+that `0x2587` record's `0x2501` child ref offset is resolved during the mixed-session index build
+and why it yields 0 at exactly 82 tracks.
+
+**Related, worth checking while there:** `final_index.offset_holes`'s `add()` silently RETURNS
+when the offset is not a known zmark. That is why a null ref is never repaired by a later
+reindex — it masks the fault rather than causing it, but it is the same "silently skip" shape as
+several defects closed this session.
+
+
 ## session_info n_tracks undercounted (CLOSED); the `_lane_track_name` 'Z' item is REFUTED
 
 **Item 8 — CONFIRMED.** `session_info()['n_tracks']` returned the `0x261B` count, with the
@@ -6620,29 +6667,28 @@ exactly the sessions where it is a no-op. Docstring corrected to say one-playlis
 
 ### CONFIRMED, QUEUED — highest severity first
 
-**Silent corruption**
- 1. `set_track_channels` — no bounds validation; appends past EOF and writes into an unrelated block.
- 2. `rename_track` with an empty `old_name` rewrites ~every string in the session; the result does
-    not parse. (12,208 empty-name matches on one session, 54,577 -> 87,553 bytes.)
- 3. `duplicate_region` / `duplicate_audio_file` splice the copy INSIDE the previous last entry, so
-    the container's declared count diverges from its contents; `duplicate_audio_file` never
-    increments the `0x1004` file count.
- 4. `add_clip_to_track` / `add_clips_to_tracks` silently DROP clips on an out-of-range track index.
- 5. The duplicate family never checks `new_name` is free, so the identity round-trip can remove the
-    wrong object.
+STATUS 2026-07-31: items 1-10 are CLOSED (see the sections above for each). Items 6 and 9 turned
+out to be REFUTED rather than fixed, and item 5's proposed fix ("refuse a name collision") was
+refuted by measurement — Pro Tools writes duplicate names itself — so the real defect there was
+the name-based LOOKUP acting on every match. Remaining: the three synthesis items below.
 
-**Wrong answers**
- 6. `clips()`/`clip_names()` and `region_list()` use DIFFERENT region index spaces — every clip name
-    is wrong when they disagree.
- 7. `markers()` de-dupes by (name, position) and collapses genuinely distinct markers: 209 -> 112.
- 8. `session_info()['n_tracks']` counts `0x261B`, which PT never writes for MIDI, instrument, VCA or
-    folder tracks.
- 9. `_lane_track_name()` returns the literal `'Z'` for any lane whose name length is 0.
-10. **`validate()` fires on 33% of PT-authored sessions** while its docstring claims "no false
-    positives". VERIFIED MYSELF: 0 of 197 in `control_files`, **25 of 75 on the external drives**.
-    All are `0x2519` name-entry misframings whose reported `name_length` is an exact multiple of
-    `0x10000` (1245184, 1769472, 458752) — the walker reads a **u32 over a field whose high half is
-    not part of the length**. This is the pre-write gate the write paths cite as evidence.
+**Silent corruption** — all CLOSED
+ 1. ~~`set_track_channels` — no bounds validation~~ CLOSED (`f2a06c1`)
+ 2. ~~`rename_track` with an empty `old_name`~~ CLOSED (`f2a06c1`)
+ 3. ~~`duplicate_region`/`duplicate_audio_file` splice INSIDE the previous last entry~~ CLOSED (`c671f34`)
+ 4. ~~`add_clip_to_track`/`add_clips_to_tracks` silently DROP clips~~ CLOSED (`c671f34`)
+ 5. ~~The duplicate family never checks `new_name` is free~~ CLOSED (`edbe345`) — reframed: PT
+    writes duplicate names, so the defect was that removal/duplication acted on EVERY match.
+
+**Wrong answers** — all CLOSED or REFUTED
+ 6. ~~`clips()`/`region_list()` use DIFFERENT region index spaces~~ **REFUTED** — 0 disagreements
+    over 139 sessions (`7f855ad`)
+ 7. ~~`markers()` collapses distinct markers 209 -> 112~~ CLOSED (`7f855ad`) — real for 12 of 73
+    sessions; for the other 61 the old reader was correct
+ 8. ~~`session_info()['n_tracks']` counts `0x261B`~~ CLOSED (`10c3319`) — 114 of 352 undercounted
+ 9. ~~`_lane_track_name()` returns `'Z'`~~ **REFUTED** at the source (`10c3319`)
+10. ~~`validate()` fires on 33% of PT-authored sessions~~ CLOSED (`b67b35f`) — two causes, both
+    name-table; 36/317 -> 0/317
 
 **Synthesis**
 11. `synthesize()` raises `ValueError` at exactly **82 tracks**; the synthesized master index
