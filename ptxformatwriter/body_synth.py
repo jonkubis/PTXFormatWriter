@@ -5109,6 +5109,42 @@ def _splice_in(data: bytes, at: int, blob: bytes) -> bytes:
     return bytes(out)
 
 
+def _walk_audio_file_entries(data: bytes, start: int, end: int):
+    """`(walk_end, [(entry_offset, filename)])` for the `0x103A` entry run beginning at `start`.
+
+    ENTRY SHAPE, uniform for both kinds: `<u8 kind><u32 index><u32 namelen><name><4-byte tag>`,
+    stride `13 + namelen`. kind `0x02` is a FILE (tag `EVAW`/`FFIA`), kind `0x01` a FOLDER marker
+    (tag `00 00 00 00`) -- e.g. `01 94 00 00 00 | 0b 00 00 00 | "Audio Files" | 00 00 00 00`.
+    Folders are STEPPED OVER, not listed.
+
+    The caller used to test `data[i:i+4] == b"\x02\x00\x00\x00"`, which demands kind 0x02 AND
+    index 0 -- true only of the first group, because the first file after a folder marker carries a
+    NON-ZERO index (`02 45 00 00 00 ...`). The walk stopped there: short on 34 of 121 sessions,
+    e.g. `GENE TUNE.bak.011` walked 128 of the 352 files its own table declares.
+    `duplicate_audio_file` range-checks against this list, so valid indices were refused and an
+    index past the cut addressed the wrong entry. Only the KIND byte identifies an entry; the u32
+    after it is an index, not padding.
+
+    Split out so it can be TESTED: no session in `control_files` contains a folder marker, so the
+    local corpus cannot make the old condition stop early -- restoring it left the corpus test
+    green. Sixth time in this session that the local fixture pool could not express a defect found
+    on the wider corpora.
+    """
+    out = []
+    i = start
+    while i + 13 <= end and data[i] in (0x01, 0x02):
+        nlen = int.from_bytes(data[i + 5 : i + 9], "little")
+        if nlen <= 0 or i + 13 + nlen > end:
+            break
+        if data[i] == 0x02:
+            # `_decode_name`, not latin1: filenames are UTF-8 and macOS stores accents DECOMPOSED,
+            # so latin1 turned `Café` into `CafeÌ\x81` and this disagreed with `audio_files()` on
+            # 10 of 121 sessions -- same bytes, same count, different text.
+            out.append((i, _decode_name(data[i + 9 : i + 9 + nlen])))
+        i += 13 + nlen
+    return i, out
+
+
 def _audio_file_list(data: bytes) -> "tuple[int, int, list[tuple[int, str]]]":
     """`(list_zmark, entries_end, [(entry_offset, filename)])` for the `0x103A` audio-file list.
 
@@ -5124,14 +5160,7 @@ def _audio_file_list(data: bytes) -> "tuple[int, int, list[tuple[int, str]]]":
         nl = int.from_bytes(data[z + 18 : z + 22], "little")
         if not (0 < nl <= 64 and z + 22 + nl <= e):
             continue
-        i = z + 22 + nl + 4
-        out = []
-        while i + 9 <= e and data[i : i + 4] == b"\x02\x00\x00\x00":
-            nlen = int.from_bytes(data[i + 5 : i + 9], "little")
-            if nlen <= 0 or i + 13 + nlen > e:
-                break
-            out.append((i, data[i + 9 : i + 9 + nlen].decode("latin1")))
-            i += 13 + nlen
+        i, out = _walk_audio_file_entries(data, z + 22 + nl + 4, e)
         return z, i, out
     raise ValueError("session has no 0x103A audio-file list")
 

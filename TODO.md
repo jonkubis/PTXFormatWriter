@@ -6220,3 +6220,42 @@ property. Worth making the standing check — **when every case fails identicall
 harness before the subject.**
 
 292 tests green.
+
+## 2026-07-28 — _audio_file_list stopped at the first folder marker (short on 34 of 121)
+
+Queue item #7. The `0x103A` entry shape is uniform for both kinds:
+
+    <u8 kind><u32 index><u32 namelen><name><4-byte tag>      stride 13+namelen
+    kind 0x02 = FILE   (tag EVAW / FFIA)
+    kind 0x01 = FOLDER (tag 00 00 00 00), e.g. 01 94 00 00 00 | 0b 00 00 00 | "Audio Files" | 00…
+
+The walk tested `data[i:i+4] == b"\x02\x00\x00\x00"` — demanding kind 0x02 **and index 0**, which is
+true only of the first group. The first file after a folder marker carries a NON-ZERO index
+(`02 45 00 00 00 ...`), so the walk stopped dead there.
+
+**Only the KIND byte identifies an entry; the u32 after it is an index, not padding.**
+
+    walk == declared file count    87 of 121  ->  121 of 121
+
+`duplicate_audio_file` range-checks against this list, so valid indices were refused and an index
+past the cut addressed the wrong entry. `GENE TUNE.bak.011` walked 128 of the 352 files its own
+table declares.
+
+### And a fourth UTF-8 slip, caught by cross-reading
+
+With the walk fixed it still disagreed with `audio_files()` on 10 of 121 sessions — same bytes,
+same COUNT, different TEXT. `_audio_file_list` decoded latin1, turning `Café` into `CafeÌ\x81`.
+Switched to `_decode_name`; agreement 111 -> 119 of 121.
+
+Fourth appearance of this assumption, after the `0x2519` name-table walk, the validator's ordinal
+offsets, and `audio_files()` itself. **Two readers of the same bytes disagreeing is a cheap, strong
+check** — it found this without any external oracle.
+
+### Sixth fixture-pool failure, same remedy
+
+No `control_files` session contains a folder marker, so restoring the old condition left the corpus
+test GREEN. The walk is now the pure function `_walk_audio_file_entries(data, start, end)`, tested
+on a synthetic buffer containing a folder marker and a non-zero index. Verified to bite: the old
+condition fails two tests.
+
+298 tests green.

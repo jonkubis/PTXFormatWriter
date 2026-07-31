@@ -4415,3 +4415,100 @@ class DuplicateRemoveRoundTripTests(unittest.TestCase):
                 ran += 1
         if not ran:
             self.skipTest("neither fixture is present")
+
+
+class AudioFileListWalkTests(unittest.TestCase):
+    """`_audio_file_list` must walk the whole `0x103A` list, folders and all.
+
+    Entry shape, uniform for both kinds: `<u8 kind><u32 index><u32 namelen><name><4-byte tag>`,
+    stride `13+namelen`. kind `0x02` is a FILE (tag `EVAW`/`FFIA`), kind `0x01` a FOLDER marker
+    (tag `00 00 00 00`).
+
+    The walk tested `data[i:i+4] == b"\\x02\\x00\\x00\\x00"`, which demands kind 0x02 AND index 0 —
+    true only of the first group. The first file after a folder marker carries a non-zero index
+    (`02 45 00 00 00 …`), so the walk stopped there: short on 34 of 121 sessions, e.g.
+    `GENE TUNE.bak.011` walked 128 of the 352 files its own table declares. `duplicate_audio_file`
+    range-checks against this list, so valid indices were refused and an index past the cut
+    addressed the wrong entry.
+    """
+
+    def _sessions(self, limit=12):
+        out = []
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 900_000:
+                continue
+            try:
+                BS._audio_file_list(d)
+            except Exception:
+                continue
+            out.append((path.name, d))
+            if len(out) >= limit:
+                break
+        return out
+
+    @staticmethod
+    def _entry(kind, index, name, tag):
+        n = name.encode()
+        return bytes([kind]) + index.to_bytes(4, "little") + len(n).to_bytes(4, "little") + n + tag
+
+    def test_the_walk_steps_over_a_folder_marker(self):
+        """Built synthetically, because no `control_files` session contains a folder marker —
+        restoring the old `== b"\x02\x00\x00\x00"` condition left the corpus tests GREEN."""
+        buf = (self._entry(0x02, 0, "a.wav", b"EVAW")
+               + self._entry(0x01, 148, "Audio Files", b"\x00\x00\x00\x00")
+               + self._entry(0x02, 69, "b.wav", b"EVAW")
+               + self._entry(0x02, 70, "c.wav", b"EVAW")
+               + b"\xff\xff\xff\xff")
+        end, out = BS._walk_audio_file_entries(buf, 0, len(buf))
+        self.assertEqual([n for _o, n in out], ["a.wav", "b.wav", "c.wav"],
+                         "the walk must continue past a folder marker and past a non-zero index")
+        self.assertEqual(end, len(buf) - 4, "the walk must stop at the first non-entry")
+
+    def test_a_nonzero_index_alone_does_not_stop_the_walk(self):
+        """The precise old bug: the first file after a folder carries a non-zero index."""
+        buf = (self._entry(0x02, 69, "only.wav", b"EVAW") + b"\xff\xff\xff\xff")
+        _end, out = BS._walk_audio_file_entries(buf, 0, len(buf))
+        self.assertEqual([n for _o, n in out], ["only.wav"])
+
+    def test_a_utf8_filename_survives_the_walk(self):
+        buf = self._entry(0x02, 0, "Caf\u00e9.wav", b"EVAW") + b"\xff\xff\xff\xff"
+        _end, out = BS._walk_audio_file_entries(buf, 0, len(buf))
+        self.assertEqual([n for _o, n in out], ["Caf\u00e9.wav"],
+                         "latin1 would give 'CafeM-bM-^@M-&' style mojibake")
+
+    def test_the_walk_reaches_the_declared_file_count(self):
+        checked = 0
+        for name, d in self._sessions():
+            declared = BS.audio_file_count(d)
+            if declared is None:
+                continue
+            _z, _end, entries = BS._audio_file_list(d)
+            self.assertEqual(len(entries), declared,
+                             f"{name}: walked {len(entries)} of {declared} declared files")
+            checked += 1
+        self.assertTrue(checked, "no control session with a file list was checked")
+
+    def test_it_agrees_with_audio_files(self):
+        """Two readers of the same list must give the same names, including non-ASCII ones.
+
+        `_audio_file_list` decoded latin1 and turned `Café` into `CafeÌ\\x81`, disagreeing with
+        `audio_files()` on 10 of 121 sessions — same bytes, same count, different text.
+        """
+        checked = 0
+        for name, d in self._sessions():
+            _z, _end, entries = BS._audio_file_list(d)
+            self.assertEqual([n for _o, n in entries], [n for n, _f in BS.audio_files(d)],
+                             f"{name}: the two file readers disagree")
+            checked += 1
+        self.assertTrue(checked)
+
+    def test_folder_markers_are_stepped_over_not_listed(self):
+        """kind 0x01 entries are structure, not files, and must not appear in the result."""
+        for name, d in self._sessions(limit=6):
+            z, end, entries = BS._audio_file_list(d)
+            for off, _n in entries:
+                self.assertEqual(d[off], 0x02, f"{name}: a non-file entry was listed")
