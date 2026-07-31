@@ -5,6 +5,41 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Name-based edits acted on EVERY match (CLOSED) — and the audit item's framing was wrong
+
+Round-2 item 5 was filed as "the duplicate family never checks `new_name` is free, so the
+identity round-trip can remove the wrong object", with the implied fix "refuse a name collision".
+**Measurement refuted that fix.** Pro Tools writes duplicate names itself: across PT-authored
+sessions on three drives, 20 of 108 carry duplicate REGION names, 5 of 266 duplicate TRACK names,
+2 of 108 duplicate audio filenames. Refusing a collision would reject sessions PT produces.
+
+The real defect is the name-based LOOKUP, and it is worse than "removes the wrong object" — it
+acts on all of them:
+- `remove_track` on a session with two tracks named `Audio 2`: **11 tracks -> 9**, the name gone
+  entirely. A track the caller never asked to delete.
+- `duplicate_track` from an ambiguous source: **11 -> 13**, producing TWO tracks named `FRESH`.
+- `validate()` called both results clean.
+
+Both functions DOCUMENTED the precondition ("Unique names." / "Constraints: unique source name")
+and neither enforced it. Now they refuse the ambiguous CALL — not the session — and say how many
+tracks matched.
+
+Counting has to cover click/aux tracks: `track_types` returns 0 for `128 click tracks.ptx`, a
+genuine 128-track session, so `_track_name_matches` takes the larger of the `track_types` count
+and the 0x2519 name-table count. (This is the same blind spot that once made a track-count guard
+refuse every edit on that session.)
+
+Also aligned while here: `_name_table_shift` still computed `2 if flag else 0` while its docstring
+— corrected earlier the same day — said the flag is a COUNT. Now `2 * flag`. Behaviour-neutral:
+`_name_table_entry_start` steps forward until an entry parses, so both rules give an identical
+entry start on 362 of 362 sessions. That empirical backstop is precisely why this reader was
+unaffected by the flag bug while `eos_validator.check_name_table`, which trusted the flag
+directly, raised false end-of-stream errors on flag=2 sessions.
+
+Four tests, verified to bite.
+
+
 ## Appended siblings became children; out-of-range clip placement dropped silently (CLOSED)
 
 Three more round-2 items, all measured on the control corpus.

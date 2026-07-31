@@ -5793,6 +5793,27 @@ def _fix_container_counts(data: bytes) -> bytes:
     return bytes(out)
 
 
+def _track_name_matches(data: bytes, name: str) -> int:
+    """How many tracks answer to `name`.
+
+    Name-based edits removed or duplicated EVERY match, silently. Counting has to cover click and
+    aux tracks, which `track_types` does not report -- `128 click tracks.ptx` returns 0 there --
+    so take the larger of the `track_types` count and the 0x2519 name-table count.
+    """
+    try:
+        n = [t.name for t in track_types(data)].count(name)
+    except Exception:
+        n = 0
+    try:
+        blocks = _size_driven_blocks(data)
+        z, e, _c = [(z, e, c) for z, e, c in blocks if c == 0x2519][0]
+        ents = _inline_name_entries(data, z, e, blocks)
+        n = max(n, sum(1 for nm, _off in ents if nm == name))
+    except Exception:
+        pass
+    return n
+
+
 def _name_table_shift(data: bytes, z: int) -> int:
     """Extra preamble bytes in a `0x2519` name table, from the `u32` flag at payload+0x0a
     (0 = base, 1 = +2). Both the entry count and the first entry move by this. It is NOT keyed
@@ -5801,7 +5822,12 @@ def _name_table_shift(data: bytes, z: int) -> int:
     436 local sessions (362 base / 74 extended). The flag is a COUNT of 2-byte extensions, not a
     boolean: 6 of 402 sessions across four drives carry flag=2 and need base+4. See
     eos_validator.check_name_table."""
-    return 2 if int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little") else 0
+    # `2 * flag`, not `2 if flag else 0`. Behaviour-neutral here -- `_name_table_entry_start`
+    # steps forward until an entry parses, so it already landed in the right place, and the two
+    # rules give an identical entry start on 362 of 362 sessions with a 0x2519. That empirical
+    # backstop is exactly why this reader worked while `eos_validator.check_name_table`, which
+    # trusted the flag directly, raised a false end-of-stream on flag=2 sessions.
+    return 2 * int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little")
 
 
 def _name_table_entry_start(data: bytes, z: int, limit: int) -> int:
@@ -7320,6 +7346,20 @@ def remove_track(data: bytes, track_name: str) -> bytes:
             "cannot remove the session's only track (a .ptx needs at least one track); "
             "create the replacement track first, or synthesize a new session")
     nb = track_name.encode()
+    # AN AMBIGUOUS NAME REMOVED EVERY MATCH. The docstring said "Unique names." and nothing
+    # enforced it: on a session carrying two tracks called `Audio 2`, this went from 11 tracks
+    # to 9 and left the name present zero times -- a track the caller never asked to delete,
+    # and `validate()` reported the result clean.
+    #
+    # Duplicate names are NOT a corrupt-session signal to be fixed elsewhere: Pro Tools itself
+    # writes them. Measured over PT-authored sessions on three drives, 5 of 266 carry duplicate
+    # track names (and 20 of 108 duplicate REGION names, 2 of 108 duplicate audio filenames).
+    # So refuse the ambiguous call rather than the session -- the caller has to say which one.
+    _dup = _track_name_matches(data, track_name)
+    if _dup > 1:
+        raise ValueError(
+            f"track name {track_name!r} matches {_dup} tracks; removal by name would delete "
+            f"all of them. Rename the one you mean first, or remove it by another identifier")
     # BODY positional renumber (synth-shaped mono/stereo/mixed sessions only): capture the
     # pre-edit channel-count layout, the grow-path threshold, and the donor 0x261c free fields so
     # the closing renumber (after the splice) can restore every survivor's by-slot BODY fields --
@@ -8318,6 +8358,16 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     (audio AND MIDI; PT display-confirm pending), and every other block is
     byte-intact."""
     import struct
+    # AN AMBIGUOUS SOURCE NAME DUPLICATED EVERY MATCH. "unique source name" was a documented
+    # constraint that nothing checked: on a session with two tracks called `Audio 2`, duplicating
+    # `Audio 2` as `FRESH` went from 11 tracks to 13 and produced TWO tracks named `FRESH`, with
+    # `validate()` reporting the result clean. Pro Tools writes duplicate track names itself
+    # (5 of 266 PT-authored sessions), so the ambiguous CALL is refused, not the session.
+    if _track_name_matches(data, source_track) > 1:
+        raise ValueError(
+            f"source_track {source_track!r} matches "
+            f"{_track_name_matches(data, source_track)} tracks; duplicating by name would copy "
+            f"all of them. Rename the one you mean first")
     # BYTES, not characters. `_unique_same_length_name` produces a name of exactly N BYTES, and
     # the same-length path splices byte-for-byte, so a 23-byte source name that is 22 CHARACTERS
     # long (`00 PRINT_CLIX 135·3BPM`) took a 22-byte placeholder and spliced one byte short --

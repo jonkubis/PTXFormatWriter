@@ -5146,3 +5146,54 @@ class ClipPlacementRangeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     BS.add_clips_to_tracks(clean, ref3, idx)
 
+class AmbiguousTrackNameTests(unittest.TestCase):
+    """Name-based edits acted on EVERY match, silently.
+
+    `remove_track` and `duplicate_track` both documented a unique-name precondition that nothing
+    enforced. On a session with two tracks called `Audio 2`, removal went 11 tracks -> 9 and left
+    the name present zero times (a track the caller never asked to delete), and duplication went
+    11 -> 13 and produced two tracks named `FRESH`. `validate()` called both results clean.
+
+    Duplicate names are not a corrupt-session signal: Pro Tools writes them. Across PT-authored
+    sessions on three drives, 5 of 266 carry duplicate track names, 20 of 108 duplicate region
+    names, 2 of 108 duplicate audio filenames. So the ambiguous CALL is refused, not the session.
+    """
+
+    @staticmethod
+    def _load(name):
+        for q in pathlib.Path("control_files").rglob(name):
+            f = PTFFormat(); f.load(str(q), 48000); return f.unxored_data()
+        raise unittest.SkipTest("control session %s not present" % name)
+
+    def _ambiguous(self):
+        d = self._load("10 stereo tracks.ptx")
+        names = [t.name for t in BS.track_types(d)]
+        dup = BS.duplicate_track(d, names[0], names[1])   # two tracks now named names[1]
+        self.assertEqual([t.name for t in BS.track_types(dup)].count(names[1]), 2)
+        return d, dup, names
+
+    def test_remove_track_refuses_an_ambiguous_name(self):
+        _d, dup, names = self._ambiguous()
+        with self.assertRaises(ValueError):
+            BS.remove_track(dup, names[1])
+
+    def test_duplicate_track_refuses_an_ambiguous_source(self):
+        _d, dup, names = self._ambiguous()
+        with self.assertRaises(ValueError):
+            BS.duplicate_track(dup, names[1], "FRESH")
+
+    def test_unambiguous_names_are_unaffected(self):
+        d, _dup, names = self._ambiguous()
+        self.assertEqual(len(BS.track_types(BS.remove_track(d, names[2]))), len(names) - 1)
+        self.assertEqual(len(BS.track_types(BS.duplicate_track(d, names[0], "NEWNAME"))),
+                         len(names) + 1)
+
+    def test_the_count_covers_click_tracks_that_track_types_does_not_report(self):
+        """`track_types` returns 0 for `128 click tracks.ptx`, a real 128-track session, so a
+        count based on it alone would never see a click-track collision. The counter falls back
+        to the 0x2519 name table, and unambiguous click removals must still work."""
+        c = self._load("128 click tracks.ptx")
+        self.assertEqual(len(BS.track_types(c)), 0, "click tracks are not reported by track_types")
+        self.assertEqual(BS._track_name_matches(c, "Click 1.dup1"), 1)
+        self.assertFalse(BS.validate(BS.remove_track(c, "Click 1.dup1")))
+
