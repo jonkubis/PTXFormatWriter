@@ -6315,3 +6315,36 @@ earlier fix was right about everything it could see.
 mistake as grepping it for `flat_blocks` and matching a comment, which happened three times today.
 
 305 tests green.
+
+## 2026-07-28 — track_types missed an UNNAMED MIDI header, and my fix broke 114 tests first
+
+Queue item #10. A `0x1057` header whose u32 name length is **0** is skipped by the scan parser, so
+`track_types` under-reported by one on `Alabama.bak.019/020/022` (101 of 102, 102 of 103).
+
+    track_types == size-driven count    519 of 522  ->  522 of 522
+
+Fifth reader moved off the scan parser, after `clip_positions`, `set_clip_position`,
+`selected_tracks` and `session_name`.
+
+### A clean sample is not a proof — I had already "verified" this reader
+
+Earlier today I measured `track_types` against the size-driven walk on **417 sessions, 417/417
+clean**, and recorded it as sound: *"two predicted reader defects in track_types, both refuted by
+measurement"*. A different sample of 522 found three failures. The refutation of the UNDERCOUNT
+claim stands; the conclusion that the reader was therefore fine did not.
+
+### And the fix broke the synthesis path
+
+Switching unconditionally raised `AttributeError` in **114 tests**: `grow_one_track` calls this via
+`channel_count` on a MID-CONSTRUCTION body that has no master index yet, and the size-driven walk
+needs one. Every real session has an index; only this library's own intermediate buffers do not, and
+those carry no unnamed header. So the walk is tried first and the scan parser is the fallback.
+
+My test then failed too — it asserted `flat_blocks` never appears, which was written before I knew a
+fallback was needed. Rewritten to assert the real property: the size-driven walk is the TRY body and
+the scan parser appears only in the except branch, checked structurally on the AST.
+
+**The corpus and the synthesis path are different oracles.** A change verified on 522 real sessions
+still broke 114 tests, because none of those sessions is a half-built buffer.
+
+309 tests green.

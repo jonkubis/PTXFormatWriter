@@ -8973,16 +8973,37 @@ def track_types(data: bytes) -> list[TrackInfo]:
     Mono vs stereo is read from the 0x1014 channel-count byte; MIDI is any
     0x1057 header. This is the structural basis for mix-and-match composition
     (you must know each track's type + channel footprint to place it)."""
-    ptf = parse(data)
+    # SIZE-DRIVEN. The scan parser misses an UNNAMED track header -- a `0x1057` whose u32 name
+    # length is 0 -- so `track_types` under-reported by one on `Alabama.bak.019/020/022`
+    # (101 of 102, 102 of 103). Fifth reader switched off the scan parser for the same class of
+    # reason, after clip_positions, set_clip_position, selected_tracks and session_name.
+    #
+    # `offset` keeps its meaning: the payload start, i.e. zmark + 7, so callers that pass it back
+    # to `set_track_channels` are unaffected.
+    # The size-driven walk needs a findable master index, and `grow_one_track` calls this (via
+    # `channel_count`) on a MID-CONSTRUCTION body that does not have one yet -- switching
+    # unconditionally raised AttributeError in 114 tests. So: size-driven when the index exists,
+    # scan parser when it does not. Every real session has an index; only the synthesis path's
+    # intermediate buffers do not, and those are built by this library and carry no unnamed header.
+    try:
+        blocks = [(z, e, c) for z, e, c in _size_driven_blocks(data) if z >= 31]
+    except Exception:
+        blocks = [(b.offset - 7, b.offset - 7 + b.block_size, b.content_type)
+                  for b in flat_blocks(parse(data))]
     out: list[TrackInfo] = []
-    for b in flat_blocks(ptf):
-        if b.content_type == _AUDIO_HDR:
-            name, nlen = _hdr_name(data, b)
-            nchan = data[b.offset + 6 + nlen + 1]
-            out.append(TrackInfo(name, "stereo" if nchan == 2 else "mono", nchan, b.offset))
-        elif b.content_type == _MIDI_HDR:
-            name, _ = _hdr_name(data, b)
-            out.append(TrackInfo(name, "midi", 0, b.offset))
+    for z, e, c in blocks:
+        if c not in (_AUDIO_HDR, _MIDI_HDR):
+            continue
+        off = z + 7
+        nlen = int.from_bytes(data[z + 9 : z + 13], "little")
+        if nlen > 255 or z + 13 + nlen > e:
+            continue
+        name = _decode_name(data[z + 13 : z + 13 + nlen])
+        if c == _AUDIO_HDR:
+            nchan = data[off + 6 + nlen + 1]
+            out.append(TrackInfo(name, "stereo" if nchan == 2 else "mono", nchan, off))
+        else:
+            out.append(TrackInfo(name, "midi", 0, off))
     out.sort(key=lambda t: t.offset)
     return out
 

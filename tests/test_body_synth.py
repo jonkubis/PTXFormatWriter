@@ -4630,3 +4630,112 @@ class AddClipChainTests(unittest.TestCase):
         import ptxformatwriter as ptx
         self.assertIs(ptx.add_clip, BS.add_clip)
         self.assertIn("add_clip", ptx.__all__)
+
+
+class TrackTypesUnnamedHeaderTests(unittest.TestCase):
+    """`track_types` must report every track header, including one with no name.
+
+    The scan parser skips a `0x1057` whose u32 name length is 0, so `track_types` under-reported by
+    one on `Alabama.bak.019/020/022` (101 of 102, 102 of 103). Switched to the size-driven walk —
+    the fifth reader moved off the scan parser, after `clip_positions`, `set_clip_position`,
+    `selected_tracks` and `session_name`.
+
+    Note on method: an earlier check of this same reader returned 417/417 clean and I recorded it
+    as sound. A different sample of 522 found the three. **A clean result on one sample is not a
+    proof**, which is the lesson this project has now recorded for corpus rules and for readers
+    alike.
+    """
+
+    def test_the_count_matches_the_authoritative_walk(self):
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 900_000:
+                continue
+            sized = sum(1 for z, _e, c in BS._size_driven_blocks(d)
+                        if z >= 31 and c in (0x1014, 0x1057))
+            self.assertEqual(len(BS.track_types(d)), sized,
+                             f"{path.name}: reader disagrees with the size-driven walk")
+            checked += 1
+            if checked >= 25:
+                break
+        self.assertTrue(checked, "no control session was checked")
+
+    def test_an_unnamed_header_is_still_a_track(self):
+        """A zero-length name is a track with no name, not the absence of a track."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 900_000:
+                continue
+            hdrs = [(z, e, c) for z, e, c in BS._size_driven_blocks(d)
+                    if z >= 31 and c in (0x1014, 0x1057)]
+            if not hdrs:
+                continue
+            z, e, _c = hdrs[0]
+            maimed = bytearray(d)
+            maimed[z + 9:z + 13] = (0).to_bytes(4, "little")   # blank the name length
+            before = len(BS.track_types(d))
+            after = len(BS.track_types(bytes(maimed)))
+            self.assertEqual(after, before,
+                             "blanking a header's name must not remove it from track_types")
+            return
+        self.skipTest("no control session with a track header")
+
+    def test_the_scan_parser_is_only_a_fallback(self):
+        """Preference order, not absence.
+
+        My first version of this test asserted `flat_blocks` never appears — too strong, and
+        written before I knew a fallback was needed. `track_types` is called by
+        `grow_one_track` (via `channel_count`) on a MID-CONSTRUCTION body that has no master index
+        yet, and the size-driven walk needs one: switching unconditionally raised AttributeError in
+        114 tests. Every real session has an index; only this library's own intermediate buffers do
+        not, and those carry no unnamed header. So the property is that the size-driven walk is
+        tried FIRST and the scan parser is reached only when it fails.
+        """
+        import ast, inspect
+        tree = ast.parse(inspect.getsource(BS.track_types).lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        self.assertIn("_size_driven_blocks", body)
+        tries = [n for n in ast.walk(fn) if isinstance(n, ast.Try)]
+        self.assertTrue(tries, "the fallback must be a try/except, not an unguarded branch")
+        t = tries[0]
+        self.assertIn("_size_driven_blocks", ast.unparse(ast.Module(body=t.body, type_ignores=[])),
+                      "the size-driven walk must be the TRY body")
+        handlers = "".join(ast.unparse(ast.Module(body=h.body, type_ignores=[]))
+                           for h in t.handlers)
+        self.assertIn("flat_blocks", handlers,
+                      "the scan parser must appear only in the except branch")
+
+    def test_it_still_works_without_a_master_index(self):
+        """The 114-error regression, pinned: a body under construction has no index yet."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            n = len(BS.track_types(d))
+            if not n:
+                continue
+            # truncate the trailing master index; the header blocks are untouched
+            import ptxformatwriter.final_index as _FI
+            ref = _FI.final_index_ref(d)
+            if ref is None:
+                continue
+            headless = d[:ref.start]
+            got = BS.track_types(headless)
+            self.assertGreater(len(got), 0,
+                               "track_types must still enumerate headers with no master index")
+            return
+        self.skipTest("no suitable control session")
