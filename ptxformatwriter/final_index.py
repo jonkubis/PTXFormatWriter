@@ -747,6 +747,30 @@ def offset_holes(data: bytes) -> tuple["W.BlockRef | None", list[tuple[int, int,
     if ref is None:
         return None, []
     zmark_to_type, by_type = block_layout(data)
+    # AUGMENT THE MAP WITH THE SIZE-DRIVEN WALK. `block_layout` is built from
+    # `writer._flatten_block_bounds`, i.e. the SCAN parser, which undercounts 80 content types.
+    # `add()` below silently RETURNS when a hole's target is not in this map, so a hole pointing at
+    # a block the scan parser missed is dropped -- and a dropped hole is never shifted on a resize,
+    # leaving a stale master-index offset that nothing reports.
+    #
+    # Measured over 321 sessions: 2 drop holes, 4 in total (`DWTS PT 2603 h.bak.006` loses 3,
+    # `2805 PT V2a` 1). Small, but silent and unrecoverable, and `reindex_after_resize`'s
+    # `_resolve_holes_sized` fallback does NOT cover it -- that path is reached only on an
+    # exception, and a dropped hole raises nothing.
+    #
+    # The scan layout is kept as the base so ranks stay identical wherever it already agreed;
+    # entries it missed are added, and `by_type` re-sorted so `.index(value)` still means
+    # "rank in file-offset order".
+    _sized = _block_bounds_sized(data, ref.start)
+    _added = False
+    for _z, _ct in _sized.items():
+        if _z not in zmark_to_type:
+            zmark_to_type[_z] = _ct
+            by_type.setdefault(_ct, []).append(_z)
+            _added = True
+    if _added:
+        for _offs in by_type.values():
+            _offs.sort()
     known = set(by_type)
     zmarks = set(zmark_to_type)
     records = parse_records(ref.data, known, zmarks)

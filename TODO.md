@@ -6388,3 +6388,55 @@ cannot be distinguished from a hung one"* — and I re-derived it the expensive 
 the log once, blaming index 172 when the print happens BEFORE the work, so the culprit was 171.
 
 312 tests green.
+
+## 2026-07-28 — the last two queue items: offset_holes dropped holes; the validator FP is gone
+
+### #12 offset_holes silently dropped holes (FIXED)
+
+`offset_holes` types each hole's target via `block_layout`, which is built from
+`writer._flatten_block_bounds` — the SCAN parser, which undercounts 80 content types. Its inner
+`add()` silently RETURNS when the target is not in that map, so a hole pointing at a block the scan
+parser missed is **dropped** — and a dropped hole is never shifted on a resize, leaving a stale
+master-index offset that nothing reports.
+
+    sessions measured   321
+    dropping holes        2     DWTS PT 2603 h.bak.006 (-3), 2805 PT V2a (-1)
+    holes lost            4
+
+`reindex_after_resize`'s `_resolve_holes_sized` fallback does NOT cover it: that path runs only on
+an exception, and a dropped hole raises nothing.
+
+FIXED by AUGMENTING rather than replacing — the scan layout stays the base so every rank that
+already agreed is unchanged, and `_block_bounds_sized` (already in `final_index`, no new import)
+adds what it missed. Verified: **342/342 sessions now match the size-driven reference**, and
+duplicate->remove is byte-exact on 296 with 0 differing.
+
+### #11 the validator false positive no longer reproduces
+
+The audit reported error-severity `audio-file-list` firing on 1 PT-authored session. Re-measured
+after today's `_audio_file_list` folder-marker fix: **406 PT-authored sessions, ZERO error
+invariants firing.** The false positive was a symptom of the truncated file-list walk (the audit's
+own note said "a 0x5A phantom in the 0x1..."), and fixing the walk removed it.
+
+That is a useful shape to notice: **two of the twelve items were the same defect seen from
+different ends.**
+
+### All twelve closed
+
+    1  set_markers destroyed the marker/playlist matrix        refuse
+    2  retarget_audio_file wrote a constant / overran          +28, bounded
+    3  set_tempo_map / set_meter_map dropped blocks            refuse
+    4  session_bit_depth returned 0 on every local session     two layouts
+    5  selected_tracks answered from unreadable data           strict=True
+    6  duplicate->remove lost 2 bytes on the last entry        detect the form
+    7  _audio_file_list stopped at the first folder marker     kind byte only
+    8  session_name read the file-header pointer record        size-driven
+    9  add_clip refused MIDI/video; last private mutator       chains + export
+    10 track_types missed an unnamed MIDI header               size-driven
+    11 validator audio-file-list false positive                gone with #7
+    12 offset_holes dropped holes                              augment the map
+
+Plus `plugins()` (empty on 31.4% of sessions) found and fixed during the same pass, and
+`session_is_probably_ours` globbing the entire filesystem, found while chasing #11.
+
+314 tests green.

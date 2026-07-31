@@ -4808,3 +4808,69 @@ class SessionProvenanceScopeTests(unittest.TestCase):
             self.assertFalse(BS.session_is_probably_ours(d, str(path), siblings=set()))
             return
         self.skipTest("no control session with a differing recorded name")
+
+
+class OffsetHoleCompletenessTests(unittest.TestCase):
+    """`final_index.offset_holes` must find every hole, including ones the scan parser can't type.
+
+    `block_layout` is built from `writer._flatten_block_bounds`, i.e. the SCAN parser, which
+    undercounts 80 content types. `offset_holes`'s inner `add()` silently RETURNS when a hole's
+    target is not in that map — and a dropped hole is never shifted on a resize, leaving a stale
+    master-index offset that nothing reports.
+
+    Measured over 321 sessions: 2 drop holes, 4 in total (`DWTS PT 2603 h.bak.006` loses 3,
+    `2805 PT V2a` 1). `reindex_after_resize`'s `_resolve_holes_sized` fallback does not cover it —
+    that path is reached only on an exception, and a dropped hole raises nothing.
+    """
+
+    @staticmethod
+    def _sized_layout(data):
+        z2t, byt = {}, {}
+        for z, _e, c in BS._size_driven_blocks(data):
+            z2t[z] = c
+            byt.setdefault(c, []).append(z)
+        for v in byt.values():
+            v.sort()
+        return z2t, byt
+
+    def test_no_hole_is_dropped(self):
+        """Compared against the same walk with a fully size-driven map."""
+        import ptxformatwriter.final_index as FI
+        checked = 0
+        real = FI.block_layout
+        try:
+            for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+                try:
+                    d = _load_path(path)
+                except Exception:
+                    continue
+                if len(d) > 900_000:
+                    continue
+                try:
+                    _r, got = FI.offset_holes(d)
+                    FI.block_layout = self._sized_layout
+                    _r, want = FI.offset_holes(d)
+                finally:
+                    FI.block_layout = real
+                self.assertEqual(len(got), len(want),
+                                 f"{path.name}: {len(want) - len(got)} holes dropped")
+                checked += 1
+                if checked >= 20:
+                    break
+        finally:
+            FI.block_layout = real
+        self.assertTrue(checked, "no control session was checked")
+
+    def test_the_map_is_augmented_not_replaced(self):
+        """The scan layout stays the base so existing ranks are unchanged; only misses are added."""
+        import ast, inspect
+        import ptxformatwriter.final_index as FI
+        src = inspect.getsource(FI.offset_holes)
+        tree = ast.parse(src.lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        self.assertIn("block_layout(data)", body, "the scan layout must still be the base")
+        self.assertIn("_block_bounds_sized", body, "the size-driven walk must augment it")
