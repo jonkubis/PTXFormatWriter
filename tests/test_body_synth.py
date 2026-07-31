@@ -5303,3 +5303,52 @@ class SessionInfoTrackCountTests(unittest.TestCase):
                 return
         raise unittest.SkipTest("no control session has a track kind without a 0x261B")
 
+class ScanUndercountNullIndexRefTests(unittest.TestCase):
+    """`synthesize` produced a master index containing NULL POINTERS at exactly 82 tracks.
+
+    `final_index._label_maps` enumerated blocks with the 0x5A SCAN parser, and `_fill_offsets`
+    resolves every donor child ref by (label, occurrence), returning 0 when the occurrence is
+    missing from the target. So a block the scan misses becomes a null pointer in the index.
+
+    At n=82 the scan found ONE 0x258a and ONE 0x258b where the size-driven walk finds two. The
+    donor references occurrence 1 of each, so two refs resolved to 0, plus a third for the 0x2501
+    sharing that record. Downstream, `parse_records`'s `is_child_ref` rejects offset 0 (not a
+    zmark), reads the ref's own type bytes as `entry_count`, and raises `bad element tag ...
+    (record type 0x2587)`.
+
+    Swept 8..140 for stereo/mono/mixed: mono and mixed failed at 82 and NOWHERE else, and stereo
+    never failed -- which is why it looked like an inexplicable single track count. Making the
+    walk size-driven left 41 of 42 synthesis outputs byte-for-byte identical across three specs
+    and fourteen track counts; the only change is the case that used to raise.
+    """
+
+    def test_82_track_mono_and_mixed_synthesis_succeeds(self):
+        for label, spec in (("mono", [1] * 82), ("mixed", [1, 2] * 41)):
+            with self.subTest(spec=label):
+                out = BS.synthesize(spec)
+                self.assertFalse(BS.validate(out), "%s n=82 did not validate clean" % label)
+
+    def test_the_index_carries_no_null_child_refs_at_82_tracks(self):
+        """The defect itself, not just its downstream symptom."""
+        out = BS.synthesize([1] * 82)
+        ref = FI.final_index_ref(out)
+        records = FI.parse_records(
+            ref.data,
+            {c for _z, _e, c in BS._size_driven_blocks(out)},
+            {z for z, _e, _c in BS._size_driven_blocks(out)})
+        nulls = [(hex(r.content_type), hex(c.child_type))
+                 for r in records for c in r.child_refs if c.offset == 0]
+        self.assertEqual(nulls, [], "index child refs pointing at offset 0: %r" % (nulls,))
+
+    def test_label_walk_is_size_driven_not_scan_driven(self):
+        """Pins the mechanism: the walk behind the label maps must agree with the size-driven
+        enumeration on the types the index references, on a session where the scan undercounts
+        (6887 blocks scanned vs 7481 walked, 23 content types differing)."""
+        out = BS.synthesize([1] * 82)
+        sized = Counter(c for _z, _e, c in BS._size_driven_blocks(out))
+        flat = Counter(b.content_type for b in FI._flat_blocks(out))
+        for ct in (0x258A, 0x258B, 0x2501, 0x200A, 0x200B):
+            self.assertEqual(flat.get(ct, 0), sized.get(ct, 0),
+                             "0x%04x: label walk found %d, size-driven walk finds %d"
+                             % (ct, flat.get(ct, 0), sized.get(ct, 0)))
+

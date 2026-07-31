@@ -9,6 +9,42 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Item 11 CLOSED — the 82-track failure was the scan parser reaching the master index
+
+The null `0x2501` child ref diagnosed above traces to `final_index._label_maps`, which enumerated
+blocks with the **0x5A scan parser**. `_fill_offsets` resolves every donor child ref by
+`(label, occurrence)` and **returns 0** when the occurrence is missing from the target — so a
+block the scan misses becomes a NULL POINTER in the synthesized index.
+
+At n=82 the scan found **one** `0x258a` and **one** `0x258b` where the size-driven walk finds two.
+The donor references occurrence 1 of each, so both resolved to 0, plus a third null for the
+`0x2501` sharing that record — three nulls, not the one my first probe counted (it only matched
+`0x2501`-typed refs). n=81 and n=83 agree between the two walks, which is exactly why the failure
+looked like an inexplicable single track count.
+
+My earlier "ruled out: the scan parser" was **wrong**, and instructively so: I compared scan vs
+size-driven for `0x2501` — the type named in the error message — and they agreed. The error names
+the type whose ref could not be *parsed*, not the type that was *missed*. Comparing only the type
+the symptom mentions is not a test of the hypothesis.
+
+Fix: `_flat_blocks` now walks by declared size. Same medicine as every other reader in this
+project; this was the last one still on the scan.
+
+Safety, measured rather than assumed — `compose_index` is PT-confirmed byte-exact at many N:
+**41 of 42 synthesis outputs are byte-for-byte identical** to HEAD across three specs (stereo /
+mono / mixed) and fourteen track counts. The single difference is `mixed` at 82 tracks, which
+used to RAISE and now produces a session validating clean. Full sweep of 8..140 for all three
+specs: **no failures at any n**.
+
+Three tests, all verified to bite (revert `_flat_blocks` to the scan and all four subtests error).
+The scan undercounts the final 82-track session by 594 blocks across 23 content types, so the
+unit test has real signal.
+
+REMAINING from the synthesis group: item 13 (duplicated `0x2589` view-chain ordinals in
+click-bearing synthesis).
+
+
 ## Synthesis items 11/12: item 12 REFUTED, item 11 localized to one byte (DIAGNOSED, NOT FIXED)
 
 **Item 12 — "from n=83 every stereo synthesis trips the validator's CONTAINMENT error, including
@@ -6691,12 +6727,13 @@ the name-based LOOKUP acting on every match. Remaining: the three synthesis item
     name-table; 36/317 -> 0/317
 
 **Synthesis**
-11. `synthesize()` raises `ValueError` at exactly **82 tracks**; the synthesized master index
-    genuinely contains a NULL pointer, so it is not a reader artifact.
-12. From **n=83** every stereo synthesis trips the validator's CONTAINMENT error — the tier whose
-    own docstring says "PT is known to REJECT these... CRASHED PT ON LOAD (bug #22)" — including
-    2 errors at n=418, the count this project records as PT-confirmed. Those two claims cannot both
-    be right.
+11. ~~`synthesize()` raises `ValueError` at exactly **82 tracks**~~ **CLOSED** — the null pointer
+    was real; cause was `_label_maps` using the scan parser (see the section above). All three
+    specs now clean across 8..140, with 41/42 outputs byte-identical to before.
+12. ~~From **n=83** every stereo synthesis trips the validator's CONTAINMENT error, including 2
+    errors at n=418~~ **REFUTED** — swept 8..140 plus 200 and 418: zero validator issues at every
+    n. The n=418 PT-confirmed record and the containment claim were never in conflict, because
+    the containment error does not occur.
 13. **Every click-bearing synthesis produces duplicated `0x2589` view-chain ordinals** (39/39 click
     cases; 0/35 non-click). I checked `per-track-subtree-ordinal` earlier today and found the click
     path clean — a DIFFERENT ordinal, so that check did not cover this.

@@ -968,17 +968,52 @@ def _counter_zmark(data: bytes) -> int:
     return min(b.offset - 7 for b in W.parse_unxored(data).blocks)
 
 
+@dataclass(frozen=True)
+class _SizedBlock:
+    """The three fields `_block_label` needs, from a size-driven walk."""
+    offset: int          # content start (zmark + 7), matching writer.Block.offset
+    block_size: int
+    content_type: int
+
+
 def _flat_blocks(data: bytes):
-    ptf = W.parse_unxored(data)
+    """Every block, enumerated by DECLARED SIZE rather than by scanning for 0x5A bytes.
+
+    This used to walk `W.parse_unxored(data)`. That scan parser UNDERCOUNTS -- and the
+    undercount reaches the master index through `_label_maps`, because `_fill_offsets`
+    resolves each donor child-ref by (label, occurrence) and returns 0 when the occurrence
+    is missing from the target. A missing block therefore becomes a NULL POINTER in the
+    synthesized index.
+
+    Measured: `synthesize([1]*82)` and the equivalent mixed spec failed with
+    `bad element tag ... (record type 0x2587)`, at exactly 82 tracks and nowhere else in
+    8..140. At n=82 the scan found ONE 0x258a and ONE 0x258b where the size-driven walk finds
+    two; the donor references occurrence 1 of each, so `match()` returned 0 for both, plus a
+    third null for the 0x2501 ref sharing that record. n=81 and n=83 agree between the two
+    walks, which is why the failure looked like an isolated, inexplicable track count.
+    """
     out: list = []
 
-    def rec(block):
-        out.append(block)
-        for child in block.child:
-            rec(child)
+    def descend(lo: int, hi: int) -> None:
+        pos = lo
+        while pos < hi:
+            nz = data.find(b"\x5a", pos, hi)
+            if nz < 0:
+                return
+            pos = nz
+            block_type = int.from_bytes(data[pos + 1 : pos + 3], "little")
+            if not (block_type & 0xFF00):
+                size = int.from_bytes(data[pos + 3 : pos + 7], "little")
+                ct = int.from_bytes(data[pos + 7 : pos + 9], "little")
+                end = (pos + 7) + size
+                if size > 0 and end <= hi:
+                    out.append(_SizedBlock(offset=pos + 7, block_size=size, content_type=ct))
+                    descend(pos + 9, end)
+                    pos = end
+                    continue
+            pos += 1
 
-    for block in ptf.blocks:
-        rec(block)
+    descend(0, len(data))
     out.sort(key=lambda b: b.offset)
     return out
 
