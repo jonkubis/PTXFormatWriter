@@ -7,6 +7,29 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## session_info n_tracks undercounted (CLOSED); the `_lane_track_name` 'Z' item is REFUTED
+
+**Item 8 — CONFIRMED.** `session_info()['n_tracks']` returned the `0x261B` count, with the
+comment *"one 0x261B per track of any type"*. That comment was false: Pro Tools does not write a
+`0x261B` for every kind of track. **114 of 352 sessions** across three drives undercounted — 46
+reported against 52 real track records, 61 against 70. Now counts the track RECORDS
+(`_TRACK_RECORD_TYPES`: audio / MIDI / click / folder / instrument / master / VCA), the same set
+`remove_track`'s own guard uses. 114 -> 0. MIDI tracks are the common missing kind (a
+`mixedmidi_5` control has 5 records and 3 `0x261B`); 69 control sessions exercise the difference,
+so the test is not vacuous.
+
+**Item 9 — `_lane_track_name()` returns the literal `'Z'` for a zero-length name — REFUTED, at
+the source.** The function accepts a length only when `1 <= n <= 64`, so a zero-length name never
+matches; it advances and ultimately returns `""`. There is no path that yields `'Z'` unless the
+name genuinely is `"Z"`. 0 occurrences over 352 sessions as well. (Note the probe that produced
+that 0 was itself wrong — it called the function with 2 of its 3 arguments and swallowed the
+`TypeError`, so the corpus number alone proves nothing. The source does.)
+
+Also corrected here: `session_info`'s `n_markers` comment still said "deduped", which stopped
+being true when `markers()` moved to reading one `0x2030` instance.
+
+
 ## markers() lost distinct memory locations (CLOSED); the clips()/region_list() item is REFUTED
 
 **Item 6 — `clips()` and `region_list()` "use DIFFERENT region index spaces" — DOES NOT

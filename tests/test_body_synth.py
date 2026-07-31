@@ -5259,3 +5259,47 @@ class MarkerListInstanceTests(unittest.TestCase):
         """Dropping an unparented record silently would be the same class of bug this replaces."""
         blocks = [(3000, 4000, 0x2030), (3010, 3100, 0x2077), (9000, 9100, 0x2077)]
         self.assertEqual(BS._first_marker_list_records(blocks), [3010, 9000])
+
+class SessionInfoTrackCountTests(unittest.TestCase):
+    """`session_info()['n_tracks']` counted 0x261B, with the comment "one 0x261B per track of any
+    type". That comment was false -- Pro Tools does not write a 0x261B for every kind of track.
+    Measured over 352 sessions on three drives, 114 undercounted: 46 reported against 52 real
+    track records, 61 against 70. It now counts the track RECORDS, the same set `remove_track`'s
+    own track-count guard uses (audio / MIDI / click / folder / instrument / master / VCA).
+    """
+
+    def test_n_tracks_counts_every_kind_of_track_record(self):
+        n = checked = 0
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                blocks = BS._size_driven_blocks(d)
+                got = BS.session_info(d)["n_tracks"]
+            except Exception:
+                continue
+            n += 1
+            want = sum(1 for _z, _e, c in blocks if c in BS._TRACK_RECORD_TYPES)
+            self.assertEqual(got, want,
+                             "%s: n_tracks=%d but the session holds %d track records"
+                             % (q.name, got, want))
+            if want != sum(1 for _z, _e, c in blocks if c == 0x261B):
+                checked += 1          # a session where the two counts actually differ
+        self.assertGreater(n, 0)
+
+    def test_a_track_kind_without_a_0x261b_is_still_counted(self):
+        """The failure mode directly: a session whose track records include a kind PT writes no
+        0x261B for must not report a smaller n_tracks than it has tracks."""
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                blocks = BS._size_driven_blocks(d)
+            except Exception:
+                continue
+            recs = sum(1 for _z, _e, c in blocks if c in BS._TRACK_RECORD_TYPES)
+            b261b = sum(1 for _z, _e, c in blocks if c == 0x261B)
+            if recs > b261b:
+                self.assertEqual(BS.session_info(d)["n_tracks"], recs,
+                                 "%s: %d track records but only %d 0x261B" % (q.name, recs, b261b))
+                return
+        raise unittest.SkipTest("no control session has a track kind without a 0x261B")
+

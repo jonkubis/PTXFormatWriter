@@ -5580,10 +5580,15 @@ def session_info(data: bytes) -> dict:
         "base_tempo": base_tempo(data),
         "base_meter": base_meter(data),
         "n_blocks": len(bl),
-        "n_tracks": ctc.get(0x261B, 0),          # one 0x261B per track of any type
+        # NOT the 0x261B count. That comment -- "one 0x261B per track of any type" -- was false:
+        # Pro Tools does not write a 0x261B for every kind of track. Measured over 352 sessions on
+        # three drives, 114 undercounted (46 reported against 52 real track records; 61 against
+        # 70). Count the track RECORDS, the same set `remove_track`'s own track-count guard uses,
+        # covering audio / MIDI / click / folder / instrument / master / VCA.
+        "n_tracks": sum(1 for _z, _e, c in bl if c in _TRACK_RECORD_TYPES),
         "n_clips": ctc.get(0x1050, 0),
         "n_regions": ctc.get(0x2628, 0),
-        "n_markers": len(markers(data)),         # deduped (a 2nd 0x2030 copy can exist)
+        "n_markers": len(markers(data)),         # one 0x2030 instance (a 2nd copy can exist)
         "n_tempo_events": len(tempo_map(data)),
         "n_meter_events": len(meter_map(data)),
         "clip_lanes": [(name, k) for _z, name, k in clip_lanes(data)],
