@@ -990,7 +990,7 @@ def _insert_clip_lanes(b1054: bytes, track_index: int, tail0: bytes, tail1: byte
     the clip tail). Lanes are track-major (2 per stereo track); block_size is bumped."""
     import struct
     out = bytearray(b1054[:9])  # zmark + btype + size + content_type
-    i, lane = 9, 0
+    i, lane, applied = 9, 0, 0
     while i < len(b1054):
         if b1054[i] != 0x5A:
             out += b1054[i:i + 1]; i += 1; continue
@@ -1004,9 +1004,19 @@ def _insert_clip_lanes(b1054: bytes, track_index: int, tail0: bytes, tail1: byte
                 newc = bytearray(child[:13 + namelen] + tail)
                 struct.pack_into("<I", newc, 3, len(newc) - 7)
                 child = bytes(newc)
+                applied += 1
             lane += 1
         out += child
         i += 7 + csize
+    # NO MATCHING LANE MEANS NO CLIP. An out-of-range `track_index` matches nothing, so the
+    # block was rebuilt byte-identical and the caller got back a session carrying the clip's
+    # global blocks but NO placement -- and no error. Measured on `10 stereo tracks.ptx`:
+    # indices 10, 60, -1 and -11 all returned 0 placements. Negative indices never wrap here
+    # (`2 * -1` is just a lane number that cannot match), so they drop silently too.
+    if applied != 2:
+        raise ValueError(
+            f"track_index {track_index} matched {applied} of 2 lanes in a 0x1054 holding "
+            f"{lane} lanes ({lane // 2} stereo tracks); valid indices are 0..{lane // 2 - 1}")
     struct.pack_into("<I", out, 3, len(out) - 7)
     return bytes(out)
 
@@ -1129,6 +1139,7 @@ def _place_clip_lanes(b1054: bytes, assignments, tails) -> bytes:
     import struct
     track_tail = {t: (tails[2 * ci], tails[2 * ci + 1]) for ci, t in enumerate(assignments)}
     out = bytearray(b1054[:9])
+    seen_tracks = set()
     i, lane = 9, 0
     while i < len(b1054):
         if b1054[i] != 0x5A:
@@ -1143,9 +1154,17 @@ def _place_clip_lanes(b1054: bytes, assignments, tails) -> bytes:
                 newc = bytearray(child[:13 + namelen] + track_tail[tk][lane % 2])
                 struct.pack_into("<I", newc, 3, len(newc) - 7)
                 child = bytes(newc)
+                seen_tracks.add(tk)
             lane += 1
         out += child
         i += 7 + csize
+    # Same silent drop as `_insert_clip_lanes`: a track index with no lane places no clip and
+    # says nothing. Report every unplaced assignment, not just the first.
+    missing = sorted(set(track_tail) - seen_tracks)
+    if missing:
+        raise ValueError(
+            f"track indices {missing} have no lane in a 0x1054 holding {lane} lanes "
+            f"({lane // 2} stereo tracks); valid indices are 0..{lane // 2 - 1}")
     struct.pack_into("<I", out, 3, len(out) - 7)
     return bytes(out)
 
@@ -5118,7 +5137,7 @@ def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
     return bytes(out)
 
 
-def _splice_in(data: bytes, at: int, blob: bytes) -> bytes:
+def _splice_in(data: bytes, at: int, blob: bytes, *, container: "tuple[int, int] | None" = None) -> bytes:
     """Insert `blob` at body offset `at`, growing every container that spans the point and sliding
     every master-index offset that sits at or past it. Size-neutral bookkeeping only -- the caller
     is responsible for any COUNT field the new element belongs to.
@@ -5131,8 +5150,18 @@ def _splice_in(data: bytes, at: int, blob: bytes) -> bytes:
     bl = sorted(_raw_block_bounds(data, ref.start))
     grow = len(blob)
     out = bytearray(data[:at] + blob + data[at:])
+    # WHICH BLOCKS GROW. The default `z < at <= e` is right only when nothing ENDS at `at`.
+    # When the new element is appended after the last of a run of framed siblings, `at` is also
+    # that sibling's end, and the default grows it too -- making the new element its CHILD
+    # instead of its sibling. Pass `container` (the list the element belongs to) to say so
+    # directly: the list and its ancestors grow, siblings do not. See `duplicate_audio_file`,
+    # where the 0x1003 run ends exactly at the splice point in 52 of 52 control sessions.
+    #
+    # `add_clip`/`remove_clip` keep the default: their splice points are strictly inside their
+    # containers, so the two rules coincide there and both are PT-confirmed.
     for z, e, _c in bl:
-        if z < at <= e:
+        grows = (z <= container[0] and container[1] <= e) if container else (z < at <= e)
+        if grows:
             out[z + 3 : z + 7] = (
                 int.from_bytes(out[z + 3 : z + 7], "little") + grow
             ).to_bytes(4, "little")
@@ -5233,7 +5262,21 @@ def duplicate_audio_file(data: bytes, file_index: int, new_filename: str) -> byt
     recs = sorted((z, e) for z, e, c in bl if c == 0x1003)
     if recs:
         sz, se = recs[min(file_index, len(recs) - 1)]
-        out = _splice_in(out, recs[-1][1], bytes(out[sz:se]))
+        # The 0x1003 records live in the 0x1004 container, whose u32 at +9 is their count
+        # (52 of 52 control sessions). Scope the growth to that container: the run ends exactly
+        # at the splice point, so the default rule grew the LAST 0x1003 and nested the copy
+        # inside it (52 of 52). And bump the count -- this used to add a record and leave the
+        # count saying N, so the container disagreed with its own contents either way.
+        c1004 = [(z, e) for z, e, c in bl if c == 0x1004 and z < recs[0][0] and recs[-1][1] <= e]
+        out = _splice_in(out, recs[-1][1], bytes(out[sz:se]),
+                         container=c1004[0] if c1004 else None)
+        if c1004:
+            qz = c1004[0][0]
+            out = bytearray(out)
+            out[qz + 9 : qz + 13] = (
+                int.from_bytes(out[qz + 9 : qz + 13], "little") + 1
+            ).to_bytes(4, "little")
+            out = bytes(out)
     return out
 
 
@@ -5322,8 +5365,19 @@ def duplicate_region(data: bytes, region_index: int, new_name: str) -> bytes:
     at_ins = entries[-1][1]                           # append after the last entry
     grow = len(blob)
     out = bytearray(data[:at_ins] + bytes(blob) + data[at_ins:])
-    for z, e, _c in bl:                               # grow every container spanning the insert
-        if z < at_ins <= e:
+    # GROW THE LIST AND ITS ANCESTORS, NOT THE PREVIOUS LAST SIBLING. This tested
+    # `z < at_ins <= e`, and the last 0x2629 ENDS exactly at the insertion point -- in fact it
+    # ends exactly where the 0x262A list ends, in 20 of 20 control sessions carrying a region
+    # list. So the previous last entry was grown by `grow` too, which made the copy a CHILD of
+    # the region it was supposed to be a sibling of: the 0x262A count went to N+1 while the list
+    # had only N direct children. Measured on 52 of 52 sessions, and `validate()` did NOT catch
+    # it -- the gate does not cover 0x262A.
+    #
+    # The right set is the insertion container and its ancestors, which a containment test
+    # states directly. A strict `z < at_ins < e` is NOT the fix: it grows nothing at all here,
+    # because the list ends at the insertion point as well.
+    for z, e, _c in bl:
+        if z <= lz and le <= e:
             out[z + 3 : z + 7] = (
                 int.from_bytes(out[z + 3 : z + 7], "little") + grow
             ).to_bytes(4, "little")

@@ -4,6 +4,39 @@ Open research / feature items. Each entry should say what we want, what's unknow
 and why it matters. (Resolved items kept briefly for provenance.)
 
 
+
+## Appended siblings became children; out-of-range clip placement dropped silently (CLOSED)
+
+Three more round-2 items, all measured on the control corpus.
+
+**`duplicate_region` / `duplicate_audio_file` — the copy became a CHILD of the previous last
+sibling.** Both append after the last framed entry and then grow "every container spanning the
+insertion point" (`z < at <= e`). The last sibling ENDS at that point, so it was grown too. For
+regions the last `0x2629` ends exactly where the `0x262A` list ends in 20 of 20 sessions, so the
+list declared N+1 while holding N direct children — 52 of 52. Same for the `0x1003` run inside
+`0x1004` — 52 of 52. A strict `z < at < e` is NOT the fix: it grows nothing, because the list
+ends at the insertion point too. The right set is the insertion container and its ancestors,
+stated as a containment test. `_splice_in` takes an optional `container=` for this;
+`add_clip`/`remove_clip` keep the default (their splice points are strictly interior, so the two
+rules coincide, and both are PT-confirmed).
+
+**`duplicate_audio_file` never bumped the `0x1004` count.** `0x1004`'s u32 at +9 equals the number
+of `0x1003` records in 52 of 52 sessions. Adding a registration left it at N. Now incremented.
+Checked and NOT needed: the `0x103A` list has no entry count — the u32 before its entries is 0 in
+all 52 sessions, so it is not the count it looked like.
+
+`validate()` caught NONE of these: the gate covers neither `0x262A` nor `0x1004`.
+
+**`add_clip_to_track` / `add_clips_to_tracks` dropped clips silently.** The lane helpers rewrite a
+`0x1052` only when its index matches, so an out-of-range index rebuilt the block byte-identical
+and returned a session carrying the clip's global blocks but no placement, with no error. On
+`10 stereo tracks.ptx` (valid 0..9), indices 10, 60, -1 and -11 all gave 0 placements. Negative
+indices never wrap — `2 * -1` is just a lane number nothing matches. Both helpers now raise and
+name the valid range; `_place_clip_lanes` reports every unplaced index, not just the first.
+
+Five tests, each verified to bite.
+
+
 ## validate() false positives — the pre-write gate was rejecting real sessions (CLOSED)
 
 `validate()` is the gate every write path cites as its clean-result evidence, and its docstring

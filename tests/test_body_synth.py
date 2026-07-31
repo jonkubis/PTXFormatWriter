@@ -5033,3 +5033,116 @@ class WriteTargetValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     BS.rename_track(d, old, new)
 
+class AppendedSiblingContainmentTests(unittest.TestCase):
+    """`duplicate_region` and `duplicate_audio_file` appended a copy after the LAST framed
+    sibling and then grew "every container spanning the insertion point". The last sibling ENDS
+    at that point, so it was grown too and the copy became its CHILD rather than its sibling --
+    the list's declared count said N+1 while it had N direct children. 52 of 52 control sessions
+    for each, and `validate()` did not catch either (the gate covers neither 0x262A nor 0x1004).
+    """
+
+    @staticmethod
+    def _sessions():
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                ref = FI.final_index_ref(d)
+                yield str(q), d, ref, sorted(BS._raw_block_bounds(d, ref.start))
+            except Exception:
+                continue
+
+    @staticmethod
+    def _direct(spans):
+        return [(z, e) for z, e in spans if not any(a < z < b for a, b in spans)]
+
+    def test_duplicate_region_appends_a_sibling_not_a_child(self):
+        n = 0
+        for path, d, _ref, bl in self._sessions():
+            lists = [(z, e) for z, e, c in bl if c == 0x262A]
+            if not lists:
+                continue
+            lz, le = lists[0]
+            if not [1 for z, _e, c in bl if c == 0x2629 and lz < z < le]:
+                continue
+            out = BS.duplicate_region(d, 0, "DUP_PROBE")
+            ref2 = FI.final_index_ref(out)
+            bl2 = sorted(BS._raw_block_bounds(out, ref2.start))
+            l2 = [(z, e) for z, e, c in bl2 if c == 0x262A][0]
+            inner = sorted((z, e) for z, e, c in bl2 if c == 0x2629 and l2[0] < z < l2[1])
+            declared = int.from_bytes(out[l2[0] + 9 : l2[0] + 13], "little")
+            self.assertEqual(
+                len(self._direct(inner)), declared,
+                "%s: 0x262A declares %d regions but has %d DIRECT children (%d counting nested) "
+                "-- the copy was spliced inside the previous last region"
+                % (pathlib.Path(path).name, declared, len(self._direct(inner)), len(inner)))
+            n += 1
+        self.assertGreater(n, 0, "no control session carries a region list")
+
+    def test_duplicate_audio_file_appends_a_sibling_and_bumps_the_0x1004_count(self):
+        n = 0
+        for path, d, _ref, bl in self._sessions():
+            try:
+                if not BS._audio_file_list(d)[2]:
+                    continue
+            except Exception:
+                continue
+            if not [1 for _z, _e, c in bl if c == 0x1003]:
+                continue
+            out = BS.duplicate_audio_file(d, 0, "PROBE_DUP.wav")
+            ref2 = FI.final_index_ref(out)
+            bl2 = sorted(BS._raw_block_bounds(out, ref2.start))
+            recs = sorted((z, e) for z, e, c in bl2 if c == 0x1003)
+            direct = self._direct(recs)
+            q = [(z, e) for z, e, c in bl2 if c == 0x1004][0]
+            declared = int.from_bytes(out[q[0] + 9 : q[0] + 13], "little")
+            name = pathlib.Path(path).name
+            self.assertEqual(len(direct), len(recs),
+                             "%s: the copy is nested inside the previous last 0x1003" % name)
+            self.assertEqual(declared, len(direct),
+                             "%s: 0x1004 declares %d files but holds %d records -- adding a "
+                             "registration must bump the count" % (name, declared, len(direct)))
+            n += 1
+        self.assertGreater(n, 0, "no control session carries an audio-file list")
+
+class ClipPlacementRangeTests(unittest.TestCase):
+    """An out-of-range track index placed no clip and said nothing.
+
+    `_insert_clip_lanes`/`_place_clip_lanes` rewrite a 0x1052 lane only when its index matches,
+    so an index past the last lane rebuilt the block byte-identical. The caller got back a
+    session carrying the clip's global blocks (wav, region, path) but NO placement, and no
+    error. Measured on `10 stereo tracks.ptx`: indices 10, 60, -1 and -11 all gave 0 placements.
+    Negative indices never wrap here -- `2 * -1` is simply a lane number nothing matches.
+    """
+
+    @staticmethod
+    def _load(name):
+        for q in pathlib.Path("control_files").rglob(name):
+            f = PTFFormat(); f.load(str(q), 48000); return f.unxored_data()
+        raise unittest.SkipTest("control session %s not present" % name)
+
+    def test_a_valid_track_index_still_places_the_clip(self):
+        clean = self._load("10 stereo tracks.ptx")
+        ref = self._load("one clip bar 2.ptx")
+        for ti in (0, 9):
+            with self.subTest(track_index=ti):
+                out = BS.add_clip_to_track(clean, ref, ti)
+                self.assertEqual(len(BS.clip_positions(out)), 2,
+                                 "a stereo clip occupies two lanes")
+
+    def test_an_out_of_range_track_index_raises_instead_of_dropping_the_clip(self):
+        clean = self._load("10 stereo tracks.ptx")     # valid indices are 0..9
+        ref = self._load("one clip bar 2.ptx")
+        for ti in (10, 60, -1, -11):
+            with self.subTest(track_index=ti):
+                with self.assertRaises(ValueError):
+                    BS.add_clip_to_track(clean, ref, ti)
+
+    def test_add_clips_to_tracks_reports_every_unplaceable_index(self):
+        clean = self._load("10 stereo tracks.ptx")
+        ref3 = self._load("3 stereo 3 different clips.ptx")
+        self.assertEqual(len(BS.clip_positions(BS.add_clips_to_tracks(clean, ref3, [0, 1, 2]))), 6)
+        for idx in ([0, 1, 10], [0, 1, -1]):
+            with self.subTest(indices=idx):
+                with self.assertRaises(ValueError):
+                    BS.add_clips_to_tracks(clean, ref3, idx)
+
