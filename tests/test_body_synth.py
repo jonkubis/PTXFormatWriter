@@ -4978,3 +4978,58 @@ class NameTablePreambleFlagTests(unittest.TestCase):
         struct.pack_into("<I", blk, q, struct.unpack_from("<I", blk, q)[0] + 4)
         with self.assertRaises(EV.EndOfStream):
             EV.check_name_table(bytes(blk), [], 0, len(blk))
+
+class WriteTargetValidationTests(unittest.TestCase):
+    """Two write paths corrupted silently instead of failing, both found in the round-2 audit.
+
+    `bytearray[a:b] = v` with `a` past the end APPENDS rather than raising, which is how a bad
+    offset turned into a longer file with no error anywhere.
+    """
+
+    @staticmethod
+    def _session_with(*content_types):
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                blocks = BS._size_driven_blocks(d)
+            except Exception:
+                continue
+            have = {c for _z, _e, c in blocks}
+            if all(ct in have for ct in content_types):
+                return d, blocks
+        raise unittest.SkipTest("no control session carries %r" % (content_types,))
+
+    def test_set_track_channels_accepts_every_real_channel_map(self):
+        """The guard must not cost a legitimate call: 3712 of 3712 real 0x1014 blocks across 60
+        control sessions are accepted, and none changes the file length."""
+        d, blocks = self._session_with(0x1014)
+        n = 0
+        for z, _e, c in blocks:
+            if c != 0x1014:
+                continue
+            out = BS.set_track_channels(d, z + 7, [3, 4])
+            self.assertEqual(len(out), len(d), "a channel write must never resize the session")
+            n += 1
+        self.assertGreater(n, 0)
+
+    def test_set_track_channels_rejects_an_offset_that_is_not_a_channel_map(self):
+        """Reproduced on `512 mono tracks.ptx`: a 0x1015 container's content start wrote 4 bytes
+        into an unrelated 0x1014, and an offset 24 bytes before EOF read name length 16777216
+        and grew the file by 4 bytes."""
+        d, blocks = self._session_with(0x1014, 0x1015)
+        z1015 = [z for z, _e, c in blocks if c == 0x1015][0]
+        for label, toff in (("a 0x1015 container", z1015 + 7), ("near EOF", len(d) - 24)):
+            with self.subTest(target=label):
+                with self.assertRaises(ValueError):
+                    BS.set_track_channels(d, toff, [3, 4])
+
+    def test_rename_track_refuses_an_empty_name(self):
+        """An empty `old_name` matched 141,104 length-prefixed positions on `128 click
+        tracks.ptx`, rewrote ~every string, took the file 473,955 -> 881,952 bytes, and left it
+        unparseable."""
+        d, _ = self._session_with(0x1014)
+        for old, new in (("", "ZZZ"), ("Audio 1", "")):
+            with self.subTest(old=old, new=new):
+                with self.assertRaises(ValueError):
+                    BS.rename_track(d, old, new)
+

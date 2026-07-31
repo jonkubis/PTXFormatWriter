@@ -8870,6 +8870,16 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     new = new_name.encode() if isinstance(new_name, str) else bytes(new_name)
     if old == new:
         return data
+    # AN EMPTY old_name MATCHES EVERY LENGTH-PREFIXED POSITION. `track_name_occurrences(d, b"")`
+    # returned 141,104 hits on `128 click tracks.ptx`; the rename then rewrote ~every string in
+    # the session, took it from 473,955 to 881,952 bytes, and the result did not parse (the
+    # final index could no longer be located). An empty new_name is refused for the same reason
+    # in reverse: it produces zero-length names that nothing can rename back.
+    if not old:
+        raise ValueError("old_name is empty; an empty name matches every length-prefixed "
+                         "position in the session and rewrites the whole file")
+    if not new:
+        raise ValueError("new_name is empty; a zero-length track name cannot be found again")
     import bisect
     delta = len(new) - len(old)
     ref = _FI.final_index_ref(data)
@@ -9078,6 +9088,18 @@ def set_track_channels(data: bytes, track_offset: int, channels: list[int]) -> b
     bytes shorter before the marker, so its post-ID channel sits at a different
     absolute offset (marker+19 for both; the bug that mis-wrote mono as if stereo)."""
     out = bytearray(data)
+    # VALIDATE THE TARGET. Every offset below is derived from `track_offset`, so a caller that
+    # passes something that is not a 0x1014 content start corrupts silently rather than failing:
+    # passing a 0x1015 container's content start wrote 4 bytes into an unrelated 0x1014 block, and
+    # an offset 24 bytes before EOF read nlen=16777216 and GREW THE FILE BY 4 BYTES -- because
+    # `bytearray[a:b] = v` with `a` past the end appends instead of raising. Both reproduced on
+    # `512 mono tracks.ptx`.
+    if not (7 <= track_offset <= len(out) - 2 and out[track_offset - 7] == 0x5A
+            and int.from_bytes(out[track_offset : track_offset + 2], "little") == 0x1014):
+        raise ValueError(
+            f"track_offset {track_offset} is not the content start of a 0x1014 channel-map "
+            f"block (expected a 0x5A frame at {track_offset - 7} and content_type 0x1014); "
+            f"pass `zmark + 7` of the track's 0x1014")
     nlen = int.from_bytes(out[track_offset + 2 : track_offset + 6], "little")
     # BOUND the marker search to this block. `track_offset` is the block's content start
     # (`zmark + 7`), so its declared size sits in the four bytes just before it and the block ends
@@ -9102,6 +9124,15 @@ def set_track_channels(data: bytes, track_offset: int, channels: list[int]) -> b
     # Guarded by CONTAINMENT, which needs no theory about where the field really lives: a write that
     # would leave this block is skipped. The pre-marker channel, whose offset is derived from the
     # name length and is always in-block, is unaffected.
+    # The pre-marker writes were unguarded while the post-marker ones were containment-checked.
+    # On legitimate 0x1014 blocks they are in bounds (0 of 3834 overrun across 70 control
+    # sessions), so this guard is about a bad `track_offset`, not about real layout variation --
+    # but an unbounded slice-assign APPENDS, so unguarded it changes the file length.
+    need = track_offset + nlen + (15 if len(channels) > 1 else 13)
+    if need > _blk_end:
+        raise ValueError(
+            f"0x1014 at {track_offset - 7}: name length {nlen} puts the pre-marker channel "
+            f"field at {need}, past the block end {_blk_end}")
     c0 = int(channels[0]).to_bytes(2, "little")
     out[track_offset + nlen + 11 : track_offset + nlen + 13] = c0   # channel0 pre-marker
     if marker >= 0 and marker + 21 <= _blk_end:
