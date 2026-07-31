@@ -6076,3 +6076,41 @@ unbounded version overrun. The write list is now the pure function `_retarget_fi
 two tests.
 
 282 tests green.
+
+## 2026-07-28 — set_tempo_map / set_meter_map no longer drop blocks (verify, then commit)
+
+Queue item #3, closed the same way as `set_markers`: the SYNTHESIS writer must not quietly damage
+an arbitrary session.
+
+`set_tempo_map` splices the inlined `0x2028`/`0x2718` conductor templates over whatever is there.
+Where the session's conductor blocks carry more than the template does, that DROPS blocks — an
+identity `set_tempo_map(d, tempo_map(d))` differed on **297 of 342** sessions and lost a `0x2028`
+in **285**, because the inlined `0x2718` ruler carries a stale nested-`0x2028` block_size.
+`set_meter_map` differed on 14 of 57. Nothing noticed: the readers returned the right map from what
+survived and `validate()` reported no new issue.
+
+`replace_tempo_map` / `replace_meter_map` are the IN-PLACE editors for an arbitrary session and are
+byte-identical on an identity replace (342/342). So the fix is to refuse and name them.
+
+NEW PRIMITIVE `_blocks_lost_by_type(before, after)` -> `{content_type: count}`. A write that removes
+blocks it cannot restore is the most damaging thing this library does and the least visible; this
+makes it a one-line post-hoc check on any writer that splices templates.
+
+    sessions with a tempo map     362
+    refused (would drop blocks)   342
+    proceeded, nothing lost        20
+    proceeded and LOST blocks       0   <- was 285
+
+### The guard had to be SCOPED, and the test suite is what said so
+
+The first version fired on `set_tempo_map(unt, [(123,0)], t140, unt)` — the explicit
+`tempo_ref`/`clean_ref` OVERRIDE path, which grows from a matched clean/ref donor pair rather than
+from the inlined template. That is the synthesis mechanism, it legitimately produces a different
+block count, and it has its own tests. The guard now applies only when `tempo_ref is None`, which
+is exactly where the 297/342 damage was measured.
+
+Worth noting which way that went: an existing test caught my over-broad guard, where earlier today
+an existing test *encoded* the `retarget_audio_file` bug. The suite is not uniformly a rubber stamp
+or a trap — it depends entirely on whether the test asserts a MEASURED property or a remembered one.
+
+285 tests green.

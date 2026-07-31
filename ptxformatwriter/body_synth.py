@@ -2037,6 +2037,22 @@ def _resize_record_blocks(data: bytes, resize) -> bytes:
     return bytes(out)
 
 
+def _blocks_lost_by_type(before: bytes, after: bytes) -> "dict[int, int]":
+    """`{content_type: how many instances vanished}` -- empty when nothing was lost.
+
+    A write that REMOVES blocks it cannot restore is the most damaging thing this library can do,
+    and the least visible: the readers go on returning the right answer from what survives, and
+    `validate()` reports no new issue. Both `set_markers` and `set_tempo_map` did it for months.
+
+    Cheap enough to run as a post-hoc check on a writer that splices templates, which is exactly
+    where the risk lives.
+    """
+    import collections
+    b = collections.Counter(c for z, _e, c in _size_driven_blocks(before) if z >= 31)
+    a = collections.Counter(c for z, _e, c in _size_driven_blocks(after) if z >= 31)
+    return {t: b[t] - a[t] for t in b if a[t] < b[t]}
+
+
 def set_tempo_map(data: bytes, events: "list[tuple[float, int]]",
                   tempo_ref: "bytes | None" = None, clean_ref: "bytes | None" = None) -> bytes:
     """Write a MID-SESSION tempo map (one or more tempo changes) onto `data`.
@@ -2091,6 +2107,31 @@ def set_tempo_map(data: bytes, events: "list[tuple[float, int]]",
                 out[r + 39] = flag
                 out[r + 30 : r + 35] = (_ZERO_TICKS + int(pos)).to_bytes(5, "little")
                 out[r + 40 : r + 48] = struct.pack("<d", float(bpm))
+    # VERIFY, THEN COMMIT. This is the SYNTHESIS writer: it splices the inlined 0x2028/0x2718
+    # templates over whatever is there. On a session whose conductor blocks carry more structure
+    # than the template does, that DROPS blocks -- measured, `set_tempo_map(d, tempo_map(d))`
+    # differed on 297 of 342 sessions and LOST a 0x2028 in 285 of them, because the inlined 0x2718
+    # ruler carries a stale nested-0x2028 block_size.
+    #
+    # `replace_tempo_map` is the in-place editor for an arbitrary session and is byte-identical on
+    # an identity replace (342/342), so the honest behaviour here is to refuse and name it rather
+    # than to quietly return a session with fewer blocks than it started with. Same decision as
+    # `set_markers`, and the same reason: a writer that cannot restore what it removed must not
+    # remove it.
+    # Scoped to the INLINED-TEMPLATE path (`tempo_ref is None`). That is where the damage was
+    # measured -- `set_tempo_map(d, tempo_map(d))` differed on 297 of 342 sessions and lost a
+    # 0x2028 in 285. The override path grows from a matched clean/ref DONOR PAIR instead, which is
+    # the synthesis mechanism, legitimately produces a different block count when the target has
+    # more tempo records than the result, and is covered by its own tests.
+    _lost = _blocks_lost_by_type(data, bytes(out)) if tempo_ref is None else {}
+    if _lost:
+        raise ValueError(
+            "set_tempo_map would drop " +
+            ", ".join(f"{k} x 0x{t:04x}" for t, k in sorted(_lost.items())) +
+            " -- it splices the inlined conductor templates and this session's blocks carry more "
+            "than they do. Use replace_tempo_map(data, events), which rewrites the existing "
+            "0x2028/0x2718 in place and is byte-identical on an identity replace."
+        )
     return bytes(out)
 
 
@@ -2145,6 +2186,18 @@ def set_meter_map(data: bytes, events: "list[tuple[int, int, int]]",
             trail0 = rec0 + n * 36
             for i in range(n):
                 out[trail0 + i * 16 : trail0 + i * 16 + 4] = int(i + 1).to_bytes(4, "little")
+    # VERIFY, THEN COMMIT -- the same guard `set_tempo_map` carries, for the same reason. This is
+    # the SYNTHESIS writer and splices inlined templates; `replace_meter_map` is the in-place
+    # editor for an arbitrary session. Measured before the guard: an identity `set_meter_map`
+    # differed on 14 of 57 sessions.
+    _lost = _blocks_lost_by_type(data, bytes(out)) if meter_ref is None else {}
+    if _lost:
+        raise ValueError(
+            "set_meter_map would drop " +
+            ", ".join(f"{k} x 0x{t:04x}" for t, k in sorted(_lost.items())) +
+            " -- it splices the inlined conductor templates and this session's blocks carry more "
+            "than they do. Use replace_meter_map(data, events), the in-place editor."
+        )
     return bytes(out)
 
 

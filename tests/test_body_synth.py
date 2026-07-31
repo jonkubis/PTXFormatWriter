@@ -4146,3 +4146,88 @@ class RetargetAudioFileTests(unittest.TestCase):
         body = ast.unparse(fn)
         self.assertIn("_retarget_field_writes", body)
         self.assertNotIn("z + 15", body, "the +15 write must be gone")
+
+
+class SynthesisWriterBlockLossTests(unittest.TestCase):
+    """The synthesis writers must never return a session with fewer blocks than it started with.
+
+    `set_tempo_map` and `set_meter_map` splice INLINED conductor templates over whatever is there.
+    On a session whose `0x2028`/`0x2718` carry more structure than the template does, that DROPS
+    blocks — measured, an identity `set_tempo_map(d, tempo_map(d))` differed on 297 of 342 sessions
+    and LOST a `0x2028` in 285 of them; `set_meter_map` differed on 14 of 57.
+
+    Nothing noticed: the readers went on returning the right map from what survived and
+    `validate()` reported no new issue. `replace_tempo_map`/`replace_meter_map` are the in-place
+    editors for an arbitrary session and are byte-identical on an identity replace (342/342).
+    """
+
+    def test_blocks_lost_by_type_detects_a_removal(self):
+        """The guard's own primitive, tested against a session with a block spliced out."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            bl = [b for b in BS._size_driven_blocks(d) if b[0] >= 31]
+            if len(bl) < 3:
+                continue
+            self.assertEqual(BS._blocks_lost_by_type(d, d), {}, "identity loses nothing")
+            z, e, c = bl[-1]
+            maimed = d[:z] + d[e:]
+            lost = BS._blocks_lost_by_type(d, maimed)
+            self.assertIn(c, lost, f"removing a 0x{c:04x} must be reported")
+            self.assertGreaterEqual(lost[c], 1)
+            return
+        self.skipTest("no suitable control session")
+
+    def test_set_tempo_map_refuses_rather_than_dropping_blocks(self):
+        checked = 0
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            try:
+                tm = BS.tempo_map(d)
+            except Exception:
+                continue
+            if not tm:
+                continue
+            try:
+                out = BS.set_tempo_map(d, tm)
+            except ValueError:
+                checked += 1
+                continue                       # refusing is the correct outcome
+            except Exception:
+                continue
+            self.assertEqual(BS._blocks_lost_by_type(d, out), {},
+                             f"{path.name}: set_tempo_map dropped blocks instead of refusing")
+            checked += 1
+            if checked >= 10:
+                break
+        self.assertTrue(checked, "no control session with a tempo map was checked")
+
+    def test_the_refusal_names_the_in_place_editor(self):
+        """A refusal has to say what to use instead, or it just blocks the caller."""
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 600_000:
+                continue
+            try:
+                tm = BS.tempo_map(d)
+                if not tm:
+                    continue
+                BS.set_tempo_map(d, tm)
+            except ValueError as ex:
+                self.assertIn("replace_tempo_map", str(ex))
+                return
+            except Exception:
+                continue
+        self.skipTest("no local session makes set_tempo_map refuse")
