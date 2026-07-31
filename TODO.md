@@ -6,6 +6,44 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## markers() lost distinct memory locations (CLOSED); the clips()/region_list() item is REFUTED
+
+**Item 6 — `clips()` and `region_list()` "use DIFFERENT region index spaces" — DOES NOT
+REPRODUCE.** Checked every clip in every session that has one: for each clip, does
+`clips()[i]['name']` agree with `clip_names(lane_zmark)[clip_index]`? **0 disagreements over 139
+sessions** (51 local + 88 PT-authored external). Recorded as unconfirmed rather than "fixed" —
+there was nothing to fix.
+
+**Item 7 — `markers()` collapsing 209 -> 112 — CONFIRMED, but the blanket framing was wrong.**
+The reader de-duplicated by `(name, position)` because a session can carry a duplicate `0x2030`
+list. Two separate findings:
+
+* Where the ratio is exactly 1.0 or 2.0 and matches the number of `0x2030` instances (61 of 73
+  PT-authored sessions with markers), the old reader was **correct** — the list really is stored
+  twice. The audit's "collapses genuinely distinct markers" reading does not apply there.
+* Where it is not (12 of 73), markers were genuinely lost. On `DWTS PT 2603 I.bak.023.ptx` one
+  list holds **209 records with distinct ordinals 1..209** but only **112 distinct
+  `(name, position)` pairs** — 30 of them named `' -'` at a single position. PT numbers memory
+  locations 1..N and two slots may legitimately share a name and a position, so 97 real markers
+  vanished. That is the audit's 209 -> 112.
+
+Fix: scope to ONE `0x2030` instance instead of de-duplicating by content. Lossless — of 48
+sessions with two or more instances, all 48 have instances identical in `(ordinal, name,
+position)`, and no `0x2077` was found outside a `0x2030` in any session.
+
+**A regression the measurement caught, not the tests:** anchoring on the first `0x2030` *in file
+order* made `markers()` return **0** on 6 sessions that have markers — a session can carry
+`0x2030` blocks holding no records. The anchor is the first list that actually HOLDS records.
+Invariant now holds 75/75 (`markers() x instances == 0x2077 records`), with 0 zero-marker
+sessions.
+
+Selection extracted to `_first_marker_list_records(blocks)` so it is testable from block tuples
+alone — `markers()` needs a master index, which a synthetic fixture has no cheap way to provide.
+Four tests, verified to bite in both directions (content de-dup restored; anchor set to file
+order).
+
+
 ## Name-based edits acted on EVERY match (CLOSED) — and the audit item's framing was wrong
 
 Round-2 item 5 was filed as "the duplicate family never checks `new_name` is free, so the

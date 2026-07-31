@@ -5197,3 +5197,65 @@ class AmbiguousTrackNameTests(unittest.TestCase):
         self.assertEqual(BS._track_name_matches(c, "Click 1.dup1"), 1)
         self.assertFalse(BS.validate(BS.remove_track(c, "Click 1.dup1")))
 
+class MarkerListInstanceTests(unittest.TestCase):
+    """`markers()` de-duplicated by `(name, position)` and lost distinct memory locations.
+
+    A session can carry a duplicate `0x2030` list -- PT's memory-locations copy -- and the reader
+    handled that by dropping repeated CONTENT. But PT numbers memory locations 1..N and two slots
+    may legitimately share a name and a position. On `DWTS PT 2603 I.bak.023.ptx` one list holds
+    209 records with distinct ordinals 1..209 but only 112 distinct `(name, position)` pairs (30
+    of them named `' -'` at a single position), so 97 real markers vanished. 12 of 73 PT-authored
+    sessions on the external drives lost markers this way; the other 61 were spared only because
+    their records happened to be content-distinct.
+
+    Scoping to one list instance is lossless: of 48 sessions with two or more `0x2030` instances,
+    all 48 have instances identical in `(ordinal, name, position)`, and no `0x2077` was observed
+    outside a `0x2030`.
+    """
+
+    def test_markers_times_list_instances_equals_the_record_count(self):
+        """The invariant that distinguishes 'the list is stored twice' from 'markers were lost'.
+        Holds on 75 of 75 corpus sessions carrying markers."""
+        n = 0
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                blocks = BS._size_driven_blocks(d)
+            except Exception:
+                continue
+            recs = [(z, e) for z, e, c in blocks if c == 0x2077]
+            if not recs:
+                continue
+            lists = sorted((z, e) for z, e, c in blocks if c == 0x2030)
+            owners = set()
+            for z, e in recs:
+                encl = [(a, b) for a, b in lists if a < z and e <= b]
+                owners.add(min(encl, key=lambda t: t[1] - t[0])[0] if encl else None)
+            mk = BS.markers(d)
+            self.assertEqual(
+                len(mk) * max(len(owners), 1), len(recs),
+                "%s: %d 0x2077 records across %d list instance(s) but markers() returned %d"
+                % (q.name, len(recs), len(owners), len(mk)))
+            n += 1
+        self.assertGreater(n, 0, "no control session carries markers")
+
+    def test_two_list_instances_are_read_as_one(self):
+        """Blocks only -- no session needed. Two 0x2030 instances each holding 3 records must
+        yield 3, not 6 (the duplicate list) and not 1 (content de-duplication)."""
+        blocks = [(1000, 2000, 0x2030), (1010, 1100, 0x2077), (1110, 1200, 0x2077),
+                  (1210, 1300, 0x2077),
+                  (3000, 4000, 0x2030), (3010, 3100, 0x2077), (3110, 3200, 0x2077),
+                  (3210, 3300, 0x2077)]
+        self.assertEqual(BS._first_marker_list_records(blocks), [1010, 1110, 1210])
+
+    def test_the_anchor_is_the_first_list_that_holds_records(self):
+        """An empty 0x2030 earlier in the file must not shadow the one with the markers --
+        anchoring on file order alone returned 0 markers on 6 corpus sessions that have them."""
+        blocks = [(100, 200, 0x2030),                      # earlier, holds nothing
+                  (3000, 4000, 0x2030), (3010, 3100, 0x2077), (3110, 3200, 0x2077)]
+        self.assertEqual(BS._first_marker_list_records(blocks), [3010, 3110])
+
+    def test_records_with_no_list_parent_are_kept(self):
+        """Dropping an unparented record silently would be the same class of bug this replaces."""
+        blocks = [(3000, 4000, 0x2030), (3010, 3100, 0x2077), (9000, 9100, 0x2077)]
+        self.assertEqual(BS._first_marker_list_records(blocks), [3010, 9000])

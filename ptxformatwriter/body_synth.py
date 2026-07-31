@@ -4769,6 +4769,28 @@ def meter_map(data: bytes) -> "list[tuple[int, int, int]]":
     return []
 
 
+def _first_marker_list_records(blocks) -> "list[int]":
+    """Zmarks of the `0x2077` marker records belonging to ONE `0x2030` list, in file order.
+
+    A session can carry a duplicate `0x2030` list (PT's memory-locations copy). Scoping to one
+    instance is the correct way to handle that; de-duplicating by CONTENT is not, because PT
+    numbers memory locations 1..N and two slots may legitimately share a name and a position.
+
+    The anchor is the first list that actually HOLDS records, not the first `0x2030` in the file:
+    a session can carry `0x2030` blocks holding none, and anchoring on file order alone returned
+    zero markers on 6 corpus sessions that have them. A record with no `0x2030` parent is kept.
+    """
+    lists = sorted((z, e) for z, e, c in blocks if c == 0x2030)
+    recs = sorted((z, e) for z, e, c in blocks if c == 0x2077)
+    owner = {}
+    for z, e in recs:
+        encl = [(a, b) for a, b in lists if a < z and e <= b]
+        owner[z] = min(encl, key=lambda t: t[1] - t[0])[0] if encl else None
+    holders = sorted(x for x in set(owner.values()) if x is not None)
+    first = holders[0] if holders else None
+    return [z for z, _e in recs if owner[z] is None or owner[z] == first]
+
+
 def markers(data: bytes) -> "list[dict]":
     """Every session marker as `{"name": str, "tick": int|None, "sample": int|None}`.
 
@@ -4776,24 +4798,29 @@ def markers(data: bytes) -> "list[dict]":
     length-prefixed (`u32` len @+15, bytes @+19), and a `u64` position at `name_end`
     (= 19 + namelen) with the SAME timebase encoding as clips (§5d) -- top byte `0x40` =
     tick-locked (`tick = pos - 0x4000000000000000 - ZERO_TICKS`), `0x00` = sample-locked
-    (`sample = pos`, e.g. a marker dropped at an audio hit). A session can carry a duplicate
-    `0x2030` list (PT's memory-locations copy), so records are de-duplicated by `(name,
-    position)`; results are in file (list) order. Recovers PT-authored controls exactly and
-    is sane across the corpus (marker counts 0..123, mixed tick/sample on some sessions)."""
+    (`sample = pos`, e.g. a marker dropped at an audio hit).
+
+    A session can carry a duplicate `0x2030` list (PT's memory-locations copy), so exactly ONE
+    list instance is read -- the first in file order. This used to de-duplicate by
+    `(name, position)` instead, which threw away distinct memory locations: PT numbers them
+    1..N and two slots may legitimately share a name and a position. On
+    `DWTS PT 2603 I.bak.023.ptx` one list holds 209 records with distinct ordinals 1..209 but
+    only 112 distinct `(name, position)` pairs -- 30 of them named `' -'` at one position -- so
+    97 real memory locations vanished. Measured over PT-authored sessions on two external
+    drives: 12 of 73 lost markers this way, and the other 61 were unaffected only because their
+    records happened to be content-distinct.
+
+    Taking the first instance is lossless: of 48 sessions carrying two or more `0x2030`
+    instances, all 48 have instances identical in `(ordinal, name, position)`, and no `0x2077`
+    was found outside a `0x2030` in any session. Results are in file (list) order."""
     out: "list[dict]" = []
-    seen: "set[tuple[str, int]]" = set()
-    for z, _e, c in _size_driven_blocks(data):
-        if c != 0x2077:
-            continue
+    for z in _first_marker_list_records(_size_driven_blocks(data)):
         nl = int.from_bytes(data[z + 15 : z + 19], "little")
         ne = z + 19 + nl
         if nl > 256 or ne + 8 > len(data):
             continue
         name = _decode_name(data[z + 19 : ne])
         pos = int.from_bytes(data[ne : ne + 8], "little")
-        if (name, pos) in seen:
-            continue
-        seen.add((name, pos))
         if pos >> 56 == 0x40:
             out.append({"name": name, "tick": pos - 0x4000000000000000 - _ZERO_TICKS,
                         "sample": None})
