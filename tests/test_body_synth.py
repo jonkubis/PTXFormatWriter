@@ -4575,3 +4575,58 @@ class SessionNamePseudoBlockTests(unittest.TestCase):
         body = ast.unparse(fn)
         self.assertNotIn("flat_blocks", body)
         self.assertIn("_size_driven_blocks", body)
+
+
+class AddClipChainTests(unittest.TestCase):
+    """`add_clip` must accept every lane `remove_clip` accepts — the pair is meant to be inverse.
+
+    It was hardwired to the audio pair (`0x1052`/`0x1050`) and refused every MIDI and video lane,
+    so the inverse its docstring claims ("the exact inverse of remove_clip, validated by round-trip
+    = byte-identity") held on one of the three chains.
+
+    It was also the only session-mutating function still missing from the public surface: the
+    earlier audit read the FIRST LINE of each signature, and `add_clip`'s parameters wrap so
+    `-> bytes` lands on line two. A structural check has to read structure — the api-layer test now
+    uses `inspect.signature`.
+    """
+
+    def _lane(self, kind):
+        for path in sorted(ROOT.glob("control_files/**/*.ptx")):
+            try:
+                d = _load_path(path)
+            except Exception:
+                continue
+            if len(d) > 900_000:
+                continue
+            for z, nm, n, k in BS.placement_lanes(d):
+                if k == kind:
+                    return path.name, d, z, n
+        self.skipTest("no control session has a %s placement" % kind)
+
+    def test_add_then_remove_is_byte_exact_on_audio(self):
+        _name, d, z, n = self._lane("audio")
+        grown = BS.add_clip(d, z, 123456)
+        self.assertGreater(len(grown), len(d))
+        self.assertEqual(BS.remove_clip(grown, z, n), d)
+
+    def test_add_then_remove_is_byte_exact_on_MIDI(self):
+        """THE test for this change: add_clip refused every MIDI lane outright."""
+        _name, d, z, n = self._lane("midi")
+        holder = next(c for zz, _e, c in BS._size_driven_blocks(d) if zz == z)
+        self.assertEqual(holder, 0x1057, "MIDI holders are 0x1057")
+        grown = BS.add_clip(d, z, 123456)
+        self.assertGreater(len(grown), len(d))
+        self.assertEqual(BS.remove_clip(grown, z, n), d)
+
+    def test_a_non_holder_zmark_is_refused_by_name(self):
+        _name, d, _z, _n = self._lane("audio")
+        holders = {h for h, _w, _k in BS._PLACEMENT_CHAINS}
+        bad = next(a for a, _b, c in BS._size_driven_blocks(d) if a >= 31 and c not in holders)
+        with self.assertRaises(ValueError) as cm:
+            BS.add_clip(d, bad, 0)
+        self.assertIn("not a placement holder", str(cm.exception))
+
+    def test_it_is_on_the_public_surface(self):
+        import ptxformatwriter as ptx
+        self.assertIs(ptx.add_clip, BS.add_clip)
+        self.assertIn("add_clip", ptx.__all__)

@@ -6286,3 +6286,32 @@ contain a block that is not one. Worth stating as a rule rather than a series of
 > types (80 of them) and prepends a pseudo-block whose type is data-dependent.
 
 301 tests green.
+
+## 2026-07-28 — add_clip: MIDI/video refused, and it was the last private mutator
+
+Queue item #9. `add_clip` was hardwired to the audio pair (`0x1052`/`0x1050`) and refused every MIDI
+and video lane, so the inverse its docstring claims — *"the exact inverse of `remove_clip`,
+validated by round-trip = byte-identity"* — held on ONE of the three chains.
+
+Generalised via `_PLACEMENT_CHAINS`, the same fix `remove_clip`, `move_clip` and
+`replace_clip_region` each needed. Round trip `remove_clip(add_clip(d, lane, pos), lane, n)`:
+
+    audio   51 lanes   byte-exact
+    midi    34 lanes   byte-exact   (previously refused outright)
+
+### My own audit missed it, and the reason is worth keeping
+
+The edit-surface audit that exported 13 mutators used `inspect.getsource(fn).split("\n")[0]` and
+tested for `"data: bytes"` and `"-> bytes"` in that FIRST LINE. `add_clip`'s parameters wrap, so
+`-> bytes` sits on line two — it stayed private while the audit reported the surface complete, and
+the api-layer test I wrote to "guard the CLASS, not the list" inherited the same blind spot and
+stayed green.
+
+FIXED: `test_no_session_mutating_function_is_accidentally_private` now uses `inspect.signature`,
+which reads the real thing. Re-run with it, `add_clip` was the ONLY remaining omission — so the
+earlier fix was right about everything it could see.
+
+**A structural check has to read structure.** Grepping source text for a signature is the same
+mistake as grepping it for `flat_blocks` and matching a comment, which happened three times today.
+
+305 tests green.

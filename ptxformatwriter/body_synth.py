@@ -5327,12 +5327,23 @@ def add_clip(data: bytes, lane_zmark: int, position: int,
     + reader-valid; PT display confirmation pending, like all write paths.)"""
     ref = _FI.final_index_ref(data)
     bl = sorted(_raw_block_bounds(data, ref.start))
-    lane = next((b for b in bl if b[0] == lane_zmark and b[2] == 0x1052), None)
+    # ALL THREE CHAINS, chosen from the holder's own content type -- the same generalisation
+    # `remove_clip`, `move_clip` and `replace_clip_region` needed. Hardwired to 0x1052/0x1050,
+    # `add_clip` refused every MIDI and video lane that `remove_clip` accepts, so the pair the
+    # docstring calls "the exact inverse" was not closed on two of the three chains.
+    lane = next((b for b in bl if b[0] == lane_zmark), None)
     if lane is None:
-        raise ValueError(f"no 0x1052 lane at zmark {lane_zmark}")
-    lane_end = lane[1]
+        raise ValueError(f"no block at zmark {lane_zmark}")
+    chain = next((ch for ch in _PLACEMENT_CHAINS if ch[0] == lane[2]), None)
+    if chain is None:
+        holders = ", ".join("0x%04x (%s)" % (h, k) for h, _w, k in _PLACEMENT_CHAINS)
+        raise ValueError(
+            f"block at zmark {lane_zmark} is 0x{lane[2]:04x}, not a placement holder; "
+            f"expected one of {holders}"
+        )
+    wrapper_ct, lane_end = chain[1], lane[1]
     placements = sorted(
-        (pz, pe) for pz, pe, c in bl if c == 0x1050 and lane_zmark < pz < lane_end
+        (pz, pe) for pz, pe, c in bl if c == wrapper_ct and lane_zmark < pz < lane_end
     )
     if not placements:
         raise ValueError("lane has no existing clip to template the new placement from")

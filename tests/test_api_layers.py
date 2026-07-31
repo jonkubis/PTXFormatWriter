@@ -83,14 +83,28 @@ class PublicSurfaceTests(unittest.TestCase):
         import ptxformatwriter as ptx
         from ptxformatwriter import body_synth
         INTERNAL = {"grow_one_midi_track", "sync_marker_playlist_rows"}
+        # `inspect.signature`, NOT the first line of the source. The first-line check missed
+        # `add_clip`, whose parameters wrap so `-> bytes` lands on line two -- it stayed private
+        # while this test reported the surface complete. A structural check must read structure.
         mutators = []
         for name, fn in vars(body_synth).items():
             if name.startswith("_") or not inspect.isfunction(fn):
                 continue
             if fn.__module__ != body_synth.__name__:
                 continue
-            sig = inspect.getsource(fn).split("\n")[0]
-            if "data: bytes" in sig and "-> bytes" in sig:
+            try:
+                sig = inspect.signature(fn)
+            except (TypeError, ValueError):
+                continue
+            params = list(sig.parameters.values())
+            if not params:
+                continue
+            first = params[0]
+            takes_data = first.name == "data" and getattr(
+                first.annotation, "__name__", str(first.annotation)) == "bytes"
+            returns_bytes = getattr(
+                sig.return_annotation, "__name__", str(sig.return_annotation)) == "bytes"
+            if takes_data and returns_bytes:
                 mutators.append(name)
         unexported = sorted(set(mutators) - INTERNAL - set(ptx.__all__))
         self.assertEqual(unexported, [],
