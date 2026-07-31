@@ -67,6 +67,18 @@ def _u32(b: bytes, o: int) -> int:
     return struct.unpack_from("<I", b, o)[0]
 
 
+def _frames_entry_head(data: bytes, q: int, e: int) -> bool:
+    """True if a name entry's HEAD (`u32 len | printable name`) begins at `q`, without
+    requiring the trailer's +6 field to be 0x2A. See `check_name_table` for why that field
+    cannot be used as a frame marker."""
+    if q + 4 > e:
+        return False
+    n = _u32(data, q)
+    if not (0 < n <= 64) or q + 4 + n + NAME_ENTRY_TRAILER > e:
+        return False
+    return all(0x20 <= b < 0x7F for b in data[q + 4 : q + 4 + n])
+
+
 def _frames_entry(data: bytes, q: int, e: int) -> bool:
     """True if a name entry (`u32 len | printable name | trailer with 0x2A marker`) begins at
     `q` within object end `e`. Used to disambiguate the 23- vs 21-byte trailer stride."""
@@ -121,9 +133,22 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
     # by the block's +1 word (the block subtype): sessions with the SAME subtype 9 carry both
     # preambles -- a synth starts its entries at 0x14 while a real clip-bearing session starts
     # at 0x16, which made the old subtype-keyed guess misread real sessions' name tables as a
-    # bogus multi-hundred-KB name_length. Rule verified on 436 local sessions (362 base / 74
-    # extended, no exceptions).
-    shift = PREAMBLE_EXTRA if _u32(data, payload + PREAMBLE_FLAG_OFF) else 0
+    # bogus multi-hundred-KB name_length. That rule was verified on 436 LOCAL sessions (362 base /
+    # 74 extended) and reported as having no exceptions -- see the flag-is-a-count note below for
+    # what a local-only sample missed.
+    # THE FLAG IS A COUNT, NOT A BOOLEAN. This read `PREAMBLE_EXTRA if flag else 0`, i.e. two-way:
+    # base, or base+2. Measured over 402 sessions on four drives the flag takes THREE values --
+    # 0 (255 sessions), 1 (141) and 2 (6) -- and a flag of 2 needs base+4, not base+2. Treating it
+    # as a boolean started the entry walk 2 bytes early on those, so the u32 length read straddled
+    # the real length and the field before it: the reported name_length came out an exact multiple
+    # of 0x10000 (a name of 7 read as 0x00070000 = 458752), and `validate` raised a false
+    # end-of-stream.
+    #
+    # Effect on the walk itself: clean on 394 of 402 with the boolean, 400 of 402 with `2 * flag`.
+    # `validate()` fired on 25 of 75 PT-authored sessions from the external drives -- while its own
+    # docstring claimed "no false positives" -- and on 0 of 197 in `control_files`, which is why the
+    # rule survived: its comment says "verified on 436 LOCAL sessions", and locally it is true.
+    shift = PREAMBLE_EXTRA * _u32(data, payload + PREAMBLE_FLAG_OFF)
     start = ENTRY_START_BASE + shift
     # Walk exactly the STORED entry count -- the way Pro Tools reads it -- not "until the first
     # child". A trackless session (a tempo/meter-only control) stores count 0 and its name table
@@ -150,13 +175,37 @@ def check_name_table(data: bytes, blocks, z: int, e: int) -> int:
                 f"entry at 0x{q:x} with name_length={name_length} runs to 0x{entry_end:x}, "
                 f"past object end 0x{e:x} (a track's name entry was not added/removed "
                 f"to match the edit)")
+        # THE +6 FIELD IS A VALUE, NOT A FRAME MARKER. This raised whenever it was not 0x2A.
+        # Measured over 10035 entries in 317 PT-authored sessions on four drives, 359 (3.58%)
+        # hold something else -- the trailer's 16 bytes at +2 are one field, and where most
+        # entries store `00000000 2A000000 <8 bytes>` these store a full 16-byte id. The entry
+        # is the same 23 bytes and the walk is NOT desynced: for 350 of those 359 the next
+        # entry still frames, and for 336 the ordinal at +18 continues the run unbroken.
+        # Treating the field as a marker made `validate()` -- whose docstring claimed no false
+        # positives -- fire on 36 of 317 PT-authored sessions, all on this check.
+        #
+        # Desync is still caught: a walk that has lost sync does not land on a framed entry, so
+        # only raise when the +6 field is unexpected AND the next entry fails to frame.
+        #
+        # THE COST, MEASURED, NOT WAVED AWAY. Against deliberate in-place corruptions of 60
+        # control sessions (stored count +5; first name_length +4; first name_length -1) the
+        # old hard check caught 60/60, 58/60, 58/60 and this one catches 59/60, 55/60, 55/60.
+        # So ~5% of synthetic desyncs now slip through, in exchange for the false-positive rate
+        # going from 36/317 to 0/317 on PT-authored sessions. Also measured and REJECTED: additionally
+        # requiring the +18 ordinal to continue the run. It detects no more (80/80, 79/80, 79/80
+        # either way on a same-harness comparison) and takes false positives from 1/317 to 7/317.
         mark_at = q + 4 + name_length + TRAILER_MARK_OFF
         if _u32(data, mark_at) != TRAILER_MARK:
-            raise EndOfStream(
-                CT_NAME_TABLE, z, f"name[{idx}].trailer",
-                f"entry at 0x{q:x} (name_length={name_length}) is misframed: expected trailer "
-                f"marker 0x{TRAILER_MARK:08x} at 0x{mark_at:x}, found 0x{_u32(data, mark_at):08x} "
-                f"(the name-entry list is out of sync with the track edit)")
+            after = q + 4 + name_length + NAME_ENTRY_TRAILER
+            in_sync = (idx + 1 >= count or after >= entries_end
+                       or _frames_entry_head(data, after, e))
+            if not in_sync:
+                raise EndOfStream(
+                    CT_NAME_TABLE, z, f"name[{idx}].trailer",
+                    f"entry at 0x{q:x} (name_length={name_length}) is misframed: the trailer "
+                    f"field at 0x{mark_at:x} is 0x{_u32(data, mark_at):08x} (not the usual "
+                    f"0x{TRAILER_MARK:08x}) AND no name entry frames at 0x{after:x}, so the "
+                    f"name-entry list is out of sync with the track edit")
         # The trailer's ordinal is a u32 in almost every entry but a u16 in some, so the stride
         # is 23 OR 21 (see body_synth._next_name_entry -- bug #14). Advance by the long form,
         # but fall back to the short form when long does not land on a valid next entry, so a

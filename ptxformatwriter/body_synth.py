@@ -5744,7 +5744,9 @@ def _name_table_shift(data: bytes, z: int) -> int:
     (0 = base, 1 = +2). Both the entry count and the first entry move by this. It is NOT keyed
     by the block's +1 subtype word: sessions with the SAME subtype 9 use both preambles -- a
     synth's entries start at payload+0x14, a real clip-bearing session's at +0x16. Verified on
-    436 local sessions (362 base / 74 extended, no exceptions)."""
+    436 local sessions (362 base / 74 extended). The flag is a COUNT of 2-byte extensions, not a
+    boolean: 6 of 402 sessions across four drives carry flag=2 and need base+4. See
+    eos_validator.check_name_table."""
     return 2 if int.from_bytes(data[z + 9 + 0x0A : z + 9 + 0x0E], "little") else 0
 
 
@@ -5933,9 +5935,18 @@ def validate(data: bytes) -> "list[dict]":
     past an object's end; (2) the count-container invariant for the other count-prefixed
     containers (`0x1015` track entries, `0x1054` lanes). `rc == 0` from the reader does
     NOT imply this passes — the reader walks by declared size and tolerates the stale
-    inner counts; Pro Tools does not. Sound on every corpus session (no false positives)
-    and flags the pre-fix track edits. A clean result is necessary, not proven-sufficient,
-    for PT validity."""
+    inner counts; Pro Tools does not. A clean result is necessary, not proven-sufficient,
+    for PT validity.
+
+    FALSE-POSITIVE RATE, MEASURED (not asserted). This said "sound on every corpus session
+    (no false positives)", which was a local-corpus claim generalised: 0 of 197 PT-authored
+    sessions in `control_files` but 25 of 75 on the external drives. Both hits were name-table
+    misframings. Fixing the preamble-flag rule (it is a count, not a boolean -- see
+    eos_validator.check_name_table) took the overall rate to 36 of 317 (11.4%). Those 36 are a
+    DIFFERENT and still-open fault: they fail on `name[N].trailer` mid-table, not on
+    `name_length`, i.e. the 23-vs-21-byte trailer stride, not the entry start. Until that is
+    closed, a non-empty result from this gate on a session you did not synthesise is not
+    reliable evidence that the session is bad."""
     from . import eos_validator as _EOS
     blocks = _size_driven_blocks(data)
     out: "list[dict]" = []

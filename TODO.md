@@ -3,6 +3,41 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+
+## validate() false positives — the pre-write gate was rejecting real sessions (CLOSED)
+
+`validate()` is the gate every write path cites as its clean-result evidence, and its docstring
+said "sound on every corpus session (no false positives)". Measured: **0 of 197** in
+`control_files`, **25 of 75** on the external drives — a local-corpus claim generalised. Two
+independent causes, both in `eos_validator.check_name_table`, both now fixed:
+
+1. **The `0x2519` preamble flag is a count, not a boolean.** Read as `PREAMBLE_EXTRA if flag
+   else 0`; the flag takes values 0 (255 sessions) / 1 (141) / 2 (6), and `flag=2` needs base+4.
+   Now `PREAMBLE_EXTRA * flag`. Clean walk 394/402 -> 400/402. All 6 `flag=2` sessions are on
+   external drives — the reason a rule "verified on 436 local sessions" survived.
+2. **The `0x2A` at trailer+6 is a field value, not a frame marker.** 359 of 10,035 PT-authored
+   entries hold something else there; 350 of those are followed by a correctly framed entry, so
+   the walk was never desynced. Now raises only when the field is unexpected AND the next entry
+   fails to frame.
+
+End to end: `validate()` non-empty on PT-authored sessions **36/317 -> 0/317**.
+
+Cost, measured rather than assumed: against deliberate in-place corruptions of 60 control
+sessions (count +5 / first name_length +4 / first name_length -1) detection goes 60,58,58 ->
+59,55,55 of 60. ~5% of synthetic desyncs now slip through in exchange for the false positives.
+Also measured and **rejected**: additionally requiring the +18 ordinal to continue the run — no
+extra detection (80/80, 79/80, 79/80 either way) and false positives 1/317 -> 7/317.
+
+Four tests, each verified to bite by stubbing the branch it names. Note the trap found while
+writing them: a bare `assertRaises` on a corrupted table passes even with the trailer branch
+stubbed to always-in-sync, because clobbered bytes raise downstream on `name_length` instead —
+the test has to assert `exception.field`.
+
+Docstrings corrected in place: `validate()` (the false-positive claim, now stating the measured
+rate and that the residual risk is the 23-vs-21 trailer stride) and the two "436 local sessions,
+no exceptions" comments.
+
+
 ## THE RE-KEY WAS CORRUPTING REAL SESSIONS ON DRIVES I HAD RECORDED AS UNREACHABLE (2026-07-26)
 
 `/Volumes/Mac 4TB SSD` (819 `.ptx`) and `/Volumes/Hack 2TB SSD Old` (1611 `.ptx`) ARE MOUNTED. The

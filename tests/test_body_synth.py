@@ -9,6 +9,7 @@ from this pipeline is confirmed to open in Pro Tools.
 from collections import Counter
 from pathlib import Path
 import tempfile
+import struct
 import collections
 import pathlib
 import unittest
@@ -4874,3 +4875,106 @@ class OffsetHoleCompletenessTests(unittest.TestCase):
         body = ast.unparse(fn)
         self.assertIn("block_layout(data)", body, "the scan layout must still be the base")
         self.assertIn("_block_bounds_sized", body, "the size-driven walk must augment it")
+
+class NameTablePreambleFlagTests(unittest.TestCase):
+    """The 0x2519 preamble flag is a COUNT of 2-byte extensions, not a boolean.
+
+    `check_name_table` read it as `PREAMBLE_EXTRA if flag else 0`, so a flag of 2 -- which
+    needs base+4 -- started the entry walk 2 bytes early. Measured over 402 sessions on four
+    drives the flag is 0 (255), 1 (141) or 2 (6); the flag=2 sessions live only on the external
+    drives, which is why a rule "verified on 436 local sessions" held locally and still made
+    `validate()` fire on 25 of 75 PT-authored external sessions.
+    """
+
+    @staticmethod
+    def _name_table(flag, names):
+        """A 0x2519 block whose preamble carries `flag` 2-byte extensions."""
+        from ptxformatwriter import eos_validator as EV
+        start = EV.ENTRY_START_BASE + EV.PREAMBLE_EXTRA * flag
+        pre = bytearray(start)
+        struct.pack_into("<I", pre, EV.PREAMBLE_FLAG_OFF, flag)
+        struct.pack_into("<H", pre, EV.ENTRY_COUNT_OFF + EV.PREAMBLE_EXTRA * flag, len(names))
+        payload = bytearray(pre)
+        for nm in names:
+            raw = nm.encode("utf-8")
+            trailer = bytearray(EV.NAME_ENTRY_TRAILER)
+            struct.pack_into("<I", trailer, EV.TRAILER_MARK_OFF, EV.TRAILER_MARK)
+            payload += struct.pack("<I", len(raw)) + raw + trailer
+        size = 2 + len(payload)
+        return (b"\x5a" + struct.pack("<H", 9) + struct.pack("<I", size)
+                + struct.pack("<H", EV.CT_NAME_TABLE) + bytes(payload))
+
+    def test_every_observed_preamble_flag_walks_the_whole_entry_list(self):
+        from ptxformatwriter import eos_validator as EV
+        names = ["Kick", "Snare", "Overheads"]
+        for flag in (0, 1, 2):
+            with self.subTest(flag=flag):
+                blk = self._name_table(flag, names)
+                got = EV.check_name_table(blk, [], 0, len(blk))
+                self.assertEqual(
+                    got, len(names),
+                    "preamble flag=%d: the walk found %d of %d entries -- the entry start is "
+                    "ENTRY_START_BASE + PREAMBLE_EXTRA * flag, not a two-way base/base+2"
+                    % (flag, got, len(names)))
+    @staticmethod
+    def _set_trailer_field(blk, entry_idx, value):
+        """Overwrite the trailer's +6 field of entry `entry_idx` (0x2A in most entries)."""
+        from ptxformatwriter import eos_validator as EV
+        b = bytearray(blk)
+        flag = struct.unpack_from("<I", b, 9 + EV.PREAMBLE_FLAG_OFF)[0]
+        q = 9 + EV.ENTRY_START_BASE + EV.PREAMBLE_EXTRA * flag
+        for _ in range(entry_idx):
+            n = struct.unpack_from("<I", b, q)[0]
+            q += 4 + n + EV.NAME_ENTRY_TRAILER
+        n = struct.unpack_from("<I", b, q)[0]
+        struct.pack_into("<I", b, q + 4 + n + EV.TRAILER_MARK_OFF, value)
+        return bytes(b)
+
+    def test_an_unusual_trailer_field_is_not_a_misframe_when_the_walk_is_in_sync(self):
+        """0x2A at trailer+6 is a FIELD VALUE, not a frame marker.
+
+        359 of 10035 entries in 317 PT-authored sessions hold something else there, and for
+        350 of those the next entry still frames -- the walk never lost sync. Raising on the
+        value alone made `validate()` fire on 36 of 317 PT-authored sessions.
+        """
+        from ptxformatwriter import eos_validator as EV
+        blk = self._name_table(1, ["Kick", "Snare", "Overheads"])
+        odd = self._set_trailer_field(blk, 1, 0x964F3CD2)   # a real one, from a corpus session
+        self.assertEqual(
+            EV.check_name_table(odd, [], 0, len(odd)), 3,
+            "an entry whose trailer+6 field is not 0x2A, but which is followed by a "
+            "correctly framed entry, is in sync and must not be reported as misframed")
+
+    def test_an_unusual_trailer_field_still_raises_when_the_walk_has_lost_sync(self):
+        """Guards the loosened branch itself.
+
+        The previous test only proves the check stopped firing; this one proves it can still
+        fire. An odd trailer field is excused ONLY because a name entry frames after it, so
+        clobber those bytes with unprintable garbage and the same entry must raise.
+        """
+        from ptxformatwriter import eos_validator as EV
+        blk = self._name_table(1, ["Kick", "Snare", "Overheads"])
+        odd = bytearray(self._set_trailer_field(blk, 1, 0x964F3CD2))
+        q = 9 + EV.ENTRY_START_BASE + EV.PREAMBLE_EXTRA
+        for _ in range(2):                       # step over entries 0 and 1
+            q += 4 + struct.unpack_from("<I", odd, q)[0] + EV.NAME_ENTRY_TRAILER
+        odd[q:q + 12] = b"\x00\xff" * 6         # entry 2 no longer frames
+        with self.assertRaises(EV.EndOfStream) as cm:
+            EV.check_name_table(bytes(odd), [], 0, len(odd))
+        # Assert WHICH field raised. Clobbered bytes also raise downstream as a bogus
+        # name_length, so a bare assertRaises passes even with the trailer branch stubbed out
+        # to always-in-sync -- it does not test this branch at all.
+        self.assertEqual(cm.exception.field, "name[1].trailer",
+                         "expected the trailer branch to report the desync, got %r"
+                         % (cm.exception.field,))
+
+    def test_a_real_desync_is_still_caught(self):
+        """A stale name_length -- the fault a track edit actually causes -- still has to raise.
+        (This one raises on the name_length branch, not the trailer branch; the test above
+        covers the trailer branch.)"""
+        from ptxformatwriter import eos_validator as EV
+        blk = bytearray(self._name_table(1, ["Kick", "Snare", "Overheads"]))
+        q = 9 + EV.ENTRY_START_BASE + EV.PREAMBLE_EXTRA
+        struct.pack_into("<I", blk, q, struct.unpack_from("<I", blk, q)[0] + 4)
+        with self.assertRaises(EV.EndOfStream):
+            EV.check_name_table(bytes(blk), [], 0, len(blk))

@@ -872,6 +872,33 @@ is why removing a middle track closes cleanly with no channel renumber.
   `5A 01 00 0B 00 00 00 34 24 04 00 00 00 00 00 00 3C 00`. Value = `p+1` (1-based).
 - `0x2519` name table — one variable-length entry per track in display order; ordinal `u16` at
   `name_end+18` (restricted to the region before the first framed child). Value = `p+1`.
+  Full entry layout, and two corrections measured across 10,035 entries in 317 PT-authored
+  sessions on four drives:
+
+  ```
+  preamble:  ... | u32 ext_count @ +0x0A | ... | u16 entry_count @ +0x0E + 2*ext_count
+  entries begin at payload + 0x14 + 2*ext_count
+  entry:     u32 name_length | name (UTF-8) | 23-byte trailer
+  trailer:   01 00 | 16-byte id @ +2 | u16 ordinal @ +18 | 3 bytes
+  ```
+
+  * **`ext_count` is a COUNT of 2-byte extensions, not a boolean.** It takes three values —
+    0 (255 sessions), 1 (141), 2 (6) — and a value of 2 shifts the count and the first entry by
+    **4**, not 2. Reading it as a flag starts the walk 2 bytes early, so the `u32` length read
+    straddles the real length and the field before it and comes out an exact multiple of
+    `0x10000` (a name of 7 read as `0x00070000` = 458752). All 6 `ext_count=2` sessions are on
+    external drives, which is how a rule "verified on 436 local sessions, no exceptions" was
+    both true locally and wrong.
+  * **The `0x2A` at trailer+6 is a FIELD VALUE, not a frame marker.** Most entries store the
+    16-byte id as `00000000 2A000000 <8 bytes>`, but 359 of 10,035 (3.58%) store a full 16-byte
+    id whose bytes 4–7 are arbitrary. Those entries are the same 23 bytes and the walk is **not**
+    desynced: 350 of the 359 are followed by a correctly framed entry, and 336 carry an ordinal
+    at +18 that continues the run unbroken. Treating the value as a marker is a false-positive
+    generator, not a check.
+
+  After the last entry the walk lands **2 bytes before** the first framed child in 297 of 317
+  sessions — dominant but not universal (also observed: −14 ×9, −18 ×1, 0 ×1), so terminal
+  alignment is too weak to serve as a desync check on its own.
 - `0x251a` lane instances — `2N` instances laid out **lane-major** (indices `0..N-1` = lane 0 of
   rows `0..N-1`, then lane 1); `row = idx mod N`; ordinal `u16` at `name_end+18` = `p+1`.
 - `0x2589` overview blocks — `u16` at `zmark+9` = `p` (0-based). Inlined into containers
