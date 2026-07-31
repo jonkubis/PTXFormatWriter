@@ -2083,9 +2083,16 @@ class ViewChainAttributionTests(unittest.TestCase):
         different WAV, which is what turns `duplicate_audio_file` (a verbatim copy, describing the
         SAME audio) into genuine new-audio registration.
 
-        Writes the identity fields `set_clip_wav` already established for the synthesis path --
-        sample count @+15, umid @+44 and @+292, id2 @+301 -- to ONE record instead of all of them.
-        All fixed-width, so the edit is size-neutral."""
+        Writes the identity fields to ONE record instead of all of them. All fixed-width, so the
+        edit is size-neutral.
+
+        > **This test encoded the bug it was meant to guard.** It read the sample count from
+        > `0x1003+15` and asserted a retarget changed it. `+15` is NOT the sample count: across
+        > 17,900 corpus records it takes exactly two values, 8448 (17,890x) and 4352 (10x),
+        > independent of file length. The real field is `+28` -- 3,320 distinct values, equal to
+        > `wav_clip_identity(wav)[0]` on 40 of 40 (record, on-disk WAV) pairs where `+15` matched
+        > NONE. So the assertion passed only because the writer and the test agreed on the wrong
+        > offset, and fixing the writer is what surfaced it. Now reads `+28`."""
         sessions = list(ROOT.glob("control_files/**/one clip bar 1.ptx"))
         wavs = [w for w in sorted(ROOT.glob("control_files/**/Audio Files/*.wav"))]
         target = None
@@ -2100,7 +2107,7 @@ class ViewChainAttributionTests(unittest.TestCase):
             self.skipTest("no session + PT/BWF wav available")
 
         def identities(d):
-            return [(int.from_bytes(d[z + 15 : z + 19], "little"), bytes(d[z + 44 : z + 52]))
+            return [(int.from_bytes(d[z + 28 : z + 32], "little"), bytes(d[z + 44 : z + 52]))
                     for z, e in sorted((z, e) for z, e, c in BS._size_driven_blocks(d)
                                        if c == 0x1003)]
 
@@ -4082,3 +4089,60 @@ class SetMarkersDataLossTests(unittest.TestCase):
                 break
         if not ran:
             self.skipTest("no local one-playlist session with markers")
+
+
+class RetargetAudioFileTests(unittest.TestCase):
+    """`retarget_audio_file` wrote the sample count to the wrong offset and overran short records.
+
+    Two defects, both measured on the corpus:
+
+      * it wrote the sample count to `0x1003+15`, which is NOT the sample count -- across 17,900
+        records in 372 sessions that field takes exactly two values, 8448 (17,890x) and 4352 (10x),
+        independent of file length. The real field is `+28`: 3,320 distinct values, and equal to
+        `wav_clip_identity(wav)[0]` on 40 of 40 (record, on-disk WAV) pairs where `+15` matched 0.
+      * `+292`/`+301` were written unconditionally, but record spans VARY (commonest 210) so those
+        offsets fall outside most records. Unbounded, 9 bytes landed up to 93 past the record end.
+
+    `control_files` has no `0x1003` record shorter than 311 bytes, so no local session can make the
+    unbounded version overrun. The write list is therefore a pure function and is tested directly.
+    """
+
+    UMID = bytes([0x2A]) + b"\xAA" * 7
+    ID2 = b"\xBB\xBB"
+
+    def test_a_short_record_gets_only_the_writes_that_fit(self):
+        w = BS._retarget_field_writes(1000, 1000 + 210, 123456, self.UMID, self.ID2)
+        self.assertEqual([o - 1000 for o, _v in w], [28, 44],
+                         "+292/+301 do not fit in a 210-byte record and must be skipped")
+
+    def test_a_long_record_gets_every_write(self):
+        w = BS._retarget_field_writes(1000, 1000 + 321, 123456, self.UMID, self.ID2)
+        self.assertEqual([o - 1000 for o, _v in w], [28, 44, 292, 301])
+
+    def test_no_write_ever_leaves_the_record(self):
+        """The property, over every span the corpus actually contains."""
+        for span in (209, 210, 260, 302, 303, 311, 312, 314, 318, 320, 321, 400):
+            for off, val in BS._retarget_field_writes(500, 500 + span, 7, self.UMID, self.ID2):
+                self.assertGreaterEqual(off, 500, f"span {span}: write before the record")
+                self.assertLessEqual(off + len(val), 500 + span,
+                                     f"span {span}: write {off - 500}..{off - 500 + len(val)} "
+                                     f"overruns the record end")
+
+    def test_the_sample_count_goes_to_28_not_15(self):
+        w = dict((o - 1000, v) for o, v in
+                 BS._retarget_field_writes(1000, 1000 + 321, 123456, self.UMID, self.ID2))
+        self.assertIn(28, w)
+        self.assertNotIn(15, w, "+15 is a structural constant (8448/4352), not the sample count")
+        self.assertEqual(int.from_bytes(w[28], "little"), 123456)
+
+    def test_the_writer_uses_the_helper(self):
+        """The bounds must be enforced by the shared helper, not re-implemented inline."""
+        import ast, inspect
+        tree = ast.parse(inspect.getsource(BS.retarget_audio_file).lstrip())
+        fn = tree.body[0]
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)):
+            fn.body = fn.body[1:]
+        body = ast.unparse(fn)
+        self.assertIn("_retarget_field_writes", body)
+        self.assertNotIn("z + 15", body, "the +15 write must be gone")

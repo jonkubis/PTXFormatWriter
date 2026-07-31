@@ -6031,3 +6031,48 @@ cannot be written from the local pool. The workable pattern is the one used twic
 decision into a small pure helper and test the helper.
 
 277 tests green.
+
+## 2026-07-28 — retarget_audio_file wrote the sample count to a CONSTANT, and overran short records
+
+Queue item #2, closed. Two defects, both measured before changing anything.
+
+### 1. The sample count went to the wrong field
+
+`+15` is not the sample count. Across **17,900 `0x1003` records in 372 sessions** it takes exactly
+two values — 8448 (17,890x) and 4352 (10x) — and does not vary with file length: 8448 appears on a
+14,460,559-sample WAV and on an 8,448-sample one alike. It is a structural constant, and writing the
+sample count there CLOBBERED it while leaving the real field untouched.
+
+`+28` is the field: **3,320 distinct values** over the same records, and equal to
+`wav_clip_identity(wav)[0]` on **40 of 40** (record, on-disk WAV) pairs — where `+15` matched **0**.
+
+### 2. `+292`/`+301` overran the majority of records
+
+`0x1003` spans VARY. Over 9,922 records the commonest span is **210 bytes** (318/320/314/321 also
+common), so the fixed offsets `+292` and `+301` fall OUTSIDE most records. Measured with the bounds
+checks removed, on a real 210-span record: **9 bytes written up to 93 bytes past the record end**,
+inside the following block. Third instance of this class after `0x2107` and `0x251A`.
+
+Both writes are now bounded. Verified on real 209/210-span sessions: bytes changed outside the
+record = **0**, and only `+28`/`+44` are written there.
+
+`+292`/`+301` are KEPT but flagged UNPROVEN: `+44` holds the umid exactly, while `+292` holds
+structural-looking data (`00 13 00 ...` 3,418x, `01 0f 00 13 ...` 2,252x) that is not a
+`00`-prefixed umid — and those two fields are the sole remaining reason that retargeting a record
+to the WAV it already names is not byte-exact. Removing a write Pro Tools may require is not
+something the corpus can justify; containing it is.
+
+### The existing test ENCODED the bug
+
+`test_retarget_audio_file_writes_the_wav_identity` read the sample count from `+15` and asserted a
+retarget changed it. It passed only because the writer and the test agreed on the wrong offset —
+fixing the writer is what surfaced it. Now reads `+28`.
+
+### Fifth fixture-pool failure, same remedy
+
+`control_files` has no `0x1003` record shorter than 311 bytes, so no local session can make the
+unbounded version overrun. The write list is now the pure function `_retarget_field_writes(z, e,
+...)` and is tested directly at spans 209-400. Verified to bite: returning the list unfiltered fails
+two tests.
+
+282 tests green.

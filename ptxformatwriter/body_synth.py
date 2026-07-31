@@ -4900,6 +4900,39 @@ def set_region_length(data: bytes, region_index: int, sample_count: int) -> byte
     return bytes(out)
 
 
+def _retarget_field_writes(z: int, e: int, sample_count: int, umid_material: bytes, id2: bytes):
+    """The `(absolute_offset, bytes)` writes a retarget performs, **filtered to the record**.
+
+    `0x1003` record spans VARY -- over 9,922 corpus records the commonest span is 210 bytes, with
+    318/320/314/321 also common -- so the fixed offsets `+292` and `+301` fall OUTSIDE the majority
+    of records. Unbounded, those two writes put **9 bytes up to 93 bytes past the record end**,
+    inside whatever block follows. Third instance of this class after `0x2107` and `0x251A`.
+
+    Split out as a pure function so the containment can be TESTED: `control_files` has no `0x1003`
+    record shorter than 311 bytes, so no local session can make the unbounded version overrun, and
+    a corpus-driven test cannot see the bug. Fifth time in this session that the local fixture pool
+    could not express a defect found on the wider corpora.
+
+    Field notes, measured:
+      * `+28` u32 sample count -- 3,320 distinct values over those records, and equal to
+        `wav_clip_identity(wav)[0]` on 40 of 40 (record, on-disk WAV) pairs.
+      * `+15` is NOT the sample count, though this function wrote it until 2026-07-28: it takes
+        exactly two values corpus-wide, 8448 (17,890x) and 4352 (10x), independent of file length.
+      * `+44` umid -- matches `wav_clip_identity` byte for byte on those same pairs.
+      * `+292`/`+301` UNPROVEN. `+292` holds structural-looking data (`00 13 00 ...` 3,418x,
+        `01 0f 00 13 ...` 2,252x), not a `00`-prefixed umid, and these two are the sole reason
+        retargeting a record to the WAV it already names is not byte-exact. Kept because the corpus
+        cannot justify removing a write Pro Tools may require -- but now contained.
+    """
+    writes = [
+        (z + 28, int(sample_count).to_bytes(4, "little")),
+        (z + 44, umid_material),
+        (z + 292, b"\x00" + umid_material[1:]),
+        (z + 301, id2),
+    ]
+    return [(off, val) for off, val in writes if off >= z and off + len(val) <= e]
+
+
 def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
     """Point ONE registered audio file (the `file_index`-th `0x1003` record) at `wav_path`,
     leaving every other file, region, clip and track byte-identical.
@@ -4909,7 +4942,7 @@ def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
     Tools matches on are the ones `set_clip_wav` already writes for the synthesis path, applied
     here to a single record instead of all of them:
 
-      * `+15`  u32  sample count (data-chunk bytes / block align)
+      * `+28`  u32  sample count (data-chunk bytes / block align)
       * `+44`  8 B  the WAV's `umid` material, `2a`-marked
       * `+292` 8 B  the same material with a `00` prefix instead of the `2a` marker
       * `+301` 2 B  `id2`, from the bext SMPTE-UMID marker
@@ -4928,10 +4961,17 @@ def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
         raise ValueError(f"file_index {file_index} out of range ({len(recs)} audio files)")
     z, e = recs[file_index]
     out = bytearray(data)
-    out[z + 15 : z + 19] = int(sample_count).to_bytes(4, "little")
-    out[z + 44 : z + 52] = umid_material
-    out[z + 292 : z + 300] = b"\x00" + umid_material[1:]
-    out[z + 301 : z + 303] = id2
+    # SAMPLE COUNT AT +28, NOT +15. This wrote +15 until 2026-07-28, which is not the sample count
+    # but a STRUCTURAL CONSTANT: across 17,900 `0x1003` records in 372 sessions it takes exactly two
+    # values, 8448 (17,890x) and 4352 (10x), and does not vary with file length -- 8448 appears on a
+    # 14,460,559-sample WAV and on an 8,448-sample one alike. Writing the sample count there
+    # clobbered it and left the real field untouched, so `retarget_audio_file` handed the exact WAV
+    # a record already names returned NON-identical bytes on 224 of 224 pairs.
+    #
+    # +28 is the field: it takes 3,320 distinct values over those same records, and equals
+    # `wav_clip_identity(wav)[0]` on 40 of 40 (record, on-disk WAV) pairs where +15 matches 0 of 40.
+    for _off, _val in _retarget_field_writes(z, e, sample_count, umid_material, id2):
+        out[_off : _off + len(_val)] = _val
     return bytes(out)
 
 
