@@ -3650,6 +3650,84 @@ class PluginCatalogTests(unittest.TestCase):
                              "record layout is wrong, not that the session is empty" % self.FIXTURE)
         return d
 
+    def test_it_is_not_empty_on_a_session_that_has_plugins(self):
+        """The bug the first version shipped with.
+
+        v1 REQUIRED the identifier, and many kind-3 records carry only a display name -- so any
+        session whose plug-ins are all identifier-less returned []. Measured: empty on 128 of 407
+        PT-authored sessions (31.4%), 32 of them provably carrying names in their own 0x1017
+        records. It shipped on a "96.8% of blocks parse" number taken from 25 sessions on ONE
+        drive, quoted per BLOCK when a caller experiences it per SESSION.
+        """
+        d = self._a_session_with_plugins()
+        self.assertTrue(BS.plugins(d))
+
+    def test_an_identifier_may_be_absent(self):
+        d = self._a_session_with_plugins()
+        for name, ident in BS.plugins(d):
+            self.assertTrue(name.strip(), "a display name is always present")
+            self.assertIsInstance(ident, str, "an absent identifier is '', never None")
+
+    def test_a_record_WITHOUT_an_identifier_is_still_reported(self):
+        """The 31.4% bug, reproduced synthetically because `control_files` cannot express it.
+
+        No control session has an identifier-less catalog record, which is precisely why v1 shipped:
+        the local fixture pool does not contain the failing case, and the corpus measurement that
+        would have caught it was taken per BLOCK on 25 sessions from one external drive.
+
+        So the case is BUILT: take a real record, blank the u32 that gives its identifier length,
+        and require the plug-in to survive with an empty identifier rather than vanish.
+        """
+        d = self._a_session_with_plugins()
+        bl = BS._size_driven_blocks(d)
+        cats = [(z, e) for z, e, c in bl if c == 0x1018 and z >= 31]
+        target = None
+        for z, e, c in bl:
+            if c != 0x1017 or z < 31 or e - z < 14 or d[z + 9] == 0xFF:
+                continue
+            if cats and not any(cz < z and e <= ce for cz, ce in cats):
+                continue
+            n = int.from_bytes(d[z + 10:z + 14], "little")
+            if not (0 < n <= 200) or z + 14 + n > e:
+                continue
+            q = z + 14 + n + 12 + 7
+            m = int.from_bytes(d[q:q + 4], "little") if q + 4 <= e else 0
+            if 0 < m <= 250 and q + 4 + m <= e:
+                target = (z, e, n, q, BS._decode_name(d[z + 14:z + 14 + n]))
+                break
+        if target is None:
+            self.skipTest("fixture has no catalog record carrying an identifier")
+        z, e, n, q, name = target
+        self.assertIn(name, [nm for nm, _i in BS.plugins(d)])
+        maimed = bytearray(d)
+        maimed[q:q + 4] = (0).to_bytes(4, "little")     # identifier length -> 0 == absent
+        got = BS.plugins(bytes(maimed))
+        self.assertIn(name, [nm for nm, _i in got],
+                      "a record whose identifier is absent must still report its display name")
+        self.assertEqual("", dict(got)[name], "the absent identifier must read as ''")
+
+    def test_the_empty_0xFF_stub_is_not_a_plugin(self):
+        """Record kind 0xFF is an empty catalog slot (span 39, all zeros). Counting it as a
+        plug-in would inflate every session's list."""
+        d = self._a_session_with_plugins()
+        stubs = [(z, e) for z, e, c in BS._size_driven_blocks(d)
+                 if c == 0x1017 and z >= 31 and e - z > 9 and d[z + 9] == 0xFF]
+        if not stubs:
+            self.skipTest("fixture has no 0xFF stub")
+        self.assertLessEqual(len(BS.plugins(d)),
+                             sum(1 for z, e, c in BS._size_driven_blocks(d)
+                                 if c == 0x1017 and z >= 31) - len(stubs))
+
+    def test_never_reports_more_than_the_catalog_declares(self):
+        """`0x1018`'s u32 equals its direct 0x1017 child count (45/45 measured, 357/357 in an
+        independent audit). Scoping matters: reading 0x1017 blocks OUTSIDE the catalog -- every
+        session has exactly two -- broke this on 24 of 407 sessions."""
+        d = self._a_session_with_plugins()
+        declared = BS.plugin_count(d)
+        if declared is None:
+            self.skipTest("fixture has no 0x1018 catalog")
+        self.assertLessEqual(len(BS.plugins(d)), declared)
+
     def test_reads_name_and_identifier_pairs(self):
         d = self._a_session_with_plugins()
         got = BS.plugins(d)
@@ -3658,16 +3736,16 @@ class PluginCatalogTests(unittest.TestCase):
             self.assertIsInstance(name, str)
             self.assertIsInstance(ident, str)
             self.assertTrue(name.strip(), "a plug-in must have a display name")
-            self.assertTrue(ident.strip(), "a plug-in must have an identifier")
             self.assertLess(len(name), 201)
-            self.assertLess(len(ident), 251)
+            self.assertLess(len(ident), 251)     # the identifier MAY be empty
 
     def test_identifiers_look_like_reverse_dns(self):
         """Not a format guarantee -- a shape check that catches a mis-set offset immediately."""
         d = self._a_session_with_plugins()
-        idents = [i for _n, i in BS.plugins(d)]
-        self.assertTrue(any("." in i for i in idents),
-                        "identifiers are reverse-DNS strings; none had a dot -> offset is wrong")
+        idents = [i for _n, i in BS.plugins(d) if i]
+        if idents:
+            self.assertTrue(any("." in i for i in idents),
+                            "identifiers are reverse-DNS; none had a dot -> the offset is wrong")
 
     def test_results_are_deduplicated(self):
         d = self._a_session_with_plugins()

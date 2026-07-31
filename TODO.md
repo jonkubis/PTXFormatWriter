@@ -5917,3 +5917,68 @@ see 6 errors and needs to know they are historical.
 The ad-hoc `ours` regex was a worse `session_is_probably_ours`; earlier I wrote a `move_clip` that
 was already there. Both cost a round trip. The check is cheap — grep the module for the concept
 before writing it — and I did not do it either time.
+
+## 2026-07-28 — parallel correctness audit: 25 confirmed bugs. plugins() FIXED, the rest queued
+
+Ran a six-way parallel audit (identity / inverse pairs / self-checking readers / positional indices /
+validator calibration / reader robustness), each finding adversarially verified by an independent
+agent instructed to refute it. **25 confirmed at high confidence, 2 refuted.** 34 agents, 3.6M tokens.
+
+### FIXED NOW — plugins(), which I shipped YESTERDAY with a flattering number
+
+`plugins()` returned **[] on 128 of 407 PT-authored sessions (31.4%)**, 32 of them provably carrying
+plug-in names in their own `0x1017` records.
+
+Cause: v1 REQUIRED the identifier. Many kind-3 records carry only a display name, so any session
+whose plug-ins are all identifier-less returned nothing. Record kinds measured: 3 (5940), 0xFF (588,
+an EMPTY STUB), 4 (449), 0 (295), 8 (39) — v1 ignored the kind byte entirely.
+
+It shipped on *"1534 of 1585 blocks parse, 96.8%"* — **25 sessions from one drive, quoted per BLOCK
+when a caller experiences it per SESSION.** Both errors are ones this file has repeatedly warned
+about. I wrote the warning and then made it the same day.
+
+FIXES: accept identifier-less records (identifier reads `""`); skip the `0xFF` stub; and **scope to
+the `0x1018` catalog** — every session has exactly one, plus exactly TWO `0x1017` outside it, and
+reading those broke the oracle invariant on 24/407.
+
+NEW ORACLE `plugin_count()`: `0x1018`'s u32 == its direct `0x1017` child count, 45/45 mine, 357/357
+the audit's. Invariant `len(plugins) <= plugin_count`.
+
+    plugins() == []                     128/407 (31.4%)  ->  0/407
+    invariant violated                        24/407     ->  0/407
+
+**`control_files` contains NEITHER failing case** — no identifier-less record, no `0x1017` outside a
+catalog. That is exactly why it shipped: the local fixture pool cannot express the bug. The
+regression test therefore BUILDS the case, blanking a real record's identifier-length u32 and
+requiring the plug-in to survive. Verified to bite.
+
+### CONFIRMED, NOT YET FIXED — in severity order
+
+1. **`set_markers(d, markers(d))` DESTROYS marker data.** Byte-identical on 0 of 58 PT-authored
+   sessions with markers; 56 LOSE blocks. Median -2,530 bytes, worst **-227,176 bytes / -12,950
+   `0x2506` records**. A session with TWO top-level `0x2030` blocks has only one replaced by the
+   template. **`markers(out) == markers(d)` and `validate()` reports no new issue**, so neither the
+   reader nor the validator notices. This is the composition the docstring advertises.
+2. **`retarget_audio_file` writes the sample count to the WRONG OFFSET.** It writes `0x1003+15`,
+   which holds only 8448 or 4352 in **14,470 of 14,470** corpus records — a structural constant it
+   therefore clobbers. The real sample count is at `+28` (matched 224/224). Identity 0/224.
+3. **`set_tempo_map(d, tempo_map(d))`** differs on 297/342 and LOSES a `0x2028` block on 285 of
+   them: the inlined `0x2718` template carries a stale nested block_size.
+4. **`session_bit_depth()` returns 0** — not a bit depth — on 314/803 (all 221 PT Studio sessions).
+5. **`selected_tracks()` is structurally blind outside PT Studio**: non-empty on 75/803, and `[]`
+   is indistinguishable from "nothing selected".
+6. **`duplicate_track`→`remove_track` loses 2 bytes** of the `0x2519` name table when the source is
+   the last entry: 2 of 1421 round trips.
+7. `_audio_file_list()` stops at the first FOLDER marker (`0x103A` interleaves folder `0x01` and
+   file `0x02` entries) — short on 71/188, and `duplicate_audio_file` indexes into it.
+8. `session_name()` indexes `[0]` of a `flat_blocks` list that prepends the index-pointer record.
+9. `_FI.offset_holes` silently drops holes whose target the scan parser cannot type, leaving stale
+   master-index offsets in `set_waveform_view`; `reindex_after_resize` inherits the path.
+10. Validator: error-severity `audio-file-list` fires on 1 PT-authored session (a `0x5A` phantom).
+11. `track_types()` misses an unnamed MIDI track header on 2 sessions.
+12. `add_clip` rejects every MIDI/video lane `remove_clip` accepts — the pair is not closed.
+
+None of these is speculative: each was measured against the corpus and survived an adversarial
+refutation attempt. They are recorded here rather than half-fixed.
+
+272 tests green.

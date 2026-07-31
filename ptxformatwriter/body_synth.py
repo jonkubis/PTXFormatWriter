@@ -4346,51 +4346,88 @@ def audio_file_count(data: bytes) -> "int | None":
 def plugins(data: bytes) -> "list[tuple[str, str]]":
     """Every plug-in in the session's catalog, as `(display_name, identifier)`.
 
-    Example: `("FabFilter Pro-Q 3", "com.fabfilter.Pro-Q.3.AAX")`.
+    Example: `("FabFilter Pro-Q 3", "com.fabfilter.Pro-Q.3.AAX")`. **The identifier may be empty**
+    -- many records carry only a display name -- so callers must not assume it is present.
 
-    `0x1017` is listed in the parser's LEAF_PAYLOADS -- the walk must not descend into it, because
-    plug-in names contain `Z` and manufacture phantoms (the `0x0c00` in the phantom catalogue is
-    the `Z` in `iZotope`). "Do not descend" is not "cannot read": the record itself is regular.
+    `0x1017` is in the parser's LEAF_PAYLOADS: the block WALK must not descend into it, because
+    plug-in names contain `Z` and manufacture phantoms (the catalogue's `0x0c00` is the `Z` in
+    `iZotope`). "Do not descend" is not "cannot read"; the record is regular:
 
-        +9   u8   record kind -- 3 in 1537 of 1585 blocks; 4, 8 and 0xFF also occur
+        +9   u8   record kind -- 3, 4, 8 carry a plug-in; **0xFF is an EMPTY STUB**
         +10  u32  length of the display name
-        +14  ..   display name, ASCII
+        +14  ..   display name
         ..   12   three four-character codes (manufacturer / type / subtype, byte-reversed)
         ..   7    fixed bytes
-        ..   u32  length of the identifier
-        ..   ..   identifier, e.g. `com.avid.aax.dyn3.Expander`
-        ..   ..   trailer -- the record does NOT end at the identifier (0 of 1534 blocks did)
+        ..   u32  length of the identifier   ) OPTIONAL -- absent on many kind-3 records,
+        ..   ..   identifier                 ) which is why it must not be required
+        ..   ..   trailer
 
-    Measured on 25 corpus sessions: **1534 of 1585 `0x1017` blocks parse (96.8%)**. The 51 that do
-    not are the non-3 record kinds, and they are skipped rather than guessed at.
+    > **CORRECTED 2026-07-28, the day after it shipped.** The first version REQUIRED the identifier
+    > and silently dropped every record without one, so a session whose plug-ins are all
+    > identifier-less returned an empty list: **`plugins()` was `[]` on 128 of 407 PT-authored
+    > sessions (31.4%)**, 32 of them provably carrying plug-in names in their own `0x1017` records.
+    >
+    > It shipped with a number that looked fine — "1534 of 1585 blocks parse, 96.8%" — measured on
+    > **25 sessions from one drive**, and quoted per BLOCK when what a caller experiences is per
+    > SESSION. Both errors are ones this project has written about repeatedly: a narrow sample, and
+    > a denominator that flatters.
 
-    Returns names in file order, de-duplicated, since a plug-in instantiated on several tracks
-    appears once per catalog entry.
+    Self-checkable: see `plugin_count()`.
     """
+    bl = _size_driven_blocks(data)
+    # SCOPED TO THE CATALOG. Every session carries exactly one 0x1018 and, measured on 40 of 40,
+    # exactly TWO 0x1017 blocks that sit OUTSIDE it -- a different use of the type. Reading those
+    # made `len(plugins()) > plugin_count()` on 24 of 407 sessions, i.e. broke the very invariant
+    # the oracle exists to provide. Falls back to every 0x1017 when a session has no 0x1018.
+    cats = [(z, e) for z, e, c in bl if c == 0x1018 and z >= 31]
     out: "list[tuple[str, str]]" = []
     seen: "set[tuple[str, str]]" = set()
-    for z, e, c in _size_driven_blocks(data):
-        if c != 0x1017 or e - z < 20 or z < 31:
+    for z, e, c in bl:
+        if c != 0x1017 or z < 31 or e - z < 14:
             continue
-        q = z + 10
-        n = int.from_bytes(data[q : q + 4], "little")
-        if not (0 < n <= 200) or q + 4 + n > e:
+        if cats and not any(cz < z and e <= ce for cz, ce in cats):
             continue
-        name = data[q + 4 : q + 4 + n]
-        q += 4 + n + 12 + 7                      # codes, then the fixed bytes
-        if q + 4 > e:
+        if data[z + 9] == 0xFF:                     # empty stub: a slot, not a plug-in
             continue
-        m = int.from_bytes(data[q : q + 4], "little")
-        if not (0 < m <= 250) or q + 4 + m > e:
+        n = int.from_bytes(data[z + 10 : z + 14], "little")
+        if not (0 < n <= 200) or z + 14 + n > e:
             continue
-        ident = data[q + 4 : q + 4 + m]
+        name = data[z + 14 : z + 14 + n]
+        if any(b < 0x20 for b in name):
+            continue
+        ident = b""
+        q = z + 14 + n + 12 + 7                     # past the codes and the fixed bytes
+        if q + 4 <= e:
+            m = int.from_bytes(data[q : q + 4], "little")
+            if 0 < m <= 250 and q + 4 + m <= e:
+                cand = data[q + 4 : q + 4 + m]
+                if not any(b < 0x20 for b in cand):
+                    ident = cand
         try:
-            pair = (_decode_name(name), _decode_name(ident))
+            pair = (_decode_name(name), _decode_name(ident) if ident else "")
         except Exception:
             continue
         if pair not in seen:
             seen.add(pair); out.append(pair)
     return out
+
+
+def plugin_count(data: bytes) -> "int | None":
+    """The plug-in count the `0x1018` catalog container DECLARES, or None if there is none.
+
+    `0x1018`'s payload opens with a `u32` that equals its direct `0x1017` child count -- verified
+    on 45 of 45 PT-authored sessions, and reported by an independent audit at 357/357. It is the
+    oracle `plugins()` can be checked against, exactly as `audio_file_count()` serves
+    `audio_files()`.
+
+    Note the two count DIFFERENT things: this counts catalog SLOTS including the `0xFF` empty
+    stubs, while `plugins()` returns only populated records and de-duplicates. So
+    `len(plugins(d)) <= plugin_count(d)` is the invariant, not equality.
+    """
+    for z, _e, c in _size_driven_blocks(data):
+        if c == 0x1018 and z >= 31:
+            return int.from_bytes(data[z + 9 : z + 13], "little")
+    return None
 
 
 def midi_devices(data: bytes) -> "list[tuple[str, str]]":
