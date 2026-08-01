@@ -73,10 +73,27 @@ across `0x251a` blocks whose SPANS DIFFER (86 vs 87) because their name lengths 
 * for 7-char-name rows the same `+32` lands on something else entirely (99, 111, 123 — stepping
   by 12), so the post-name region of `0x251a` is **not uniform across name lengths**.
 
-That last point is why every fixed-offset probe in this investigation disagreed with the
-authoritative comparison, and it is the blocker: implementing a restamp needs a validated layout
-model for the post-name region of `0x251a`, which does not exist yet. Writing one from the
-8-char-name case alone would repeat the exact mistake this correction is undoing.
+**CORRECTION TO THE CORRECTION — the tail IS uniform.** I wrote above that the post-name region
+is "not uniform across name lengths". It is: `span - namelen == 79` in EVERY lane block measured
+(synth mono/stereo/mixed; corpus `512 mono tracks`, `512 stereo tracks` at 1024 lanes each,
+`128 click tracks`, the MIDI fixtures). The tail is a fixed 64 bytes and is now documented in
+`docs/ptx-format-spec.md`:
+
+```
++0 six zeros | +6 2A 00 00 00 | +10 GUID(8) | +18 u16 ordinal = row+1 | +20 ten zeros
+| +30 2A 00 00 00 | +34 same GUID | +42 00 00 | +44 22-byte constant run
+```
+
+So the layout blocker is REMOVED — offsets from `name_end` are well defined. What went wrong in
+this investigation was using offsets from the block START, which are meaningless because the name
+length varies.
+
+**What is still NOT explained:** why the masking becomes asymmetric at exactly 42 rows. The
+appealing story — a row ordinal of 42 is `0x2A`, so `<ordinal> 00 00 00` reads as a tag and
+`_norm_guids` blanks the wrong bytes — does not survive its own test: the `2A 00 00 00` count is
+EQUAL in dup and ref at N=41 (622 vs 622) where 2 bytes already survive, and differs by only +1 at
+N=42. Tag POSITIONS rather than counts could still explain it, but I have not demonstrated that,
+and I am not going to assert it.
 
 ### The fix was SIMULATED before implementing, and the simulation corrected the plan
 

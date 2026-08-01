@@ -901,6 +901,32 @@ is why removing a middle track closes cleanly with no channel renumber.
   alignment is too weak to serve as a desync check on its own.
 - `0x251a` lane instances — `2N` instances laid out **lane-major** (indices `0..N-1` = lane 0 of
   rows `0..N-1`, then lane 1); `row = idx mod N`; ordinal `u16` at `name_end+18` = `p+1`.
+
+  **Block layout, measured.** The name's `u32` length prefix is at `zmark+11`, the name at
+  `zmark+15`, and the tail after the name is a **FIXED 64 bytes** — `span - namelen == 79` in
+  every lane block measured: synth mono/stereo/mixed, and corpus sessions including
+  `512 mono tracks`, `512 stereo tracks` (1024 lanes each), `128 click tracks` and the MIDI
+  fixtures. The tail:
+
+  ```
+  +0   6 zero bytes
+  +6   2A 00 00 00                 tag
+  +10  8-byte GUID
+  +18  u16 ordinal (= row + 1)
+  +20  10 zero bytes
+  +30  2A 00 00 00                 tag
+  +34  the SAME 8-byte GUID again
+  +42  00 00
+  +44  22-byte constant run (5A 01 00 04 ... FE FF)
+  ```
+
+  Two consequences worth stating. The block is uniform across name lengths, so a fixed offset
+  from the block START is meaningless while an offset from `name_end` is well defined — several
+  investigations here went wrong by using the former. And `body_synth._norm_guids`, which blanks
+  8 bytes after every `2A 00 00 00`, is keyed on the two tags above; when a row ordinal itself
+  takes the value `0x2A` (row 42) the ordinal field can read as a tag, which is why
+  GUID-normalized comparisons of large sessions are not a reliable equality test (see
+  `_is_synth_shaped`).
 - `0x2589` overview blocks — `u16` at `zmark+9` = `p` (0-based). Inlined into containers
   `0x2551`/`0x2587`/`0x258a`/`0x258b`; for the two-instance `0x258a`/`0x258b` all `N` children
   live in the **second** instance.
