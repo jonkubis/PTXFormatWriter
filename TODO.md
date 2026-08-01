@@ -13,6 +13,54 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Item 15, characterized much more sharply (STILL OPEN) — the fault is SLOT-dependent
+
+New facts, all from the sound comparison (original vs `duplicate_track` then `remove_track`):
+
+1. **It depends on WHICH slot is duplicated, not just the spec.** On mixed `[1,2]*4`, duplicating
+   slot **3** round-trips **byte-exact**; duplicating slot **0** shifts every element-id pool from
+   slot 1 onward. That reframes the item: it is not "mixed specs are broken", it is a specific
+   slot/ladder interaction.
+2. The pools tell the story directly. Original mixed N=8 slot bases:
+   `[13561, 13571, 18901, 31, 18921, 51, 18941, 71]` — donor slots 0..1, then TWO interleaved
+   per-kind ladders (mono 18901/18921/18941, stereo 31/51/71). After duplicating slot 0 the
+   round-trip reads `[13561, 21, 18911, 41, 18931, 61, 18951, 81]`: the donor value 13571 is gone
+   and every later slot has advanced one rung.
+3. Same shape for mono at N=41 (`[13441, 13461, ...]` — the donor value 13451 lost), while N=40 is
+   byte-exact. `_view_scale_base_n` is 8 for both, so the threshold is not the donor-slot count.
+4. All differences remain in the BODY — **0 bytes in the master index** — and every result
+   `validate()`s clean.
+
+**A comparison I ran that is NOT evidence, recorded so it is not repeated:** I tested
+`duplicate_track(synth(N)) == synth(N+1)` and found it false everywhere, including cases whose
+pools match exactly. That test is confounded — `duplicate_track` inserts the copy immediately
+AFTER ITS SOURCE while `synthesize` appends at the end, so the two have different track layouts
+and a whole-file comparison cannot mean anything. The docstring's canonicality claim is about the
+rebuilt master INDEX "of the same track layout", not the whole file. The 9,970-byte mono
+difference it reported is layout, not defect.
+
+**Two hypotheses tested and REFUTED, so the next attempt need not repeat them:**
+
+* *"The copy lands at or below `base_n`, polluting the donor capture."* No. On mixed N=8 with
+  src=0 the copy's pool (21) sits at slot **2**, and `_view_scale_base_n` is 2 — so the copy is
+  at, not below, the boundary, and slots 0..1 are captured from untouched donor blocks.
+* *"`kinds[s]` is misaligned against the `0x261C` block order on mixed specs, so
+  `_b261c_free_field` reads the wrong bytes."* No. `_track_kinds` matches spec order exactly for
+  mixed `[1,2]*4`, mono N=41 and stereo N=40, and the `0x261C` block count equals the track count
+  in each.
+
+**What the evidence still says.** After duplicating slot 0 of mixed N=8, the round-trip equals the
+duplicated session with 0x261c slot **1** deleted — the donor value 13571 is gone and each later
+slot has advanced exactly one rung — even though the copy occupies slot 2. So the pool rewrite and
+the block removal disagree about which slot the copy is. Names and track count come out right and
+`validate()` is clean, which is why this never surfaced as anything but a byte-diff.
+
+**NEXT STEP:** instrument `_recompute_free_fields` on the same mixed session for src=0 (fails) and
+src=3 (byte-exact) and compare what it writes per slot against `donor_free`. Those two runs differ
+only in the source slot, so the divergence is isolated by construction.
+
+
 ## Items 16 and 17 CLOSED — two docstring distributions, both contradicted by measurement
 
 **Item 16 — `set_region_length`.** The docstring said the length field "is 2 bytes in ~94% of
