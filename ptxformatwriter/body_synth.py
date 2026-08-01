@@ -4118,7 +4118,9 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
     MIDI, stereo]) with grown MIDI at internal position <= 9.
     `display_order` sets the edit-window track order independently of build order: a permutation of
     0..N-1 over the built tracks in spec/creation order (e.g. `synthesize([1, 0, 2], display_order=
-    [2, 0, 1])` builds mono/MIDI/stereo then DISPLAYS stereo, mono, MIDI). Index-only — Pro Tools'
+    [2, 0, 1])` builds mono/MIDI/stereo then DISPLAYS stereo, mono, MIDI). With `click` set the
+    session has N+1 tracks, so the permutation must cover 0..N; a length-N one RAISES
+    `new_order must be a permutation of 0..N` rather than being silently reinterpreted. Index-only — Pro Tools'
     loader orders the edit window by the master track-list, not body order, so this is how MIDI can
     sit anywhere in the display. None = display in build order.
     `click` adds a single Click track: None, 'top', or 'bottom' — works with audio AND MIDI. For a
@@ -8402,8 +8404,20 @@ def _renumber_dense_track_indices(before: bytes, after: bytes) -> bytes:
 
 def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
-    `remove_track`, validated by round-trip byte-identity (`duplicate_track` then
-    `remove_track(new_name)` == original).
+    `remove_track`.
+
+    ROUND-TRIP BYTE-IDENTITY IS NOT UNIVERSAL, and this said it was. `duplicate_track` then
+    `remove_track(new_name)` reproduces the original byte-for-byte on pure mono up to N=40 and
+    pure stereo up to N=40, but NOT on mono N>=41, stereo by N=48, or ANY mono+stereo mixed spec
+    (measured at N=8, 20, 40). The differing bytes are entirely in the BODY -- 0 of them in the
+    master index -- and are dominated by 0x261b, which carries the per-track element-id pools:
+    the copy takes a fresh pool and the survivors are not fully restored by the closing
+    positional renumber. `_is_synth_shaped` is True in every one of those cases, so the renumber
+    path RUNS; it just does not cover them.
+    
+    What still holds: every round-trip result above `validate()`s clean. Byte-identity is the
+    strength of the evidence, not the correctness criterion — so treat it as PROVEN only within
+    the ranges named above.
 
     Copies the source track's COMPLETE per-track block-set (track-list entries 0x1014/0x251A,
     lane(s) 0x1052 in the shared 0x1054, the 0x261C playlist subtree, the SECOND view-chain

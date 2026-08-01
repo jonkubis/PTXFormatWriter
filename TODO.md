@@ -11,6 +11,44 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Items 14 and 15: 14 REFUTED, 15 confirmed as a FALSE CLAIM (not corruption)
+
+**Item 14 — "`click='top'` silently reinterprets `display_order` against the post-click order" —
+REFUTED.** It does not reinterpret anything; it RAISES `new_order must be a permutation of 0..N`.
+The documented N+1 usage works: with `click` set, `display_order` over the N+1 tracks (the click
+being the last build index) succeeds for both positions and for MIDI specs, validates clean, and
+different permutations produce different files. The one real weakness was the docstring opening
+with "a permutation of 0..N-1" and only mentioning N+1 six lines later — now stated at the point
+of definition.
+
+**Item 15 — `duplicate_track`->`remove_track` byte-identity — CONFIRMED, but the defect is the
+CLAIM, not the data.** Measured:
+
+| spec | byte-exact |
+|---|---|
+| mono | yes to N=40, **no from N=41** |
+| stereo | yes to N=40, no by N=48 |
+| mixed mono+stereo | **never** (N=8, 20, 40 all differ) |
+
+`duplicate_track`'s docstring asserted this unconditionally — "validated by round-trip
+byte-identity (`duplicate_track` then `remove_track(new_name)` == original)". Corrected to state
+the measured ranges.
+
+Where the differences are: **0 bytes in the master index** — the index round-trips perfectly —
+and the body differences are dominated by `0x261b` (3860 of 6821 bytes at mono N=41; 1172 of 1222
+at mixed N=8), which carries the per-track element-id pools. The copy takes a fresh pool and the
+survivors are not fully restored by the closing positional renumber. `_is_synth_shaped` is True in
+every failing case, so that renumber path RUNS — it simply does not cover mono N>=41, stereo from
+~N=48, or mixed at all.
+
+**Crucially, every round-trip result `validate()`s clean.** Byte-identity here is the strength of
+the evidence, not the correctness criterion, so this is a narrower proof than advertised rather
+than a corruption. NOT FIXED: extending the positional renumber to those ranges is real work on
+the id-pool allocator (the pools are source-dependent — synth scaffold rows draw from
+base~20661, grow-path rows from base=1).
+
+
 ## Item 13 CLOSED — click-bearing synthesis emitted a repeated 0x2589 ordinal column
 
 Confirmed and still live: `synthesize([2]*8, click='top')` produced `[0,1,2,3,4,5,6,0,2]` across
@@ -6773,9 +6811,12 @@ the name-based LOOKUP acting on every match. Remaining: the three synthesis item
 13. ~~**Every click-bearing synthesis produces duplicated `0x2589` view-chain ordinals**~~
     **CLOSED** — `_repair_overview_order`, applied last in `synthesize`; fires only on an invalid
     column so a requested order survives. See the section above.
-14. `click='top'` silently reinterprets `display_order` against the post-click order.
-15. `duplicate_track`->`remove_track` is not byte-identical on synthesized mono+stereo mixed specs,
-    nor pure mono at N=41..64 (byte-exact at N=8..40).
+14. ~~`click='top'` silently reinterprets `display_order` against the post-click order~~
+    **REFUTED** — it RAISES `new_order must be a permutation of 0..N`; the documented N+1 usage
+    works. Docstring now states the N+1 rule at the point of definition.
+15. `duplicate_track`->`remove_track` is not byte-identical on mixed specs, nor mono N>=41,
+    nor stereo by N=48. **The false CLAIM is fixed** (the docstring asserted it unconditionally);
+    the narrower renumber coverage is NOT — see the section above. All results validate clean.
 
 **Documentation**
 16. `set_region_length`: "2 bytes in ~94% of corpus records" — measured **6.3%**; 84.7% are 3 bytes,
