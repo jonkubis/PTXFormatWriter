@@ -5352,3 +5352,65 @@ class ScanUndercountNullIndexRefTests(unittest.TestCase):
                              "0x%04x: label walk found %d, size-driven walk finds %d"
                              % (ct, flat.get(ct, 0), sized.get(ct, 0)))
 
+class ClickOverviewOrdinalTests(unittest.TestCase):
+    """Every click-bearing synthesis emitted a `0x2589` view-chain ordinal column with REPEATS.
+
+    The click splice clones a donor click track and brings its overview ordinal along, so
+    `synthesize([2]*8, click='top')` produced `[0,1,2,3,4,5,6,0,2]` across nine anchors instead
+    of nine distinct values (39/39 click cases; 0/35 without). The sibling repair at the end of
+    `synthesize` normalizes the PLAYLIST ordinal column -- a different column -- which is why
+    this survived a check of that one.
+    """
+
+    @staticmethod
+    def _column(d):
+        return [int.from_bytes(d[o : o + 2], "little") for o in BS._overview_order_offsets(d)]
+
+    def test_click_bearing_synthesis_has_a_valid_ordinal_permutation(self):
+        for click in ("top", "bottom"):
+            for n in (4, 8, 12):
+                with self.subTest(click=click, n=n):
+                    col = self._column(BS.synthesize([2] * n, click=click))
+                    self.assertEqual(len(col), n + 1, "audio tracks plus the click")
+                    self.assertEqual(sorted(col), list(range(n + 1)),
+                                     "0x2589 ordinal column is not a permutation: %r" % (col,))
+
+    def test_a_column_without_repeats_is_left_untouched(self):
+        """The repair must not overwrite a column that has no repeats -- that would silently
+        discard a caller's requested display order."""
+        d = BS.synthesize([2] * 8)
+        self.assertEqual(BS._repair_overview_order(d), d)
+
+    def test_midi_columns_are_not_permutations_of_0_to_n_and_must_survive(self):
+        """MIDI tracks carry NO overview anchor, so the audio tracks keep their GLOBAL positions
+        and the values legitimately exceed the anchor count -- `[1,0,2,1]` has 3 anchors reading
+        `[0,3,2]`. A first version of this repair tested `sorted(col) == range(len)` and rewrote
+        those to identity, breaking four MIDI byte-identity tests. The criterion had only been
+        checked against all-audio specs.
+        """
+        for spec in ([1, 0, 2, 1], [1, 0, 2, 2, 0, 1], [1, 0, 2, 1, 2, 1, 0, 2, 0]):
+            with self.subTest(spec=spec):
+                col = self._column(BS.synthesize(spec))
+                self.assertNotEqual(sorted(col), list(range(len(col))),
+                                    "fixture no longer exercises the out-of-range case")
+                self.assertEqual(len(set(col)), len(col), "values must stay distinct")
+                self.assertEqual(BS.synthesize(spec), BS.synthesize_mixed_midi_inline(spec),
+                                 "the repair must not perturb a MIDI column")
+
+    def test_midi_plus_click_repeats_are_repaired_without_losing_positions(self):
+        """MIDI+click DOES repeat -- `[1,0,2,1]` with a click gives `[0,3,0,2]`. The repair must
+        resolve the repeat while keeping the distinct global positions (here, 3)."""
+        col = self._column(BS.synthesize([1, 0, 2, 1], click="top"))
+        self.assertEqual(len(set(col)), len(col), "repeats remain: %r" % (col,))
+        self.assertIn(3, col, "the global position 3 was discarded by the repair")
+
+    def test_the_repair_fixes_an_invalid_column(self):
+        """Bites the repair itself: plant a repeat and require it to be resolved."""
+        d = bytearray(BS.synthesize([2] * 8))
+        offs = BS._overview_order_offsets(bytes(d))
+        d[offs[3] : offs[3] + 2] = (0).to_bytes(2, "little")     # duplicate of entry 0
+        broken = bytes(d)
+        self.assertNotEqual(sorted(self._column(broken)), list(range(len(offs))))
+        fixed = BS._repair_overview_order(broken)
+        self.assertEqual(sorted(self._column(fixed)), list(range(len(offs))))
+

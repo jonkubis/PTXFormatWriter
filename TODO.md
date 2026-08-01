@@ -10,6 +10,42 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Item 13 CLOSED — click-bearing synthesis emitted a repeated 0x2589 ordinal column
+
+Confirmed and still live: `synthesize([2]*8, click='top')` produced `[0,1,2,3,4,5,6,0,2]` across
+nine anchors, and `synthesize([1,0,2,1], click='top')` produced `[0,3,0,2]`. The click splice
+clones a donor click track and carries its overview ordinal along. Every click-bearing synthesis
+had it.
+
+Two reasons it survived earlier checks:
+* The repair at the end of `synthesize` normalizes the **playlist** ordinal column — PT-confirmed
+  (a repeat there crashed Pro Tools, 2026-07-27). Different column, so checking it proved nothing
+  about this one.
+* `synthesize_mixed_session` DOES re-set the overview order after its click splice, but the public
+  `synthesize` takes a different path (`add_click_anyN`), so that repair never ran for it.
+
+**The column is NOT always a permutation of `0..len-1`, and assuming it was cost a round trip.**
+MIDI tracks carry no overview anchor, so the audio tracks keep their GLOBAL positions and values
+legitimately exceed the anchor count: `[1,0,2,1]` has 3 anchors reading `[0,3,2]`;
+`[1,0,2,1,2,1,0,2,0]` reads `[0,6,2,3,4,5]` over 6. My first repair tested
+`sorted(col) == range(len)` and rewrote those to identity — **4 MIDI byte-identity tests failed**,
+because I had validated the criterion only against all-audio specs. Same lesson as the
+`track_types` "417/417 clean" episode: a clean sample of one shape is not a proof.
+
+Final rule: **repeats are the defect signature and nothing else is.** Each duplicate after the
+first is reassigned the smallest unused value, so every distinct value — including MIDI's
+out-of-range global positions — stays exactly where it was. A column with no repeats is returned
+untouched, so a caller's requested order is never overwritten. MIDI+click, which genuinely
+repeats, becomes `[0,3,1,2]`: repeat resolved, global position 3 preserved.
+
+Verified: 15/15 non-click outputs byte-for-byte identical; the 4 MIDI specs byte-identical to
+`synthesize_mixed_midi_inline` again; audio+click, midi, midi+click all distinct and
+`validate()` clean.
+
+Five tests. Bite-checked twice — disabling the repair fails 7 subtests, and restoring the
+original identity-rewrite version fails 3 here plus 4 in `MixedMidiTests`.
+
 ## Item 11 CLOSED — the 82-track failure was the scan parser reaching the master index
 
 The null `0x2501` child ref diagnosed above traces to `final_index._label_maps`, which enumerated
@@ -6734,9 +6770,9 @@ the name-based LOOKUP acting on every match. Remaining: the three synthesis item
     errors at n=418~~ **REFUTED** — swept 8..140 plus 200 and 418: zero validator issues at every
     n. The n=418 PT-confirmed record and the containment claim were never in conflict, because
     the containment error does not occur.
-13. **Every click-bearing synthesis produces duplicated `0x2589` view-chain ordinals** (39/39 click
-    cases; 0/35 non-click). I checked `per-track-subtree-ordinal` earlier today and found the click
-    path clean — a DIFFERENT ordinal, so that check did not cover this.
+13. ~~**Every click-bearing synthesis produces duplicated `0x2589` view-chain ordinals**~~
+    **CLOSED** — `_repair_overview_order`, applied last in `synthesize`; fires only on an invalid
+    column so a requested order survives. See the section above.
 14. `click='top'` silently reinterprets `display_order` against the post-click order.
 15. `duplicate_track`->`remove_track` is not byte-identical on synthesized mono+stereo mixed specs,
     nor pure mono at N=41..64 (byte-exact at N=8..40).

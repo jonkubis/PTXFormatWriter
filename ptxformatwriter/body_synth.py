@@ -3360,6 +3360,50 @@ def _set_track_selection(body: bytearray, selected_track_1based: int | None) -> 
         body[b.offset + fp[1]] = want
 
 
+def _repair_overview_order(data: bytes) -> bytes:
+    """Remove REPEATS from the `0x2589` view-chain ordinal column, keeping every distinct value.
+
+    The click splice clones a donor click track and brings its overview ordinal along, so the
+    column ends up with duplicates: `synthesize([2]*8, click='top')` gave
+    `[0,1,2,3,4,5,6,0,2]` over nine anchors, and `synthesize([1,0,2,1], click='top')` gave
+    `[0,3,0,2]`. Every click-bearing synthesis had this. The sibling repair at the end of
+    `synthesize` normalizes the PLAYLIST ordinal column -- a different column -- which is why
+    this survived a check of that one.
+
+    THE COLUMN IS NOT ALWAYS A PERMUTATION OF 0..len-1. MIDI tracks carry no anchor, so the
+    audio tracks keep their GLOBAL positions and the values legitimately exceed the anchor
+    count: spec `[1,0,2,1]` has 3 anchors reading `[0,3,2]`, and `[1,0,2,1,2,1,0,2,0]` reads
+    `[0,6,2,3,4,5]` over 6. A first version of this repair tested `sorted(col) == range(len)`
+    and rewrote those to identity, breaking four MIDI byte-identity tests -- the criterion had
+    only been checked against all-audio specs.
+
+    So: repeats are the defect signature, and nothing else is. Each duplicate after the first
+    is reassigned the smallest value not already in use, which leaves every distinct value --
+    including the out-of-range global positions MIDI produces -- exactly where it was. A column
+    with no repeats is returned unchanged, so a caller's requested order is never overwritten.
+    """
+    ref = _FI.final_index_ref(data)
+    if ref is None:
+        return data
+    body, index = bytearray(data[: ref.start]), data[ref.start :]
+    offs = _overview_order_offsets(bytes(body))
+    if not offs:
+        return data
+    cur = [int.from_bytes(body[o : o + 2], "little") for o in offs]
+    if len(set(cur)) == len(cur):
+        return data                                   # no repeats: nothing to repair
+    used, out, nxt = set(), [], 0
+    for v in cur:
+        if v in used:
+            while nxt in used:
+                nxt += 1
+            v = nxt
+        used.add(v)
+        out.append(v)
+    _set_overview_order(body, out)
+    return bytes(body) + index
+
+
 def _set_overview_order(body: bytearray, values: list[int]) -> None:
     """Overwrite every overview order u16 (in file order) with `values`. The
     count must match — both the grown body and the source control hold exactly N
@@ -4113,8 +4157,8 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
     # and inherits its ordinal, so `synthesize([2]*4, click='top')` emitted [3,1,2,3,4] -- a
     # REPEAT, which is what Pro Tools crashes on (PT-confirmed 2026-07-27). Every click-bearing
     # session this writer produced carried one. No-op where the column is already correct.
-    return _normalize_one_playlist_ordinals(
-        _reallocate_duplicate_track_ids(_repair_next_kind_chain(body)))
+    return _repair_overview_order(_normalize_one_playlist_ordinals(
+        _reallocate_duplicate_track_ids(_repair_next_kind_chain(body))))
 
 
 # --- index-offset pointer ----------------------------------------------------
