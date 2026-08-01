@@ -56,6 +56,35 @@ stale special-last count is one), at which point the gate becomes honest and the
 disappears. That is the remaining work, and it is a synthesis-writer change, not a predicate
 tweak.
 
+### The fix was SIMULATED before implementing, and the simulation corrected the plan
+
+Patching the surviving diffs directly into the duplicate (i.e. pretending `duplicate_track` had
+written what a fresh synth writes) and then measuring:
+
+| case | surviving diffs | gate | round-trip byte-exact |
+|---|---|---|---|
+| mono N=41 | 2 | False -> **True** | False -> **False** |
+| mono N=42 | 6 | False -> **True** | False -> False |
+| mono N=45 | 8 | False -> **True** | False -> False |
+| stereo N=48 | 2 | False -> **True** | False -> False |
+
+**Flipping the gate is necessary but NOT sufficient** — which retires the one-line plan recorded
+above ("make `duplicate_track` restamp it and the threshold disappears"). What it DOES buy is
+large: with the gate True the renumber runs and mono N=41's round-trip goes from wholesale failure
+to **2 differing bytes, both `0x251a`** (mono N=40 becomes byte-exact, as the control). Those 2
+bytes are the same special-last count in the opposite direction, so **`remove_track` fails to
+restamp it too**. The fix is symmetric and both editors need it.
+
+### Why no constant is being committed for the field's offset
+
+The field is at a KIND-DEPENDENT offset: `end-32` for mono, `end-28` for stereo (both blocks span
+87 bytes). End-offset 46 also carries the count in both kinds but is a different byte. A single
+constant would be wrong, and a kind-conditional pair derived from five sessions is exactly the
+shape of under-verified constant that has bitten this codebase repeatedly (`retarget_audio_file`'s
+`+15` vs the real `+28`; `set_region_length`'s "~94% are 2 bytes"; the `0x2519` preamble flag read
+as a boolean). Deriving the rule properly -- across kinds, mixed specs, MIDI, and the corpus --
+is the precondition for implementing this, not an afterthought.
+
 Still open beneath it: the six `0x1014` bytes that appear from N=45, and the mixed src=0/1 length
 mismatch (97402 vs 97467).
 
