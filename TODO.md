@@ -120,10 +120,30 @@ payoff, sweeping N=8..55:
 
 Two tests, verified to bite (restore the scan-while-mutating loop and 3 subtests fail).
 
-**Still open beneath this:** mono from N=42 and mixed src=0/1 have FURTHER real differences — the
-six `0x1014` bytes seen from N=45 and the mixed length mismatch (97402 vs 97467). Those are
-genuine content differences, not masking artifacts, so they need the restamp work described
-above.
+### What remains, re-measured AFTER the `_norm_guids` fix (the earlier figures were inflated by it)
+
+**mono from N=42 — 2 bytes, and they ARE real (checked, not assumed).** Always in `0x1014` block
+**index 42**, at block-relative **+45** and **+51**. The duplicate carries **3** `2A 00 00 00`
+tags in that block where a fresh synth carries **4**: the synth populates a tagged GUID slot at
++45 that `duplicate_track` leaves zeroed. At N=43 the same 2 bytes recur and block index 43 shows
+the mirror (dup 2 tags, ref 1), i.e. the slot is populated one block late.
+
+Ruled out while localizing it: the CHANNEL INDEX is not involved. `set_track_channels` writes it
+at `track_offset + nlen + 11` (block-relative +26) and it is EQUAL in both files (41 and 41, 42
+and 42). A channel value of 42 does form a spurious `2A 00 00 00` there — 42 is `0x2A` — but
+symmetrically in both files, so it is not the difference.
+
+Note the general hazard this exposes, which the `_norm_guids` fix does NOT remove: any field whose
+value is `0x2A` followed by zeros reads as a GUID tag. Collecting tag positions before blanking
+stops one file's blanking from destroying another tag, but it cannot tell a real tag from data
+that looks like one. GUID-normalized whole-file comparison is therefore only ever approximate.
+
+**mixed `[1,2]*4` src=0 and src=1 — a LENGTH mismatch, structurally different from the above.**
+src=0 gives 97402 against the reference's 97467 (+65); src=1 gives 97491 against 97475 (−16). Not
+a field value at all, so it needs its own investigation and shares nothing with the mono residual
+beyond the audit item number.
+
+Both are now cleanly separated from the masking bug that was inflating them.
 
 ### The fix was SIMULATED before implementing, and the simulation corrected the plan
 
