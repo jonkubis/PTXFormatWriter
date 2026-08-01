@@ -5450,3 +5450,50 @@ class NormGuidsOverlappingWindowTests(unittest.TestCase):
                 self.assertEqual(BS.remove_track(dup, "ZZTEMPNAME"), d,
                                  "%s: duplicate->remove is no longer byte-exact" % label)
 
+class ChannelMarkerCollisionTests(unittest.TestCase):
+    """`set_track_channels` located its `2A 00 00 00` marker with a find from `track_offset`.
+
+    A 0x1014 holds the channel index at `nlen + 11`, and a channel value of 42 IS `2a 00 00 00`.
+    So for the one track allocated channel 42 the search locked onto the CHANNEL FIELD instead of
+    the real marker (block-relative 26 rather than 32) and the post-ID writes landed 6 bytes early
+    -- a stray non-zero at block-relative 45, which is 0 in every other mono block at every N.
+    Starting the search past the pre-marker channel pair (`nlen + 15`) resolves rel 32 for every
+    block.
+
+    That stray byte is what kept `duplicate_track` -> `remove_track` from being byte-exact on mono
+    from 43 tracks up. With it fixed, both pure-kind specs round-trip byte-exact across N=8..59.
+    """
+
+    def test_no_stray_channel_write_in_any_mono_channel_map(self):
+        for n in (43, 44, 50):
+            with self.subTest(n=n):
+                d = BS.synthesize([1] * n)
+                blocks = sorted((z, e) for z, e, c in BS._size_driven_blocks(d) if c == 0x1014)
+                stray = [(i, d[z + 45]) for i, (z, e) in enumerate(blocks)
+                         if z + 45 < e and d[z + 45] != 0]
+                self.assertEqual(stray, [], "stray channel writes at 0x1014 rel 45: %r" % (stray,))
+
+    def test_the_marker_search_skips_a_channel_field_valued_42(self):
+        """Pins the mechanism rather than only its symptom."""
+        d = BS.synthesize([1] * 44)
+        blocks = sorted((z, e) for z, e, c in BS._size_driven_blocks(d) if c == 0x1014)
+        z, e = blocks[42]
+        toff = z + 7
+        nlen = int.from_bytes(d[toff + 2 : toff + 6], "little")
+        self.assertEqual(int.from_bytes(d[toff + nlen + 11 : toff + nlen + 13], "little"), 42,
+                         "fixture must be the block whose channel index is 42")
+        naive = d.find(b"\x2a\x00\x00\x00", toff, e)
+        fixed = d.find(b"\x2a\x00\x00\x00", toff + nlen + 15, e)
+        self.assertEqual(naive - z, 26, "the naive search lands on the channel field")
+        self.assertEqual(fixed - z, 32, "the search must resolve the real marker")
+
+    def test_duplicate_remove_is_byte_exact_for_pure_mono_and_stereo(self):
+        """The payoff, at the boundaries that used to fail."""
+        for label, spec in (("mono N=42", [1] * 42), ("mono N=50", [1] * 50),
+                            ("stereo N=48", [2] * 48)):
+            with self.subTest(case=label):
+                d = BS.synthesize(spec)
+                names = [t.name for t in BS.track_types(d)]
+                dup = BS.duplicate_track(d, names[0], "ZZTEMPNAME")
+                self.assertEqual(BS.remove_track(dup, "ZZTEMPNAME"), d)
+

@@ -120,7 +120,38 @@ payoff, sweeping N=8..55:
 
 Two tests, verified to bite (restore the scan-while-mutating loop and 3 subtests fail).
 
-### What remains, re-measured AFTER the `_norm_guids` fix (the earlier figures were inflated by it)
+### CLOSED — the mono residual was `set_track_channels` colliding with a channel value of 42
+
+A `0x1014` holds the channel index at `nlen + 11`, and **a channel value of 42 IS `2a 00 00 00`**.
+`set_track_channels` searched for its marker from `track_offset`, so for the ONE track allocated
+channel 42 it locked onto the channel field (block-relative 26) instead of the real marker
+(rel 32), and the post-ID writes landed 6 bytes early — a stray non-zero at rel 45, which is 0 in
+every other mono block at every N. Starting the search past the pre-marker channel pair
+(`nlen + 15`) resolves rel 32 for every block.
+
+Payoff, sweeping N=8..59 with `duplicate_track` then `remove_track`:
+
+| spec | before this session | after |
+|---|---|---|
+| mono | byte-exact to N=40 | **byte-exact, N=8..59, no failures** |
+| stereo | byte-exact to N=40 | **byte-exact, N=8..59, no failures** |
+| mixed | src 0,1 fail | unchanged |
+
+Both pure-kind specs are now fully closed. Three tests, verified to bite.
+
+This is the third defect this session traceable to a value of `0x2A` being indistinguishable from
+the tag byte: `_norm_guids`' blanking windows, the `0x2519` name-entry trailer field, and now the
+channel index. The pattern is worth carrying: **any `find(b"\x2a\x00\x00\x00")` in this format is
+a latent collision with whatever field can hold 42 followed by zeros.**
+
+### What remains for item 15 — ONLY the mixed case
+
+`mixed [1,2]*4` src=0 and src=1, and `mixed [2,1]*5` src=0: a LENGTH mismatch (97402 vs 97467,
+i.e. +65; and 97491 vs 97475, −16). Only source slots inside the donor/scaffold region fail —
+`_view_scale_base_n` is 2 for these — while every later slot round-trips byte-exact. Not a field
+value at all, so it needs its own investigation.
+
+### Superseded: the earlier residual figures (kept for provenance)
 
 **mono from N=42 — 2 bytes, and they ARE real (checked, not assumed).** Always in `0x1014` block
 **index 42**, at block-relative **+45** and **+51**. The duplicate carries **3** `2A 00 00 00`

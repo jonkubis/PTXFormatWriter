@@ -9343,7 +9343,17 @@ def set_track_channels(data: bytes, track_offset: int, channels: list[int]) -> b
     # unframed that block so the walk lost it (0x1014 count stayed 57 instead of going to 58) and
     # duplicate->remove came back 2 bytes short of byte-exact on 2 of 40 real sessions.
     _blk_end = track_offset + int.from_bytes(out[track_offset - 4 : track_offset], "little")
-    marker = out.find(b"\x2a\x00\x00\x00", track_offset, max(track_offset, _blk_end))
+    # START THE SEARCH PAST THE PRE-MARKER CHANNEL PAIR. The channel indices sit at
+    # `nlen + 11` and `nlen + 13`, and a channel value of 42 IS `2a 00 00 00` -- so searching
+    # from `track_offset` locks onto the CHANNEL FIELD itself for the one track allocated
+    # channel 42, and the post-ID writes then land 6 bytes early (block-relative 45 instead of
+    # 51). Measured on a fresh mono synth: 0x1014 blocks 41 and 43 resolve their marker at
+    # rel 32, block 42 resolved it at rel 26. The stray write shows up as a lone non-zero byte
+    # at rel 45 in exactly that block -- 0 in every other mono block, at every N -- which is
+    # what made `duplicate_track`->`remove_track` differ from a fresh synth from 43 tracks up
+    # (TODO.md, audit item 15).
+    marker = out.find(b"\x2a\x00\x00\x00", track_offset + nlen + 15,
+                      max(track_offset, _blk_end))
     # Channel indices are u16 (the field's high byte is 0 below 256 but in use from
     # 256 up -- i.e. stereo track >=129, channel index 2k-2 >= 256). Writing a single
     # byte truncated them and raised at N>=129. Pre-marker pair is contiguous (stride
