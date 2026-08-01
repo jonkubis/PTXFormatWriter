@@ -88,11 +88,27 @@ routes directly: `synthesize_stereo_inline` 1 path, `synthesize_mono_inline` 1 p
 and `[2]*12` is not. The defect is confined to the mixed route, which is also exactly where item
 15's residual lived.
 
-Exposed as `synthesize(..., normalize_paths=False)`, **opt-in**. Every LOCAL oracle (validate,
-rc=0, the suite) passes either way, so only a Pro Tools load can settle whether the normalised
-form is preferable. An A/B pair is staged on the Desktop: `PATHNORM_A_mixed_chimera.ptx` (2 paths)
-and `PATHNORM_B_mixed_normalized.ptx` (1 path), both `validate()`-clean. If B opens cleanly the
-default can flip in one line.
+Exposed as `synthesize(..., normalize_paths=False)`, **opt-in**. An A/B pair is staged on the
+Desktop: `PATHNORM_A_mixed_chimera.ptx` (2 paths) and `PATHNORM_B_mixed_normalized.ptx` (1 path),
+both `validate()`-clean.
+
+**WHY THE DEFAULT IS NOT FLIPPED — this is a decision, not an omission.** The current default is
+PT-CONFIRMED. The normalised form is not. Replacing verified behaviour with unverified behaviour
+because the latter *looks* more PT-native is precisely the error this project's history warns
+about: reader `rc=0` is not PT-validity, and Pro Tools is the only oracle. Every local check
+passes for both forms, so local green carries no information about the one question that matters.
+The correct engineering action is to stage the experiment and let the oracle decide, which is what
+the A/B pair is for.
+
+**A structural proxy was tried as a substitute for PT, and it does not work.** The idea: if
+PT-authored sessions gave same-kind tracks uniform `0x261C` spans, the chimera (which does not)
+would be provably non-native. Measured: PT-authored sessions are NOT uniform either --
+`512 mono tracks.ptx` shows 3 distinct mono spans, `512 stereo tracks.ptx` 3 -- because track NAME
+lengths vary ("Audio 1" against "Audio 100"). The proxy cannot separate path variation from name
+variation, so it is not evidence. Recorded so it is not retried.
+
+For reference, the transformation does do what it claims structurally: mixed `[1,2]*4` goes from
+stereo spans `{1872: 1, 1856: 3}` to `{1872: 4}`, with mono `{1833: 4}` unchanged in both.
 
 
 ## Item 15 — ROOT CAUSE RESOLVED (fix deliberately not applied; see why)
