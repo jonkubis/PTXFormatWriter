@@ -6325,12 +6325,27 @@ _REAL_CONTENT_MARKERS = frozenset({
 
 
 def _is_synth_shaped(data: bytes) -> bool:
-    """True iff `data` is a pristine mono/stereo/mixed `*_inline` synth (mod random GUIDs) -- the
-    ONLY shape the fixed-offset positional renumber is derived for. Verified by rebuilding the
-    fresh synth of the same audio layout + names and comparing whole-file (GUID-normalized): any
+    """Approximately: `data` is a mono/stereo/mixed `*_inline` synth. Rebuilds the fresh synth of
+    the same audio layout + names and compares whole-file after `_norm_guids`. Any
     clips/plugins/automation/click content makes the rebuild differ, so real sessions fall through
-    to the no-renumber splice path (which `remove_track` already handles safely). Audio-only
-    (mono/stereo); MIDI/aux/etc. are outside the renumber's domain.
+    to the no-renumber splice path (which `remove_track` handles safely). Audio-only; MIDI/aux are
+    outside the renumber's domain.
+
+    IT IS NOT AN EQUALITY TEST, and this said "True iff `data` is a PRISTINE synth". `_norm_guids`
+    zeroes 8 bytes after EVERY `2a 00 00 00` tag, and those windows swallow far more than random
+    GUIDs. A `duplicate_track` output -- which is NOT a pristine synth -- differs from the fresh
+    synth of its own layout by 540 raw bytes at N=20, 700 at 36, 740 at 40, 750 at 41, 792 at 45,
+    yet normalizes EQUAL through 41 rows. So this returns True for sessions it is documented to
+    reject.
+
+    That masking is load-bearing, which is why it is described rather than tightened. Both
+    `duplicate_track` and `remove_track` gate their positional renumber on this predicate, and the
+    `duplicate`->`remove` round-trip is byte-exact exactly while it answers True: at 42 rows the
+    tag layout near the last row stops matching between the two files, normalization becomes
+    asymmetric, 2 bytes survive, the gate flips to False, `remove_track` skips the renumber, and
+    the round-trip stops being byte-exact (see TODO.md, audit item 15). Making it a true equality
+    test would disable the renumber everywhere, including the cases that currently round-trip
+    byte-exact.
 
     The rebuild is expensive and scales with track count, so a real session is rejected first by
     an O(blocks) scan for content a synth never emits (`_REAL_CONTENT_MARKERS`) -- otherwise every

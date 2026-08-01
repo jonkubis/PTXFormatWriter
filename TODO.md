@@ -14,74 +14,56 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
-## Item 15 — ROOT CAUSE FOUND (still open): `_is_synth_shaped(dup)` gates the whole renumber
+## Item 15 — ROOT CAUSE RESOLVED (fix deliberately not applied; see why)
 
-`_is_synth_shaped(duplicated_session)` predicts round-trip byte-exactness **perfectly — 25 of 25
-cases** across mixed/mono/stereo and five source slots each. When it returns False, `remove_track`
-skips the positional renumber entirely (instrumenting `_capture_donor_free` and
-`_recompute_free_fields` shows neither is called), so the survivors keep the pool values
-`duplicate_track` assigned and every slot reads one rung high.
+The gate is `_is_synth_shaped(duplicated_session)`. It predicts round-trip byte-exactness
+**perfectly, 25 of 25 cases**: when it returns False, `remove_track` skips the positional renumber
+entirely (verified by instrumenting — neither `_capture_donor_free` nor `_recompute_free_fields`
+is called), so survivors keep the pool values `duplicate_track` assigned.
 
-So there is ONE gate, not a family of spec-specific bugs. The predicate rebuilds a fresh synth of
-the duplicate's own layout + names and compares GUID-normalized. It is not N-limited: a pristine
-`synthesize([1]*n)` is recognized at every n from 8 to 80. It is the DUPLICATE that fails to match
-its layout-matched reference.
+**Why it flips at 42 rows — and it is not what it looks like.** Two properties had to be pulled
+apart:
 
-**How far it fails, measured:**
+| N (mono) | `dup == fresh synth of its layout` | raw byte delta | `orig -> dup -> remove == orig` |
+|---|---|---|---|
+| 20 | **False** | 540 | True |
+| 36 | **False** | 700 | True |
+| 40 | **False** | 740 | True |
+| 41 | **False** | 750 | **False** |
+| 45 | **False** | 792 | **False** |
 
-| case | bytes differing from the layout-matched reference |
-|---|---|
-| mono N=40, stereo N=40, mixed src>=2 | **0 — dup matches, round-trip byte-exact** |
-| mono N=41 src=0 | **2**, both in `0x251a` |
-| stereo N=48 src=0 | **2**, both in `0x251a` |
-| mono N=45 src=0 | 8 — the same 2 in `0x251a`, plus 6 in `0x1014` |
-| mixed `[1,2]*4` src=0 | lengths differ (97402 vs 97467) — a separate, larger fault |
+`duplicate_track` output is **never** a fresh synth — it differs by 540..792 raw bytes at every N
+tested. `_is_synth_shaped` answers True anyway, because `_norm_guids` zeroes 8 bytes after EVERY
+`2a 00 00 00` tag and those windows swallow all of them through 41 rows. From 42 rows the tag
+layout near the last row stops matching between the two files, the masking becomes asymmetric, 2
+bytes survive, and the gate flips.
 
-The two `0x251a` bytes are one field: at rel **+55** (mono) / **+59** (stereo), in the block at
-**lane-group index 41**, once per lane group (blocks 41 and 83 of 84 for mono N=41; 41 and 90 of
-98 for stereo N=48). The duplicate writes **41** where a fresh synth writes **42**. It is index 41
-in both the mono and stereo cases even though their track counts differ (42 vs 49), so the trigger
-is that lane-group index existing at all — which is why mono N=40 (41 rows, no index 41) is clean
-and mono N=41 (42 rows) is not.
+So the "42-row threshold" is a property of the GUID-normalization window, not of any field's
+semantics. That resolves the tension flagged earlier, and it retires the intermediate story: the
+`0x251a` rel+55 special-last field IS stale in the duplicate at every N (it keeps the old count),
+it is simply masked below 42 rows.
 
-**Hypotheses tested and REFUTED** (so the next attempt skips them): the copy does not land below
-`base_n`; `kinds[s]` is not misaligned against the `0x261C` block order; `_is_synth_shaped` is not
-failing on large N per se.
+**Corrected in code:** `_is_synth_shaped`'s docstring claimed "True iff `data` is a PRISTINE
+synth". It returns True for `duplicate_track` output, which is not one. Now states what it
+actually tests and the measured deltas.
 
-**Correction to an earlier note here:** I previously recorded the dup-vs-canonical comparison as
-"not evidence" because `duplicate_track` inserts the copy after its source while `synthesize`
-appends. That is right about MY version of the test, which compared against
-`synthesize(spec + [kind])`. It is wrong as a general statement: the LAYOUT-MATCHED comparison --
-rebuild the reference with the copy's kind at the copy's slot and the same names, exactly what
-`_is_synth_shaped` does -- is meaningful, and is what produced the 2-byte localization above.
+**Why the behaviour is NOT changed.** The masking is load-bearing. Both `duplicate_track` and
+`remove_track` gate their renumber on this predicate, and the round-trip is byte-exact exactly
+while it answers True. Making it a real equality test would return False everywhere and disable
+the renumber for the cases that currently round-trip byte-exact — strictly worse. The principled
+fix is to make `duplicate_track` actually reproduce the fresh synth (all ~740 bytes, of which the
+stale special-last count is one), at which point the gate becomes honest and the threshold
+disappears. That is the remaining work, and it is a synthesis-writer change, not a predicate
+tweak.
 
-**THE FIELD IS IDENTIFIED.** It is a SPECIAL-LAST field, the same pattern as the `0x2519`
-name-table's special last entry: across all 84 lane instances of a 42-track mono session the byte
-is **0 everywhere except the two instances of the LAST row** (indices 41 and 83), where a fresh
-synth writes the track count (42) and `duplicate_track` leaves 41. Ruled out while identifying it:
-the `2a 00 00 00` anchor marker is intact and at the identical offset in dup and reference for
-every one of the 84 blocks, so this is not a corrupted marker.
+Still open beneath it: the six `0x1014` bytes that appear from N=45, and the mixed src=0/1 length
+mismatch (97402 vs 97467).
 
-So `duplicate_track` grows the session from 41 to 42 rows without restamping the previously-last
-row's lane count. The copy is inserted after its source, so the last row stays last and the field
-simply needs to follow the new total.
-
-The **0x2A-collision hypothesis is REFUTED** (I raised it; the measurement kills it). On fresh
-mono synths the field simply equals the track count -- 38, 39, 40, 41, 42, 43, 45, 48 all read
-back their own N -- so 42 is in no way special and the lane anchor byte is not being collided
-with. Probe caveat worth carrying: `rel +55` is the field's offset for MONO; stereo's sits at
-`+59`, and a fixed `+55` probe reads a constant 95 on stereo, which is a different byte entirely.
-
-So the threshold at 42 rows remains UNEXPLAINED. Note the tension to resolve first: if
-`duplicate_track` simply never restamps this field, it would be wrong at every N (leaving the old
-count), yet mono N=40 -> 41 rows matches its reference exactly. Something restamps it up to 41
-rows and stops. That "something" is the thing to find -- most likely inside the duplicate-side
-positional renumber, not in the field's writer.
-
-**NEXT STEP:** find the writer that stamps this special-last lane field (it is correct on a fresh
-synth, so `synthesize` sets it) and make `duplicate_track` restamp it. Then re-check the six
-`0x1014` bytes that appear from N=45, and treat the mixed src=0/1 length mismatch (97402 vs 97467)
-as its own investigation.
+**Probe discipline note.** Two claims in this investigation came from a fixed-offset probe
+(`rel +55`) and had to be withdrawn: it read a different byte on stereo (returning a constant 95),
+and it appeared to contradict the full-file comparison at N=40 until `_norm_guids` explained the
+gap. The authoritative comparison is the one `_is_synth_shaped` itself makes. Fixed offsets across
+varying name lengths are not.
 
 ## Items 16 and 17 CLOSED — two docstring distributions, both contradicted by measurement
 
