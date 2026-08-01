@@ -63,11 +63,36 @@ field as well, which is rebuilding the file rather than comparing it. **Reverted
 in place — it added a fallback to a load-bearing predicate that never fires, and dead complexity
 in `_is_synth_shaped` is worse than none.
 
-**This sharpens the remaining work rather than leaving it vague.** The only correct fix is at the
-OUTPUT level: normalise the source paths when the session is built, so the block sizes are
-consistent with the paths they describe. That is the `rename_track`-style reindex on the
-PT-confirmed stereo route, and its honest verification is a Pro Tools load, which only the user can
-run.
+### IMPLEMENTED at the output level — `normalize_source_paths` (opt-in), and item 15 CLOSES
+
+The comparison-layer attempt failed for a reason that pointed straight at the fix: the residual
+was the enclosing SIZE fields, so the paths have to be corrected in the OUTPUT, where the sizes
+follow. `normalize_source_paths(data, target=None)` renames the divergent chain component-wise
+onto the majority one via `rename_track` (which already fixes `5a 0a 00` path-wrapper lengths and
+reindexes). Both chains have 6 components above the leaf, so the rename is well-defined.
+
+Measured: every spec collapses to ONE path, `validate()` clean, track names preserved. **And it
+closes audit item 15** — on `[1,2]*4`, source slots 0 and 1 go from non-exact to byte-exact and
+2..5 are unaffected:
+
+| src | raw | after normalisation |
+|---|---|---|
+| 0 | not exact | **byte-exact** |
+| 1 | not exact | **byte-exact** |
+| 2..5 | byte-exact | byte-exact |
+
+**SCOPE CORRECTED — my "synthesized stereo sessions are chimeras" claim was wrong.** Measuring the
+routes directly: `synthesize_stereo_inline` 1 path, `synthesize_mono_inline` 1 path,
+`synthesize_mixed_inline` 2. My `[2]*6` sample had routed through the MIXED builder, because
+`synthesize` only sends an all-one-kind spec to the pure route at n >= 8 — so `[2]*6` is a chimera
+and `[2]*12` is not. The defect is confined to the mixed route, which is also exactly where item
+15's residual lived.
+
+Exposed as `synthesize(..., normalize_paths=False)`, **opt-in**. Every LOCAL oracle (validate,
+rc=0, the suite) passes either way, so only a Pro Tools load can settle whether the normalised
+form is preferable. An A/B pair is staged on the Desktop: `PATHNORM_A_mixed_chimera.ptx` (2 paths)
+and `PATHNORM_B_mixed_normalized.ptx` (1 path), both `validate()`-clean. If B opens cleanly the
+default can flip in one line.
 
 
 ## Item 15 — ROOT CAUSE RESOLVED (fix deliberately not applied; see why)

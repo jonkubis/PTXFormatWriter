@@ -4110,7 +4110,7 @@ def _repair_next_kind_chain(data: bytes) -> bytes:
 
 
 def synthesize(spec: "list[int]", *, click: "str | None" = None,
-               display_order: "list[int] | None" = None, unique: bool = True) -> bytes:
+               display_order: "list[int] | None" = None, unique: bool = True, normalize_paths: bool = False) -> bytes:
     """Build a Pro Tools session from an ordered track spec with NO external control files.
 
     `spec` = per-track channel counts (1 = mono, 2 = stereo, 0 = MIDI). A spec containing MIDI (0)
@@ -4159,8 +4159,13 @@ def synthesize(spec: "list[int]", *, click: "str | None" = None,
     # and inherits its ordinal, so `synthesize([2]*4, click='top')` emitted [3,1,2,3,4] -- a
     # REPEAT, which is what Pro Tools crashes on (PT-confirmed 2026-07-27). Every click-bearing
     # session this writer produced carried one. No-op where the column is already correct.
-    return _repair_overview_order(_normalize_one_playlist_ordinals(
+    out = _repair_overview_order(_normalize_one_playlist_ordinals(
         _reallocate_duplicate_track_ids(_repair_next_kind_chain(body))))
+    # OPT-IN, default off. A stereo/mixed synth is a PATH CHIMERA (two source folders where PT
+    # writes one); normalizing closes audit item 15 by making donor-derived and generated units
+    # the same size. Off by default because it changes output on the PT-confirmed stereo route
+    # and every LOCAL oracle passes either way -- only a Pro Tools load can settle it.
+    return normalize_source_paths(out) if normalize_paths else out
 
 
 # --- index-offset pointer ----------------------------------------------------
@@ -6336,6 +6341,94 @@ _REAL_CONTENT_MARKERS = frozenset({
     0x2611,   # insert / plug-in instance
     0x2064,   # plug-in-settings (.tfx) wrapper
 })
+
+
+def source_path_runs(data: bytes, lo: int, hi: int, minlen: int = 3) -> "list[tuple[int, int, list]]":
+    """Maximal runs of >= `minlen` consecutive length-prefixed printable components in
+    `data[lo:hi]` -- one stored absolute source path. Returns `(start, end, components)`."""
+    out = []
+    i = lo
+    while i < hi - 4:
+        j, comps = i, []
+        while j < hi - 4:
+            n = int.from_bytes(data[j : j + 4], "little")
+            if not (1 <= n <= 40 and j + 4 + n <= hi):
+                break
+            seg = data[j + 4 : j + 4 + n]
+            if not all(32 <= c < 127 for c in seg):
+                break
+            comps.append(seg)
+            j += 4 + n
+        if len(comps) >= minlen:
+            out.append((i, j, comps))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def session_source_paths(data: bytes) -> "dict[str, int]":
+    """`{path: track count}` for the absolute source path stored in each `0x261C`.
+
+    A Pro Tools-authored session carries exactly ONE (uniform across all 512 tracks on the
+    512-track controls). A synthesized STEREO or MIXED session carries TWO, because the inlined
+    unit template and the scaffold donor were captured from different folders -- see
+    `normalize_source_paths`."""
+    out: "dict[str, int]" = {}
+    for z, e in sorted(_blocks_by_type(data).get(0x261C, [])):
+        for _s, _t, comps in source_path_runs(data, z, e):
+            key = "/".join(c.decode("latin1") for c in comps[:-1])
+            out[key] = out.get(key, 0) + 1
+    return out
+
+
+def normalize_source_paths(data: bytes, target: "str | None" = None) -> bytes:
+    """Put every track's stored source path onto ONE directory chain, the way Pro Tools writes it.
+
+    A session built by `synthesize_mixed_inline` is a PATH CHIMERA: the scaffold donor carries the
+    control's folder while generated units carry the inlined template's, e.g.
+    `Dropbox SSD/Dropbox/PYTHON/__CODEX/PTFORMAT/control_files` alongside
+    `Macintosh HD/Users/jonkubis/Music/temp/PT`. SCOPE, measured: only the MIXED route is
+    affected. `synthesize_stereo_inline` and `synthesize_mono_inline` are each internally uniform
+    (1 path), as are PT-authored sessions; `synthesize_mixed_inline` carries 2. Note `synthesize`
+    routes an all-one-kind spec of n < 8 through the mixed builder, so `[2]*6` is a chimera while
+    `[2]*12` is not. `synthesize_mixed_session` normalizes only the LEAF, and the two chains
+    differ in every component above it, so the leaf rename cannot reconcile them.
+
+    Renames component-wise via `rename_track` (which fixes the `5a 0a 00` path-wrapper lengths and
+    reindexes), so it requires the chains to have the same component COUNT -- true for the two
+    templates in use. `target` picks the chain to keep; default is the most common one.
+
+    Closes audit item 15: it makes a donor-derived and a generated unit the same size, so
+    `duplicate_track` -> `remove_track` becomes byte-exact for donor-region sources too (measured
+    on `[1,2]*4`: source slots 0 and 1 go from non-exact to exact, 2..5 unaffected).
+
+    NOT applied by `synthesize` -- see its `normalize_paths` argument. It changes output on a
+    PT-confirmed route, and every LOCAL oracle (validate, rc=0, the suite) passes either way, so
+    only a Pro Tools load can settle it.
+    """
+    counts = session_source_paths(data)
+    if len(counts) <= 1:
+        return data
+    keep = target or max(counts, key=lambda k: counts[k])
+    keep_parts = keep.split("/")
+    out = data
+    for other in counts:
+        if other == keep:
+            continue
+        parts = other.split("/")
+        if len(parts) != len(keep_parts):
+            raise ValueError(
+                f"cannot normalize {other!r} onto {keep!r}: {len(parts)} components vs "
+                f"{len(keep_parts)}; component-wise rename needs equal depth")
+        for a, b in zip(parts, keep_parts):
+            if a == b:
+                continue
+            try:
+                out = rename_track(out, a, b)
+            except ValueError:
+                pass          # component already absent (shared with the target chain)
+    return out
 
 
 def _is_synth_shaped(data: bytes) -> bool:

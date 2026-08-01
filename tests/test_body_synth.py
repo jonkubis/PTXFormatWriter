@@ -5568,3 +5568,58 @@ class MixedDuplicateByteExactnessRuleTests(unittest.TestCase):
         self.assertNotEqual(back, d, "fixture must exercise the non-exact branch")
         self.assertFalse(BS.validate(back), "a non-exact round-trip must still validate clean")
 
+class SourcePathChimeraTests(unittest.TestCase):
+    """A synthesized STEREO or MIXED session stores TWO absolute source paths where Pro Tools
+    writes one: the scaffold donor keeps the control's folder, generated units keep the inlined
+    template's. Mono synths are already uniform, and PT-authored sessions always are (512/512
+    tracks on the 512-track controls).
+
+    That difference is the whole of the donor-vs-generated 16-byte size delta, which is why
+    `duplicate_track` -> `remove_track` was not byte-exact for donor-region sources.
+    """
+
+    def test_stereo_and_mixed_synths_carry_two_paths_mono_carries_one(self):
+        self.assertEqual(len(BS.session_source_paths(BS.synthesize([1] * 6))), 1)
+        self.assertEqual(len(BS.session_source_paths(BS.synthesize([2] * 6))), 2)
+        self.assertEqual(len(BS.session_source_paths(BS.synthesize([1, 2] * 3))), 2)
+
+    def test_pt_authored_sessions_carry_exactly_one(self):
+        checked = 0
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                paths = BS.session_source_paths(d)
+            except Exception:
+                continue
+            if not paths:
+                continue
+            self.assertEqual(len(paths), 1,
+                             "%s stores %d source paths: %r" % (q.name, len(paths), list(paths)))
+            checked += 1
+            if checked >= 12:
+                return
+        self.assertGreater(checked, 0)
+
+    def test_normalize_collapses_to_one_path_and_stays_valid(self):
+        for spec in ([2] * 6, [1, 2] * 3, [1] * 6):
+            with self.subTest(spec=tuple(spec)):
+                d = BS.synthesize(spec)
+                out = BS.normalize_source_paths(d)
+                self.assertEqual(len(BS.session_source_paths(out)), 1)
+                self.assertFalse(BS.validate(out))
+                self.assertEqual([t.name for t in BS.track_types(out)],
+                                 [t.name for t in BS.track_types(d)])
+
+    def test_normalizing_closes_the_donor_region_round_trip(self):
+        """Audit item 15's last case: with one path, a donor-region copy round-trips byte-exact."""
+        d = BS.normalize_source_paths(BS.synthesize([1, 2] * 4))
+        names = [t.name for t in BS.track_types(d)]
+        for src in (0, 1, 2):
+            with self.subTest(src=src):
+                dup = BS.duplicate_track(d, names[src], "ZZTEMPNAME")
+                self.assertEqual(BS.remove_track(dup, "ZZTEMPNAME"), d)
+
+    def test_synthesize_normalize_paths_is_opt_in(self):
+        self.assertEqual(len(BS.session_source_paths(BS.synthesize([2] * 6))), 2)
+        self.assertEqual(len(BS.session_source_paths(BS.synthesize([2] * 6, normalize_paths=True))), 1)
+
