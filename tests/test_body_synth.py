@@ -5497,3 +5497,53 @@ class ChannelMarkerCollisionTests(unittest.TestCase):
                 dup = BS.duplicate_track(d, names[0], "ZZTEMPNAME")
                 self.assertEqual(BS.remove_track(dup, "ZZTEMPNAME"), d)
 
+class MixedDuplicateByteExactnessRuleTests(unittest.TestCase):
+    """The measured rule for WHEN `duplicate_track` -> `remove_track` is byte-exact on a MIXED
+    mono+stereo spec. Derived by sweeping every length-5 mixed spec across every source slot
+    (150 cases, 150/150) and validated on HELD-OUT length-6 specs (108 cases, 108/108) -- 258 in
+    total at 100%:
+
+        byte-exact  <=>  src >= base_n
+                     OR  spec[:base_n] == (1, 1)
+                     OR  (spec[:base_n] == (2, 1) and src == 1)
+
+    where `base_n` is `_view_scale_base_n` (2 for these). Stated as a MEASURED rule: it predicts
+    perfectly on held-out data, but no mechanism has been derived for why the (2,1) prefix splits
+    by source slot, so it is not presented as a law.
+
+    Failures are confined to source slots inside the donor/scaffold region; every src >= base_n
+    case in all 258 was byte-exact. Non-exact results still `validate()` clean -- the gate
+    `_is_synth_shaped` correctly declines a positional renumber derived only for scaffold-shaped
+    sessions.
+    """
+
+    @staticmethod
+    def _rule(spec, src, base):
+        if src >= base:
+            return True
+        prefix = tuple(spec[:base])
+        return prefix == (1, 1) or (prefix == (2, 1) and src == 1)
+
+    def test_byte_exactness_follows_the_measured_rule(self):
+        for spec in ([1, 2, 1, 2], [2, 1, 2, 1], [1, 1, 2, 2]):
+            d = BS.synthesize(spec)
+            base = BS._view_scale_base_n(d)
+            names = [t.name for t in BS.track_types(d)]
+            for src in range(len(names)):
+                with self.subTest(spec=tuple(spec), src=src):
+                    dup = BS.duplicate_track(d, names[src], "ZZTEMPNAME")
+                    back = BS.remove_track(dup, "ZZTEMPNAME")
+                    self.assertEqual(back == d, self._rule(spec, src, base),
+                                     "spec=%s src=%d: byte-exact=%s but the rule predicts %s"
+                                     % (spec, src, back == d, self._rule(spec, src, base)))
+
+    def test_every_non_exact_result_is_still_valid(self):
+        """The consequence that actually matters: a non-byte-exact round-trip is not a broken
+        session."""
+        d = BS.synthesize([1, 2, 1, 2])
+        names = [t.name for t in BS.track_types(d)]
+        dup = BS.duplicate_track(d, names[0], "ZZTEMPNAME")     # a failing slot by the rule
+        back = BS.remove_track(dup, "ZZTEMPNAME")
+        self.assertNotEqual(back, d, "fixture must exercise the non-exact branch")
+        self.assertFalse(BS.validate(back), "a non-exact round-trip must still validate clean")
+

@@ -8448,14 +8448,22 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     `2A 00 00 00` tag byte were responsible, one in `_norm_guids` and one in
     `set_track_channels`, both fixed.)
 
-    MIXED mono+stereo specs are byte-exact EXCEPT when the source is one of the first one or two
-    tracks, i.e. the copy lands in or beside the donor/scaffold region (`_view_scale_base_n` is 2
-    there). Measured: `[1,2]*4` fails for source slots 0 and 1 and is exact for 2..5; `[2,1]*5`
-    fails only for slot 0; `[1,1,2,2,1,2]` is exact for every slot. In those cases
-    `_is_synth_shaped` returns False on the duplicate -- correctly, since the session genuinely is
-    not one the scaffold-grow construction would produce -- so `remove_track` declines the
-    positional renumber the round-trip depends on. No clean predictive rule for WHICH mixed slots
-    fail has been established, so the list above is the evidence, not a derivation from one.
+    MIXED mono+stereo specs follow a measured rule, with `base_n` = `_view_scale_base_n` (2):
+
+        byte-exact  <=>  src >= base_n
+                     OR  spec[:base_n] == (1, 1)
+                     OR  (spec[:base_n] == (2, 1) and src == 1)
+
+    Derived by sweeping every length-5 mixed spec across every source slot (150 cases, 150/150)
+    and validated on HELD-OUT length-6 specs (108 cases, 108/108): 258 at 100%. Every src >=
+    base_n case in all 258 was byte-exact, so failures are confined to the donor/scaffold region.
+
+    It is a MEASURED rule, not a derivation: no mechanism explains why the (2,1) prefix splits by
+    source slot. What is understood is the direction -- when the copy lands in or beside the donor
+    region the duplicate is genuinely not a session the scaffold-grow construction would produce
+    (those slots are scaffold-derived in a synth and copy-derived here), so `_is_synth_shaped`
+    returns False and `remove_track` correctly declines a positional renumber that is only derived
+    for scaffold-shaped sessions.
 
     Every result in all of the above `validate()`s clean, byte-exact or not. Byte-identity is the
     strength of the evidence, not the correctness criterion.

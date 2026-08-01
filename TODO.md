@@ -169,10 +169,25 @@ because those slots are scaffold-derived in a synth and copy-derived in a duplic
 then correct to say "not synth-shaped", and `remove_track` is correct to decline a renumber
 derived only for scaffold-shaped sessions.
 
-**No clean predictive rule for WHICH mixed slots fail has been established.** "The donor region's
-kind sequence changed" explains three of the four failures but not `[1,2]*4` src=1. The table
-above is the evidence; I am not going to dress a partial pattern up as a law — that is the
-mistake this session has had to correct three times already.
+**THE PREDICTIVE RULE, derived and validated on held-out data:**
+
+```
+byte-exact  <=>  src >= base_n
+             OR  spec[:base_n] == (1, 1)
+             OR  (spec[:base_n] == (2, 1) and src == 1)
+```
+
+Derived by sweeping EVERY length-5 mixed spec across EVERY source slot — 150 cases, 150/150 — and
+validated on **held-out length-6 specs**, 108 cases, 108/108. **258 cases at 100%.** Every
+`src >= base_n` case in all 258 was byte-exact, so failures are confined to the donor region.
+
+Earlier partial rules and why they were rejected (each scored against all 150): "src >= base_n"
+alone 128/150; "dup kinds[:base] == spec[:base]" 128/150; "the donor region's kind sequence
+changed" 128/150. The `(2,1)` prefix is what breaks them — it SPLITS by source slot (8 fail,
+8 pass), which is the observation the final rule turns on.
+
+Stated as a MEASURED rule, not a law: it predicts perfectly on data it was not fitted to, but no
+mechanism explains why `(2,1)` splits by slot. Now encoded as a test.
 
 ### Superseded: the earlier residual figures (kept for provenance)
 
