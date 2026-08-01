@@ -44,11 +44,30 @@ make donor-derived and generated stereo units the same size, which removes the d
 makes `_is_synth_shaped` return False for donor-region copies — i.e. it closes item 15's remaining
 case as a side effect, rather than by reshaping anything.
 
-**NOT IMPLEMENTED.** Normalizing the full path (not just the leaf) changes every affected block's
-length, so it runs through `rename_track`'s reindex path and changes synthesized output on the
-PT-confirmed stereo route. The change moves output TOWARD what PT writes, and PT already accepts
-both forms, so the risk is bounded — but it is still a deliberate change to a PT-confirmed writer
-and wants a decision, not a drive-by.
+### An implementation was ATTEMPTED at the comparison layer, and REVERTED — here is why
+
+The obvious low-risk move is to make `_is_synth_shaped` path-blind the way it is already
+GUID-blind, so donor-region copies are recognised without changing a single synthesized byte. I
+built it (`_source_path_runs` + `_norm_source_paths`, replacing each path's directory chain with a
+placeholder while KEEPING the session-name leaf so real name differences still reject) and
+measured it. **It does not work, and the reason is instructive:**
+
+* It DOES fully explain the length mismatch — after normalisation the two files are exactly the
+  same size (96909 vs 96909, delta 0), confirming the path chain was the entire length delta.
+* But **158 content bytes still differ**, and almost all are single bytes differing by exactly
+  `0x10`: `b1`/`a1`, `4c`/`3c`, `e0`/`d0`, `2f`/`1f`, `19`/`09`, `be`/`ae`. Those are the
+  ENCLOSING BLOCK SIZE FIELDS, still carrying the +16 the path contributes.
+
+So a comparison-only normalisation cannot work: it would have to neutralise every enclosing size
+field as well, which is rebuilding the file rather than comparing it. **Reverted** rather than left
+in place — it added a fallback to a load-bearing predicate that never fires, and dead complexity
+in `_is_synth_shaped` is worse than none.
+
+**This sharpens the remaining work rather than leaving it vague.** The only correct fix is at the
+OUTPUT level: normalise the source paths when the session is built, so the block sizes are
+consistent with the paths they describe. That is the `rename_track`-style reindex on the
+PT-confirmed stereo route, and its honest verification is a Pro Tools load, which only the user can
+run.
 
 
 ## Item 15 — ROOT CAUSE RESOLVED (fix deliberately not applied; see why)
