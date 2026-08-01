@@ -5095,11 +5095,18 @@ def set_region_length(data: bytes, region_index: int, sample_count: int) -> byte
     at a WAV of a DIFFERENT length leaves the region's geometry describing the old one. Call this
     with `wav_clip_identity(wav)[0]` to finish the job.
 
-    WIDTH LIMIT, stated rather than worked around: the field's byte width is declared by the
-    descriptor nibbles and is 2 bytes in ~94% of corpus records, so counts above 65535 do not fit.
-    Widening it means rewriting the descriptor nibble AND resizing the block, which changes every
-    enclosing size and index offset -- that is the genuinely unfinished part of the `0x2628`
-    model, so this raises instead of silently truncating."""
+    WIDTH. The field's byte width is declared by the descriptor nibbles. This used to say it is
+    "2 bytes in ~94% of corpus records, so counts above 65535 do not fit", which is close to
+    inverted. Measured over 102,599 `0x2628` records in 342 sessions, using the very nibble logic
+    below: 3 bytes 90.8%, 2 bytes 6.4%, 4 bytes 2.1%, 5 bytes 0.5%, 1 byte 0.2%. The common case
+    therefore holds up to 16,777,215 samples, not 65,535.
+
+    The same passage said this "raises instead of silently truncating" when the value does not
+    fit. It does NOT raise -- it WIDENS: the branch below splices in the extra bytes, rewrites the
+    descriptor nibble for that slot, and lets `_splice_in` repair every enclosing block size (the
+    `0x2628`/`0x2629`/`0x262A` chain holds no master-index targets, so no index entries are
+    added). It raises only when the value needs more than 15 bytes, which one nibble cannot
+    declare. Nothing is ever silently truncated."""
     z28 = _region_2628(data, region_index)
     if z28 is None:
         raise ValueError(f"no 0x2628 record for region {region_index}")
@@ -9036,11 +9043,15 @@ def _assign_free_channels(data: bytes, name: str) -> bytes:
 # --- arbitrary track naming --------------------------------------------------
 
 def track_name_occurrences(data: bytes, name: str | bytes) -> list[int]:
-    """Offsets of every length-prefixed occurrence of a track name. A track name
-    lives in 8 places (0x1014, 0x1052 x2, 0x251a x2, 0x210b, the 0x2519 name-table
-    entry, and 0x2619), each preceded by a u32 = name length. The length-prefix
-    test distinguishes a real name slot from a coincidental substring (and
-    'Audio 1' from 'Audio 10')."""
+    """Offsets of every length-prefixed occurrence of a track name, each preceded by a u32 =
+    name length. The length-prefix test distinguishes a real name slot from a coincidental
+    substring (and 'Audio 1' from 'Audio 10').
+
+    THE COUNT IS NOT FIXED. This said a track name "lives in 8 places" (0x1014, 0x1052 x2,
+    0x251a x2, 0x210b, the 0x2519 entry, and 0x2619). That is the modal case only: measured over
+    3,617 track names in 342 sessions, 8 places covers 35.9%, with 9 at 17.2%, 7 at 16.0%, 5 at
+    13.7%, 6 at 12.2% and a tail down to 2. The count varies with track kind and with what the
+    session carries, so callers must use the returned list -- never assume its length."""
     needle = name.encode() if isinstance(name, str) else bytes(name)
     out: list[int] = []
     pos = 0

@@ -12,6 +12,34 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## Items 16 and 17 CLOSED — two docstring distributions, both contradicted by measurement
+
+**Item 16 — `set_region_length`.** The docstring said the length field "is 2 bytes in ~94% of
+corpus records, so counts above 65535 do not fit". Measured over **102,599 `0x2628` records in
+342 sessions**, using the function's own descriptor-nibble logic rather than a guess at the
+layout: **3 bytes 90.8%, 2 bytes 6.4%**, 4 bytes 2.1%, 5 bytes 0.5%, 1 byte 0.2%. The claim is
+close to inverted, and the practical consequence is that the common case holds up to 16,777,215
+samples, not 65,535.
+
+The same passage claimed the function "raises instead of silently truncating" and called widening
+"the genuinely unfinished part". It does not raise — **it widens**: splices the extra bytes in,
+rewrites the descriptor nibble for that slot, and lets `_splice_in` repair every enclosing size.
+It raises only above 15 bytes, which one nibble cannot declare. Both corrected.
+
+Process note: my first probe reported "1 byte 69.2%, 0 bytes 30.8%", matching neither the
+docstring nor the audit — because I guessed the descriptor offset instead of reading it the way
+the function does. Re-measuring with the function's own nibble logic reproduced the audit's
+figures independently (6.4% vs its 6.3%). A measurement that agrees with nothing is a signal to
+check the probe, not to report the number.
+
+**Item 17 — `track_name_occurrences`.** The docstring stated flatly that a track name "lives in 8
+places". Measured over **3,617 track names in 342 sessions**: 8 places is the modal case at
+**35.9%**, with 9 at 17.2%, 7 at 16.0%, 5 at 13.7%, 6 at 12.2%, and a tail down to 2. The count
+varies with track kind and session contents. Docstring now says so, and tells callers to use the
+returned list rather than assume its length.
+
+
 ## Items 14 and 15: 14 REFUTED, 15 confirmed as a FALSE CLAIM (not corruption)
 
 **Item 14 — "`click='top'` silently reinterprets `display_order` against the post-click order" —
@@ -6819,10 +6847,12 @@ the name-based LOOKUP acting on every match. Remaining: the three synthesis item
     the narrower renumber coverage is NOT — see the section above. All results validate clean.
 
 **Documentation**
-16. `set_region_length`: "2 bytes in ~94% of corpus records" — measured **6.3%**; 84.7% are 3 bytes,
+16. ~~`set_region_length` width claim + undocumented widen branch~~ **CLOSED** — measured 6.4% are
+    2 bytes, 90.8% are 3; and it widens rather than raising. Both corrected.
     over 53,927 records. And it promises twice that it "raises rather than guessing" / is
     "size-neutral" while silently WIDENING the field and growing the body, 21 of 21.
-17. `track_name_occurrences`: "a track name lives in 8 places" — true for 36 of 784 names (4.6%);
+17. ~~`track_name_occurrences`: "a track name lives in 8 places"~~ **CLOSED** — modal case only
+    (35.9% of 3,617 names; range 2..9). Docstring corrected.
     the mode is 5.
 
 **Verified CLEAN, worth recording**
