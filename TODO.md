@@ -14,6 +14,43 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
+
+## NEW — synthesized STEREO and MIXED sessions are PATH CHIMERAS (mono is clean)
+
+Found while deriving item 15's 16-byte delta: those bytes are not structure. The nested content
+types of a donor `0x261C` and a generated one are **identical**; what differs is a FILESYSTEM PATH.
+
+| session | distinct per-track source paths |
+|---|---|
+| synth mono ×6 | **1** — `Dropbox/PYTHON/__CODEX/PTFORMAT/control_files` |
+| synth stereo ×6 | **2** — 4 tracks `Users/jonkubis/Music/temp`, 2 `…/PTFORMAT/control_files` |
+| synth mixed `[1,2]*3` | **2** — 4 `…/control_files`, 2 `Users/jonkubis/Music/temp` |
+| PT-authored corpus | **1** — uniform across all tracks (512/512 on the 512-track controls) |
+
+`synthesize_mixed_session` normalizes the source-folder **LEAF** of added tracks, and its own
+comment says this is done "so the session is not a path chimera Pro Tools would reject". The
+measurement shows the goal is not met: the inlined stereo unit template carries
+`Users/jonkubis/Music/temp` while the donor carries `…/PTFORMAT/control_files`, and those differ
+in DEPTH and COMPONENTS, not just the leaf — so a leaf-only rename cannot reconcile them.
+
+**Severity, stated honestly:** not fatal. Stereo synthesis is PT-confirmed to N≈418 WITH the
+chimera present, so Pro Tools evidently accepts it. This is a fidelity gap against what PT itself
+writes, not a validity bug — which is exactly why it survived: every oracle this project uses
+(PT load, `validate()`, `rc=0`) passes.
+
+**It also fully explains item 15's residual.** The donor-vs-generated size delta of 16 bytes is
+the path-length difference between those two templates. Normalizing all tracks onto one path would
+make donor-derived and generated stereo units the same size, which removes the divergence that
+makes `_is_synth_shaped` return False for donor-region copies — i.e. it closes item 15's remaining
+case as a side effect, rather than by reshaping anything.
+
+**NOT IMPLEMENTED.** Normalizing the full path (not just the leaf) changes every affected block's
+length, so it runs through `rename_track`'s reindex path and changes synthesized output on the
+PT-confirmed stereo route. The change moves output TOWARD what PT writes, and PT already accepts
+both forms, so the risk is bounded — but it is still a deliberate change to a PT-confirmed writer
+and wants a decision, not a drive-by.
+
+
 ## Item 15 — ROOT CAUSE RESOLVED (fix deliberately not applied; see why)
 
 The gate is `_is_synth_shaped(duplicated_session)`. It predicts round-trip byte-exactness
