@@ -15,7 +15,29 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
-## NEW — synthesized STEREO and MIXED sessions are PATH CHIMERAS (mono is clean)
+## RESOLVED — the "path chimera" is a LEGITIMATE PT-NATIVE FORM; the default stays off ON EVIDENCE
+
+**Pro Tools writes multi-path sessions itself.** Measured across four drives: of 327 PT-authored
+sessions, **324 carry one source path and 3 carry two** — including the corpus control
+`robust_audio_mixed12.ptx` (4 tracks on one path, 8 on another) and a real delivery session
+(3 + 23). Tracks imported from another session folder keep their origin path, which is ordinary
+Pro Tools behaviour.
+
+That **refutes the premise** of the normalisation argument as I originally framed it. I described
+the two-path synth output as "a form PT never writes" and a "fidelity gap". Both were wrong. There
+is therefore NO fidelity case for flipping `normalize_paths` on by default, and the open decision
+closes here — on corpus evidence, without needing a Pro Tools load.
+
+`normalize_source_paths` keeps a narrower, real purpose: with one path a donor-derived and a
+generated unit are the same size, which is exactly what makes `duplicate_track` -> `remove_track`
+byte-exact for donor-region sources (audit item 15). It is a canonicalisation tool for that
+guarantee, not a repair.
+
+The A/B pair staged on the Desktop is no longer a blocking experiment. Opening
+`PATHNORM_B_mixed_normalized.ptx` would still be a useful confirmation that the normalised form
+loads, but nothing depends on it: the two-path default is a form PT demonstrably produces.
+
+## SUPERSEDED (kept for provenance) — synthesized STEREO and MIXED sessions are PATH CHIMERAS
 
 Found while deriving item 15's 16-byte delta: those bytes are not structure. The nested content
 types of a donor `0x261C` and a generated one are **identical**; what differs is a FILESYSTEM PATH.

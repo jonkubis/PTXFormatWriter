@@ -6385,8 +6385,15 @@ def session_source_paths(data: bytes) -> "dict[str, int]":
 def normalize_source_paths(data: bytes, target: "str | None" = None) -> bytes:
     """Put every track's stored source path onto ONE directory chain, the way Pro Tools writes it.
 
-    A session built by `synthesize_mixed_inline` is a PATH CHIMERA: the scaffold donor carries the
-    control's folder while generated units carry the inlined template's, e.g.
+    Put every track's source path onto one chain. NOTE THIS IS A CANONICALISATION, NOT A FIDELITY
+    FIX: Pro Tools itself writes sessions with two source paths -- 3 of 327 PT-authored sessions
+    measured across four drives, including the corpus control `robust_audio_mixed12.ptx` (4 tracks
+    on one path, 8 on another) and a real delivery session (3 + 23). Tracks imported from another
+    session folder legitimately keep their origin path. So a multi-path session is NOT malformed
+    and `synthesize`'s two-path output is not an alien form.
+
+    A session built by `synthesize_mixed_inline` carries two: the scaffold donor keeps the
+    control's folder while generated units keep the inlined template's, e.g.
     `Dropbox SSD/Dropbox/PYTHON/__CODEX/PTFORMAT/control_files` alongside
     `Macintosh HD/Users/jonkubis/Music/temp/PT`. SCOPE, measured: only the MIXED route is
     affected. `synthesize_stereo_inline` and `synthesize_mono_inline` are each internally uniform
@@ -6403,9 +6410,11 @@ def normalize_source_paths(data: bytes, target: "str | None" = None) -> bytes:
     `duplicate_track` -> `remove_track` becomes byte-exact for donor-region sources too (measured
     on `[1,2]*4`: source slots 0 and 1 go from non-exact to exact, 2..5 unaffected).
 
-    NOT applied by `synthesize` -- see its `normalize_paths` argument. It changes output on a
-    PT-confirmed route, and every LOCAL oracle (validate, rc=0, the suite) passes either way, so
-    only a Pro Tools load can settle it.
+    NOT applied by `synthesize`, and deliberately so -- see its `normalize_paths` argument. Since
+    PT writes multi-path sessions itself there is no fidelity argument for normalising by default;
+    the value here is narrower and real: with one path a donor-derived and a generated unit are the
+    same size, which is what makes `duplicate_track` -> `remove_track` byte-exact for donor-region
+    sources (audit item 15). Use it when you want that guarantee, not to "fix" a session.
     """
     counts = session_source_paths(data)
     if len(counts) <= 1:
