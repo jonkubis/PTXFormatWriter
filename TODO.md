@@ -144,12 +144,35 @@ the tag byte: `_norm_guids`' blanking windows, the `0x2519` name-entry trailer f
 channel index. The pattern is worth carrying: **any `find(b"\x2a\x00\x00\x00")` in this format is
 a latent collision with whatever field can hold 42 followed by zeros.**
 
-### What remains for item 15 — ONLY the mixed case
+### What remains for item 15 — the mixed case, and it looks like a DOMAIN BOUNDARY not a bug
 
-`mixed [1,2]*4` src=0 and src=1, and `mixed [2,1]*5` src=0: a LENGTH mismatch (97402 vs 97467,
-i.e. +65; and 97491 vs 97475, −16). Only source slots inside the donor/scaffold region fail —
-`_view_scale_base_n` is 2 for these — while every later slot round-trips byte-exact. Not a field
-value at all, so it needs its own investigation.
+First, a correction: I described this as "a LENGTH mismatch". The ROUND-TRIP is length-preserving
+(94755 -> 94755); the length difference was in the dup-vs-reference comparison only. The actual
+residual is ~1222 bytes dominated by `0x261b` — the element-id pools, exactly where this item
+started.
+
+Instrumenting `remove_track` shows neither `_capture_donor_free` nor `_recompute_free_fields` is
+called for the failing slots: it is the SAME gate, `_is_synth_shaped(dup)`, returning False.
+
+Measured boundary (every result `validate()`s clean either way):
+
+| spec | base_n | failing source slots | exact |
+|---|---|---|---|
+| `[1,2]*4` | 2 | 0, 1 | 2, 3, 4, 5 |
+| `[2,1]*5` | 2 | 0 | 1, 2, 3, 4, 5 |
+| `[1,1,2,2,1,2]` | 2 | none | all |
+
+Why this reads as a domain boundary rather than a defect: `_synth_reference(kinds)` is sound — it
+equals a fresh `synthesize(kinds)` in every case checked — and the duplicate genuinely differs in
+size from any fresh synth of its own layout when the copy lands in or beside the donor region,
+because those slots are scaffold-derived in a synth and copy-derived in a duplicate. The gate is
+then correct to say "not synth-shaped", and `remove_track` is correct to decline a renumber
+derived only for scaffold-shaped sessions.
+
+**No clean predictive rule for WHICH mixed slots fail has been established.** "The donor region's
+kind sequence changed" explains three of the four failures but not `[1,2]*4` src=1. The table
+above is the evidence; I am not going to dress a partial pattern up as a law — that is the
+mistake this session has had to correct three times already.
 
 ### Superseded: the earlier residual figures (kept for provenance)
 

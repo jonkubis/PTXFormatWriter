@@ -8442,18 +8442,23 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     """Add an AUDIO track by DUPLICATING an existing one under `new_name` — the inverse of
     `remove_track`.
 
-    ROUND-TRIP BYTE-IDENTITY IS NOT UNIVERSAL, and this said it was. `duplicate_track` then
-    `remove_track(new_name)` reproduces the original byte-for-byte on pure mono up to N=40 and
-    pure stereo up to N=40, but NOT on mono N>=41, stereo by N=48, or ANY mono+stereo mixed spec
-    (measured at N=8, 20, 40). The differing bytes are entirely in the BODY -- 0 of them in the
-    master index -- and are dominated by 0x261b, which carries the per-track element-id pools:
-    the copy takes a fresh pool and the survivors are not fully restored by the closing
-    positional renumber. `_is_synth_shaped` is True in every one of those cases, so the renumber
-    path RUNS; it just does not cover them.
-    
-    What still holds: every round-trip result above `validate()`s clean. Byte-identity is the
-    strength of the evidence, not the correctness criterion — so treat it as PROVEN only within
-    the ranges named above.
+    ROUND-TRIP BYTE-IDENTITY, with its measured domain. `duplicate_track` then
+    `remove_track(new_name)` reproduces the original byte-for-byte for PURE MONO and PURE STEREO
+    at every N in 8..59 -- no exceptions. (It formerly held only to N=40; two collisions with the
+    `2A 00 00 00` tag byte were responsible, one in `_norm_guids` and one in
+    `set_track_channels`, both fixed.)
+
+    MIXED mono+stereo specs are byte-exact EXCEPT when the source is one of the first one or two
+    tracks, i.e. the copy lands in or beside the donor/scaffold region (`_view_scale_base_n` is 2
+    there). Measured: `[1,2]*4` fails for source slots 0 and 1 and is exact for 2..5; `[2,1]*5`
+    fails only for slot 0; `[1,1,2,2,1,2]` is exact for every slot. In those cases
+    `_is_synth_shaped` returns False on the duplicate -- correctly, since the session genuinely is
+    not one the scaffold-grow construction would produce -- so `remove_track` declines the
+    positional renumber the round-trip depends on. No clean predictive rule for WHICH mixed slots
+    fail has been established, so the list above is the evidence, not a derivation from one.
+
+    Every result in all of the above `validate()`s clean, byte-exact or not. Byte-identity is the
+    strength of the evidence, not the correctness criterion.
 
     Copies the source track's COMPLETE per-track block-set (track-list entries 0x1014/0x251A,
     lane(s) 0x1052 in the shared 0x1054, the 0x261C playlist subtree, the SECOND view-chain
