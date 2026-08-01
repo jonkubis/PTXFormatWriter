@@ -6301,15 +6301,29 @@ def _track_kinds(data: bytes) -> "list[int]":
 def _norm_guids(b: bytes) -> bytes:
     """Zero every 8-byte GUID (the bytes after a `2A 00 00 00` tag) so two sessions that differ
     only in their random per-track GUIDs compare equal."""
-    out = bytearray(b)
+    # COLLECT EVERY TAG FIRST, THEN BLANK. This scanned and mutated the SAME buffer, so a
+    # blanking window could overwrite a later tag before the scan reached it, leaving that tag's
+    # GUID un-blanked -- and a random per-track GUID then read as a real difference.
+    #
+    # It bites when a row ordinal happens to equal 0x2A (row 42), because `<ordinal> 00 00 00`
+    # then looks like a tag. Worked example from `duplicate_track(synthesize([1]*41))`: real tags
+    # sit at 5521, 5533 and 5543; processing 5533 blanks [5537,5545), which overwrites the first
+    # two bytes of the tag at 5543, so [5547,5555) is never blanked. That is the entire reason
+    # `_is_synth_shaped` returned False from 42 rows, which made `remove_track` skip its
+    # positional renumber and broke duplicate->remove byte-identity (TODO.md, audit item 15).
+    src = bytes(b)
+    positions = []
     k = 0
     while True:
-        k = out.find(b"\x2a\x00\x00\x00", k)
+        k = src.find(b"\x2a\x00\x00\x00", k)
         if k < 0:
             break
+        positions.append(k)
+        k += 1
+    out = bytearray(src)
+    for k in positions:
         if k + 12 <= len(out):
             out[k + 4 : k + 12] = b"\x00" * 8
-        k += 1
     return bytes(out)
 
 

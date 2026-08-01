@@ -88,12 +88,42 @@ So the layout blocker is REMOVED — offsets from `name_end` are well defined. W
 this investigation was using offsets from the block START, which are meaningless because the name
 length varies.
 
-**What is still NOT explained:** why the masking becomes asymmetric at exactly 42 rows. The
-appealing story — a row ordinal of 42 is `0x2A`, so `<ordinal> 00 00 00` reads as a tag and
-`_norm_guids` blanks the wrong bytes — does not survive its own test: the `2A 00 00 00` count is
-EQUAL in dup and ref at N=41 (622 vs 622) where 2 bytes already survive, and differs by only +1 at
-N=42. Tag POSITIONS rather than counts could still explain it, but I have not demonstrated that,
-and I am not going to assert it.
+### THE THRESHOLD IS EXPLAINED, AND FIXED — `_norm_guids` scanned and mutated the same buffer
+
+The ordinal story was right in substance; my test of it was wrong. Counting `2A 00 00 00` in the
+RAW files finds the same number in both (622 at N=41), which is why the count test showed nothing.
+The asymmetry is not in the counts — it is created DURING the blanking, because `_norm_guids`
+searched the buffer it was mutating:
+
+```
+duplicate_track(synthesize([1]*41)) -- real tags at 5521, 5533, 5543
+  tag@5521 blanks [5525,5533)
+  tag@5533 blanks [5537,5545)   <-- overwrites bytes 5543,5544
+  tag@5543 IS NEVER FOUND: its first two bytes were just erased
+  => [5547,5555) never blanked  => a random per-track GUID survives
+  => 2 bytes "differ"           => _is_synth_shaped False from 42 rows
+  => remove_track skips its renumber => duplicate->remove not byte-exact
+```
+
+The 0x2A involvement is real: a row ordinal of 42 IS `0x2A`, so `<ordinal> 00 00 00` forms the
+spurious tag at 5533 whose window does the damage. Verified by replaying the loop and listing
+which tags it actually reaches (5521 and 5533; 5543 destroyed).
+
+**Fixed:** collect every tag position from the immutable source first, then blank. Measured
+payoff, sweeping N=8..55:
+
+| spec | before | after |
+|---|---|---|
+| stereo | failing from ~48 | **48 of 48 byte-exact** |
+| mono | byte-exact to N=40 | byte-exact to **N=41** (fails 42+) |
+| mixed `[1,2]*4` | src 0,1 fail | unchanged (src 0,1 fail; src>=2 pass) |
+
+Two tests, verified to bite (restore the scan-while-mutating loop and 3 subtests fail).
+
+**Still open beneath this:** mono from N=42 and mixed src=0/1 have FURTHER real differences — the
+six `0x1014` bytes seen from N=45 and the mixed length mismatch (97402 vs 97467). Those are
+genuine content differences, not masking artifacts, so they need the restamp work described
+above.
 
 ### The fix was SIMULATED before implementing, and the simulation corrected the plan
 

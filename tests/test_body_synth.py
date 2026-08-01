@@ -5414,3 +5414,39 @@ class ClickOverviewOrdinalTests(unittest.TestCase):
         fixed = BS._repair_overview_order(broken)
         self.assertEqual(sorted(self._column(fixed)), list(range(len(offs))))
 
+class NormGuidsOverlappingWindowTests(unittest.TestCase):
+    """`_norm_guids` scanned and mutated the SAME buffer, so a blanking window could overwrite a
+    later tag before the scan reached it, leaving that tag's GUID un-blanked -- and a random
+    per-track GUID then read as a real difference.
+
+    It bites when a row ordinal equals 0x2A (row 42), since `<ordinal> 00 00 00` looks like a tag.
+    Worked example from `duplicate_track(synthesize([1]*41))`: real tags at 5521, 5533 and 5543;
+    processing 5533 blanks [5537,5545), overwriting the first two bytes of the tag at 5543, so
+    [5547,5555) is never blanked. That was the whole reason `_is_synth_shaped` returned False from
+    42 rows, which made `remove_track` skip its positional renumber and broke duplicate->remove
+    byte-identity.
+    """
+
+    def test_a_tag_inside_another_tags_window_is_still_blanked(self):
+        """Blocks only. Tag at 0 blanks [4,12); the tag at 10 lives inside that window, so a
+        scan-while-mutating loop loses it and leaves [14,22) untouched."""
+        buf = (b"\x2a\x00\x00\x00" + b"\xAA" * 6
+               + b"\x2a\x00\x00\x00" + b"\xBB" * 8 + b"\xCC" * 4)
+        out = BS._norm_guids(buf)
+        self.assertEqual(out[4:12], b"\x00" * 8, "the first tag's window must be blanked")
+        self.assertEqual(out[14:22], b"\x00" * 8,
+                         "the tag at offset 10 falls inside the first window; its GUID must "
+                         "still be blanked (got %r)" % (out[14:22],))
+        self.assertEqual(out[22:], b"\xCC" * 4, "bytes past every window must be untouched")
+
+    def test_duplicate_remove_round_trip_is_byte_exact_where_it_now_holds(self):
+        """The measured payoff. Stereo is byte-exact across the swept range; mono gained N=41."""
+        for label, spec in (("stereo N=48", [2] * 48), ("mono N=41", [1] * 41),
+                            ("mono N=40", [1] * 40)):
+            with self.subTest(case=label):
+                d = BS.synthesize(spec)
+                names = [t.name for t in BS.track_types(d)]
+                dup = BS.duplicate_track(d, names[0], "ZZTEMPNAME")
+                self.assertEqual(BS.remove_track(dup, "ZZTEMPNAME"), d,
+                                 "%s: duplicate->remove is no longer byte-exact" % label)
+
