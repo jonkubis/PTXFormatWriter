@@ -14,52 +14,50 @@ and why it matters. (Resolved items kept briefly for provenance.)
 
 
 
-## Item 15, characterized much more sharply (STILL OPEN) — the fault is SLOT-dependent
+## Item 15 — ROOT CAUSE FOUND (still open): `_is_synth_shaped(dup)` gates the whole renumber
 
-New facts, all from the sound comparison (original vs `duplicate_track` then `remove_track`):
+`_is_synth_shaped(duplicated_session)` predicts round-trip byte-exactness **perfectly — 25 of 25
+cases** across mixed/mono/stereo and five source slots each. When it returns False, `remove_track`
+skips the positional renumber entirely (instrumenting `_capture_donor_free` and
+`_recompute_free_fields` shows neither is called), so the survivors keep the pool values
+`duplicate_track` assigned and every slot reads one rung high.
 
-1. **It depends on WHICH slot is duplicated, not just the spec.** On mixed `[1,2]*4`, duplicating
-   slot **3** round-trips **byte-exact**; duplicating slot **0** shifts every element-id pool from
-   slot 1 onward. That reframes the item: it is not "mixed specs are broken", it is a specific
-   slot/ladder interaction.
-2. The pools tell the story directly. Original mixed N=8 slot bases:
-   `[13561, 13571, 18901, 31, 18921, 51, 18941, 71]` — donor slots 0..1, then TWO interleaved
-   per-kind ladders (mono 18901/18921/18941, stereo 31/51/71). After duplicating slot 0 the
-   round-trip reads `[13561, 21, 18911, 41, 18931, 61, 18951, 81]`: the donor value 13571 is gone
-   and every later slot has advanced one rung.
-3. Same shape for mono at N=41 (`[13441, 13461, ...]` — the donor value 13451 lost), while N=40 is
-   byte-exact. `_view_scale_base_n` is 8 for both, so the threshold is not the donor-slot count.
-4. All differences remain in the BODY — **0 bytes in the master index** — and every result
-   `validate()`s clean.
+So there is ONE gate, not a family of spec-specific bugs. The predicate rebuilds a fresh synth of
+the duplicate's own layout + names and compares GUID-normalized. It is not N-limited: a pristine
+`synthesize([1]*n)` is recognized at every n from 8 to 80. It is the DUPLICATE that fails to match
+its layout-matched reference.
 
-**A comparison I ran that is NOT evidence, recorded so it is not repeated:** I tested
-`duplicate_track(synth(N)) == synth(N+1)` and found it false everywhere, including cases whose
-pools match exactly. That test is confounded — `duplicate_track` inserts the copy immediately
-AFTER ITS SOURCE while `synthesize` appends at the end, so the two have different track layouts
-and a whole-file comparison cannot mean anything. The docstring's canonicality claim is about the
-rebuilt master INDEX "of the same track layout", not the whole file. The 9,970-byte mono
-difference it reported is layout, not defect.
+**How far it fails, measured:**
 
-**Two hypotheses tested and REFUTED, so the next attempt need not repeat them:**
+| case | bytes differing from the layout-matched reference |
+|---|---|
+| mono N=40, stereo N=40, mixed src>=2 | **0 — dup matches, round-trip byte-exact** |
+| mono N=41 src=0 | **2**, both in `0x251a` |
+| stereo N=48 src=0 | **2**, both in `0x251a` |
+| mono N=45 src=0 | 8 — the same 2 in `0x251a`, plus 6 in `0x1014` |
+| mixed `[1,2]*4` src=0 | lengths differ (97402 vs 97467) — a separate, larger fault |
 
-* *"The copy lands at or below `base_n`, polluting the donor capture."* No. On mixed N=8 with
-  src=0 the copy's pool (21) sits at slot **2**, and `_view_scale_base_n` is 2 — so the copy is
-  at, not below, the boundary, and slots 0..1 are captured from untouched donor blocks.
-* *"`kinds[s]` is misaligned against the `0x261C` block order on mixed specs, so
-  `_b261c_free_field` reads the wrong bytes."* No. `_track_kinds` matches spec order exactly for
-  mixed `[1,2]*4`, mono N=41 and stereo N=40, and the `0x261C` block count equals the track count
-  in each.
+The two `0x251a` bytes are one field: at rel **+55** (mono) / **+59** (stereo), in the block at
+**lane-group index 41**, once per lane group (blocks 41 and 83 of 84 for mono N=41; 41 and 90 of
+98 for stereo N=48). The duplicate writes **41** where a fresh synth writes **42**. It is index 41
+in both the mono and stereo cases even though their track counts differ (42 vs 49), so the trigger
+is that lane-group index existing at all — which is why mono N=40 (41 rows, no index 41) is clean
+and mono N=41 (42 rows) is not.
 
-**What the evidence still says.** After duplicating slot 0 of mixed N=8, the round-trip equals the
-duplicated session with 0x261c slot **1** deleted — the donor value 13571 is gone and each later
-slot has advanced exactly one rung — even though the copy occupies slot 2. So the pool rewrite and
-the block removal disagree about which slot the copy is. Names and track count come out right and
-`validate()` is clean, which is why this never surfaced as anything but a byte-diff.
+**Hypotheses tested and REFUTED** (so the next attempt skips them): the copy does not land below
+`base_n`; `kinds[s]` is not misaligned against the `0x261C` block order; `_is_synth_shaped` is not
+failing on large N per se.
 
-**NEXT STEP:** instrument `_recompute_free_fields` on the same mixed session for src=0 (fails) and
-src=3 (byte-exact) and compare what it writes per slot against `donor_free`. Those two runs differ
-only in the source slot, so the divergence is isolated by construction.
+**Correction to an earlier note here:** I previously recorded the dup-vs-canonical comparison as
+"not evidence" because `duplicate_track` inserts the copy after its source while `synthesize`
+appends. That is right about MY version of the test, which compared against
+`synthesize(spec + [kind])`. It is wrong as a general statement: the LAYOUT-MATCHED comparison --
+rebuild the reference with the copy's kind at the copy's slot and the same names, exactly what
+`_is_synth_shaped` does -- is meaningful, and is what produced the 2-byte localization above.
 
+**NEXT STEP:** identify the `0x251a` field at rel +55/+59 and find where `duplicate_track` should
+bump it from 41 to 42. Then re-check the `0x1014` bytes that appear from N=45, and treat the mixed
+src=0/1 length mismatch as its own investigation.
 
 ## Items 16 and 17 CLOSED — two docstring distributions, both contradicted by measurement
 
