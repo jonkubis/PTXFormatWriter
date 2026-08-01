@@ -5518,11 +5518,30 @@ class MixedDuplicateByteExactnessRuleTests(unittest.TestCase):
     """
 
     @staticmethod
-    def _rule(spec, src, base):
+    def _rule(spec, src, base, kinds=None):
+        """Mechanistic form: exact iff the copy is outside the donor region, or it leaves the
+        start pair alone AND is mono. Equivalent to the prefix form on all 258 measured cases."""
         if src >= base:
             return True
+        if kinds is not None:
+            return tuple(kinds[:base]) == tuple(spec[:base]) and spec[src] == 1
         prefix = tuple(spec[:base])
         return prefix == (1, 1) or (prefix == (2, 1) and src == 1)
+
+    def test_a_donor_stereo_slot_is_larger_than_a_generated_stereo_unit(self):
+        """The mechanism behind the mono/stereo asymmetry, and the source of the 16-byte delta.
+        A donor-region copy lands where the reference builds a GENERATED unit; for mono the two
+        constructions are the same size, for stereo the donor slot is 16 bytes larger."""
+        sizes = lambda d: [e - z for z, e in BS._blocks_by_type(d).get(0x261C, [])]
+        mono = sizes(BS.synthesize([1] * 6))
+        stereo = sizes(BS.synthesize([2] * 6))
+        base = BS._view_scale_base_n(BS.synthesize([1] * 6))
+        self.assertEqual(mono[0], mono[base],
+                         "mono donor and generated slots must be the same size (%d vs %d)"
+                         % (mono[0], mono[base]))
+        self.assertEqual(stereo[0] - stereo[base], 16,
+                         "stereo donor slot should exceed the generated unit by 16 (%d vs %d)"
+                         % (stereo[0], stereo[base]))
 
     def test_byte_exactness_follows_the_measured_rule(self):
         for spec in ([1, 2, 1, 2], [2, 1, 2, 1], [1, 1, 2, 2]):
@@ -5533,9 +5552,11 @@ class MixedDuplicateByteExactnessRuleTests(unittest.TestCase):
                 with self.subTest(spec=tuple(spec), src=src):
                     dup = BS.duplicate_track(d, names[src], "ZZTEMPNAME")
                     back = BS.remove_track(dup, "ZZTEMPNAME")
-                    self.assertEqual(back == d, self._rule(spec, src, base),
+                    kinds = [t.channels for t in BS.track_types(dup)]
+                    self.assertEqual(back == d, self._rule(spec, src, base, kinds),
                                      "spec=%s src=%d: byte-exact=%s but the rule predicts %s"
-                                     % (spec, src, back == d, self._rule(spec, src, base)))
+                                     % (spec, src, back == d,
+                                        self._rule(spec, src, base, kinds)))
 
     def test_every_non_exact_result_is_still_valid(self):
         """The consequence that actually matters: a non-byte-exact round-trip is not a broken

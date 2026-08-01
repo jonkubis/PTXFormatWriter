@@ -8458,12 +8458,27 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     and validated on HELD-OUT length-6 specs (108 cases, 108/108): 258 at 100%. Every src >=
     base_n case in all 258 was byte-exact, so failures are confined to the donor/scaffold region.
 
-    It is a MEASURED rule, not a derivation: no mechanism explains why the (2,1) prefix splits by
-    source slot. What is understood is the direction -- when the copy lands in or beside the donor
-    region the duplicate is genuinely not a session the scaffold-grow construction would produce
-    (those slots are scaffold-derived in a synth and copy-derived here), so `_is_synth_shaped`
-    returns False and `remove_track` correctly declines a positional renumber that is only derived
-    for scaffold-shaped sessions.
+    MECHANISM (derived, and it predicts the observed byte deltas). Equivalently:
+
+        byte-exact  <=>  src >= base_n
+                     OR  (the copy leaves `kinds[:base_n]` unchanged AND the copy is MONO)
+
+    Two independent reasons a donor-region copy can diverge:
+
+    1. `synthesize_mixed_inline` picks its 2-track start-pair donor to MATCH `spec[:2]`. A copy
+       that changes `kinds[:base_n]` therefore makes the rebuilt reference select a DIFFERENT
+       donor, so its first slots come from another scaffold and cannot match.
+    2. Even with the start pair unchanged, a donor-region copy lands where the reference builds a
+       GENERATED unit -- and the two constructions are not the same size for stereo. Measured
+       0x261C spans: mono donor slot 1840 vs generated mono 1840 (identical, so a mono copy
+       matches); stereo donor slot 1881 vs generated stereo 1865 -- SIXTEEN BYTES larger. In a
+       mixed spec the same holds (mono 1833/1833; stereo 1872/1856). That 16 is exactly the
+       length delta observed for `[1,2]*4` src=1 (97491 against 97475).
+
+    So the (2,1) prefix splits by source slot because src=0 copies the STEREO donor slot and
+    src=1 copies the MONO one. `_is_synth_shaped` returns False in the diverging cases -- correctly
+    -- and `remove_track` declines a positional renumber derived only for scaffold-shaped
+    sessions. Both forms of the rule score 100% on the sweep and on held-out specs (see the tests).
 
     Every result in all of the above `validate()`s clean, byte-exact or not. Byte-identity is the
     strength of the evidence, not the correctness criterion.

@@ -186,8 +186,27 @@ alone 128/150; "dup kinds[:base] == spec[:base]" 128/150; "the donor region's ki
 changed" 128/150. The `(2,1)` prefix is what breaks them — it SPLITS by source slot (8 fail,
 8 pass), which is the observation the final rule turns on.
 
-Stated as a MEASURED rule, not a law: it predicts perfectly on data it was not fitted to, but no
-mechanism explains why `(2,1)` splits by slot. Now encoded as a test.
+**THE MECHANISM, derived — and it predicts the observed byte deltas.** Equivalent form:
+
+```
+byte-exact  <=>  src >= base_n
+             OR  (the copy leaves kinds[:base_n] unchanged AND the copy is MONO)
+```
+
+150/150 on the sweep, **96/96 on held-out length-6 specs**, and it agrees with the empirical form
+on every case. Two independent reasons a donor-region copy diverges:
+
+1. **A different scaffold gets picked.** `synthesize_mixed_inline` selects its 2-track start-pair
+   donor to MATCH `spec[:2]` (its own docstring). A copy that changes `kinds[:base_n]` makes the
+   rebuilt reference choose a DIFFERENT donor, so its first slots come from another scaffold.
+2. **A donor slot is not the same size as a generated unit — for stereo.** Measured `0x261C`
+   spans: mono donor 1840 vs generated mono 1840 (IDENTICAL, so a mono copy matches); stereo
+   donor **1881** vs generated stereo **1865** — sixteen bytes larger. Mixed specs likewise
+   (mono 1833/1833, stereo 1872/1856). **That 16 is exactly the length delta measured for
+   `[1,2]*4` src=1: 97491 against 97475.**
+
+So `(2,1)` splits by source slot because src=0 copies the STEREO donor slot and src=1 copies the
+MONO one. The earlier "no mechanism" note is withdrawn.
 
 ### Superseded: the earlier residual figures (kept for provenance)
 
