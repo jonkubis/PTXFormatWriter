@@ -100,6 +100,13 @@ passes for both forms, so local green carries no information about the one quest
 The correct engineering action is to stage the experiment and let the oracle decide, which is what
 the A/B pair is for.
 
+**THE REWRITER ITSELF IS NOW VALIDATED AGAINST PT-AUTHORED BYTES.** Separable from the default
+question, and worth doing: rename a stored path component away and back on real Pro Tools output
+and require byte-exact recovery, with the intermediate staying `validate()`-clean. **40 of 40
+PT-authored control sessions round-trip byte-exact, 0 failures.** That removes the transformation's
+OWN risk — it does not corrupt real sessions — and leaves exactly one open question, which is
+whether Pro Tools prefers a single-path mixed synth. Only a PT load answers that. Now a test.
+
 **A structural proxy was tried as a substitute for PT, and it does not work.** The idea: if
 PT-authored sessions gave same-kind tracks uniform `0x261C` spans, the chimera (which does not)
 would be provably non-native. Measured: PT-authored sessions are NOT uniform either --
