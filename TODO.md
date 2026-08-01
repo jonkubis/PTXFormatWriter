@@ -66,12 +66,17 @@ So `duplicate_track` grows the session from 41 to 42 rows without restamping the
 row's lane count. The copy is inserted after its source, so the last row stays last and the field
 simply needs to follow the new total.
 
-Unexplained and worth checking first: why the same omission does not bite at mono N=40 (41 rows),
-where dup matches its reference exactly. One hypothesis, flagged but NOT asserted -- 42 is 0x2A,
-the same byte as the lane anchor marker, and several writers locate that anchor with a literal
-`find(b"\x2a\x00\x00\x00")`. A value colliding with the anchor byte is the kind of thing that
-makes a threshold appear at exactly 42; it is testable by forcing other track counts and seeing
-whether the failure tracks the VALUE rather than the count.
+The **0x2A-collision hypothesis is REFUTED** (I raised it; the measurement kills it). On fresh
+mono synths the field simply equals the track count -- 38, 39, 40, 41, 42, 43, 45, 48 all read
+back their own N -- so 42 is in no way special and the lane anchor byte is not being collided
+with. Probe caveat worth carrying: `rel +55` is the field's offset for MONO; stereo's sits at
+`+59`, and a fixed `+55` probe reads a constant 95 on stereo, which is a different byte entirely.
+
+So the threshold at 42 rows remains UNEXPLAINED. Note the tension to resolve first: if
+`duplicate_track` simply never restamps this field, it would be wrong at every N (leaving the old
+count), yet mono N=40 -> 41 rows matches its reference exactly. Something restamps it up to 41
+rows and stops. That "something" is the thing to find -- most likely inside the duplicate-side
+positional renumber, not in the field's writer.
 
 **NEXT STEP:** find the writer that stamps this special-last lane field (it is correct on a fresh
 synth, so `synthesize` sets it) and make `duplicate_track` restamp it. Then re-check the six
