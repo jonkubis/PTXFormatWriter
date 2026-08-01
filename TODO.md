@@ -55,9 +55,28 @@ appends. That is right about MY version of the test, which compared against
 rebuild the reference with the copy's kind at the copy's slot and the same names, exactly what
 `_is_synth_shaped` does -- is meaningful, and is what produced the 2-byte localization above.
 
-**NEXT STEP:** identify the `0x251a` field at rel +55/+59 and find where `duplicate_track` should
-bump it from 41 to 42. Then re-check the `0x1014` bytes that appear from N=45, and treat the mixed
-src=0/1 length mismatch as its own investigation.
+**THE FIELD IS IDENTIFIED.** It is a SPECIAL-LAST field, the same pattern as the `0x2519`
+name-table's special last entry: across all 84 lane instances of a 42-track mono session the byte
+is **0 everywhere except the two instances of the LAST row** (indices 41 and 83), where a fresh
+synth writes the track count (42) and `duplicate_track` leaves 41. Ruled out while identifying it:
+the `2a 00 00 00` anchor marker is intact and at the identical offset in dup and reference for
+every one of the 84 blocks, so this is not a corrupted marker.
+
+So `duplicate_track` grows the session from 41 to 42 rows without restamping the previously-last
+row's lane count. The copy is inserted after its source, so the last row stays last and the field
+simply needs to follow the new total.
+
+Unexplained and worth checking first: why the same omission does not bite at mono N=40 (41 rows),
+where dup matches its reference exactly. One hypothesis, flagged but NOT asserted -- 42 is 0x2A,
+the same byte as the lane anchor marker, and several writers locate that anchor with a literal
+`find(b"\x2a\x00\x00\x00")`. A value colliding with the anchor byte is the kind of thing that
+makes a threshold appear at exactly 42; it is testable by forcing other track counts and seeing
+whether the failure tracks the VALUE rather than the count.
+
+**NEXT STEP:** find the writer that stamps this special-last lane field (it is correct on a fresh
+synth, so `synthesize` sets it) and make `duplicate_track` restamp it. Then re-check the six
+`0x1014` bytes that appear from N=45, and treat the mixed src=0/1 length mismatch (97402 vs 97467)
+as its own investigation.
 
 ## Items 16 and 17 CLOSED — two docstring distributions, both contradicted by measurement
 
