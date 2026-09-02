@@ -9,6 +9,7 @@ These validate the architecture documented in
 """
 from pathlib import Path
 import unittest
+import pathlib
 
 from ptxformatwriter.core import PTFFormat
 from ptxformatwriter import final_index as FI
@@ -219,3 +220,66 @@ class FinalIndexRebuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BlockLayoutIsSizeDrivenTests(unittest.TestCase):
+    """`block_layout` walked via `writer._flatten_block_bounds`, which UNDERCOUNTS on real
+    sessions — and the undercount reached the master index. `offset_holes` was already augmented
+    with the size-driven walk, so it ranked each hole against the FULL block set while
+    `block_layout` supplied a short one.
+
+    Found on 73 Pro Tools Ultimate sessions (DWTS Season 35) where the scan reported 0x4828 x1
+    (really 2), 0x2501 x2 (3), 0x258a x1 (2), 0x2581 x1 (2), leaving 10 of 317 holes with an
+    out-of-range rank. `rebuild_index_offsets` raised IndexError on 73/73 against a docstring
+    promising a byte-exact round-trip on an unmodified file, and `reindex_after_resize(d, d)`
+    silently dropped those holes and returned 22-29 CORRUPTED index bytes on an identity edit.
+    `control_files` never tripped it, which is why it survived.
+    """
+
+    def test_block_layout_matches_the_size_driven_walk(self):
+        from ptxformatwriter import body_synth as BS
+        checked = 0
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+                _z2t, by_type = FI.block_layout(d)
+            except Exception:
+                continue
+            sized = {}
+            for z, _e, c in BS._size_driven_blocks(d):
+                sized.setdefault(c, []).append(z)
+            # `_size_driven_blocks` emits a -1 sentinel for the leading counter block, which
+            # `block_layout` reports under its real u16. Compare only genuine content types.
+            for ct, zs in sized.items():
+                if ct < 0:
+                    continue
+                self.assertGreaterEqual(
+                    len(by_type.get(ct, [])), len(zs),
+                    "%s: block_layout has %d instances of 0x%04x, the size-driven walk finds %d"
+                    % (q.name, len(by_type.get(ct, [])), ct, len(zs)))
+            checked += 1
+            if checked >= 10:
+                return
+        self.assertGreater(checked, 0)
+
+    def test_identity_reindex_is_byte_exact_and_rebuild_does_not_raise(self):
+        """Both rewriters honour their documented identity contract on unmodified PT-authored bytes.
+
+        HONESTY NOTE: this is a CONTRACT test, not a regression guard for the defect above. It
+        PASSES against the broken code, because `control_files` never triggers the undercount --
+        that is exactly why the defect survived until a Pro Tools Ultimate corpus (DWTS Season 35)
+        was measured. `test_block_layout_matches_the_size_driven_walk` is the one that bites.
+        """
+        checked = 0
+        for q in sorted(pathlib.Path("control_files").rglob("*.ptx")):
+            try:
+                f = PTFFormat(); f.load(str(q), 48000); d = f.unxored_data()
+            except Exception:
+                continue
+            self.assertEqual(FI.reindex_after_resize(d, d), d,
+                             "%s: identity reindex changed bytes" % q.name)
+            FI.rebuild_index_offsets(d)          # must not raise
+            checked += 1
+            if checked >= 8:
+                return
+        self.assertGreater(checked, 0)
+

@@ -671,15 +671,58 @@ def synthesize_index_records(
     return records
 
 
+def _block_bounds_sized_full(data: bytes):
+    """`(zmark, end, content_type)` for every block, walked by DECLARED SIZE over the whole file.
+
+    `_block_bounds_sized` returns only `{zmark: content_type}` and stops at the index; this yields
+    the triples `block_layout` needs and covers the index region too."""
+    out = []
+
+    def descend(lo: int, hi: int) -> None:
+        pos = lo
+        while pos < hi:
+            nz = data.find(b"\x5a", pos, hi)
+            if nz < 0:
+                return
+            pos = nz
+            block_type = int.from_bytes(data[pos + 1 : pos + 3], "little")
+            if not (block_type & 0xFF00):
+                size = int.from_bytes(data[pos + 3 : pos + 7], "little")
+                ct = int.from_bytes(data[pos + 7 : pos + 9], "little")
+                end = (pos + 7) + size
+                if size > 0 and end <= hi:
+                    out.append((pos, end, ct))
+                    descend(pos + 9, end)
+                    pos = end
+                    continue
+            pos += 1
+
+    descend(0, len(data))
+    out.sort()
+    return out
+
+
 def block_layout(data: bytes) -> tuple[dict[int, int], dict[int, list[int]]]:
     """Return (zmark_offset -> content_type, content_type -> [zmark offsets]).
 
     The per-type offset lists are sorted ascending so a block can be addressed by
     (content_type, rank).
     """
+    # SIZE-DRIVEN, not `W._flatten_block_bounds`. That scan UNDERCOUNTS on real sessions, and the
+    # undercount reaches the master index here: `offset_holes` was already augmented with the
+    # size-driven walk, so it computes each hole's rank against the FULL block set while this map
+    # was built from the short one. Ranks then address a list that is too short.
+    #
+    # Measured on `S3501 BOYZ PRO TOOLS a - ja.ptx`: the scan finds 0x4828 x1 (really 2),
+    # 0x2501 x2 (3), 0x258a x1 (2), 0x2581 x1 (2), leaving 10 of 317 holes with an
+    # out-of-range rank. Consequences on 73 of 73 DWTS Season 35 sessions:
+    # `rebuild_index_offsets` raised IndexError -- against a docstring promising a byte-exact
+    # round-trip on an unmodified file -- and `reindex_after_resize(d, d)` silently dropped those
+    # holes (its own `rank < len(...)` guard) and returned 22-29 CORRUPTED index bytes on an
+    # identity edit. `control_files` never tripped it, which is why it survived this long.
     zmark_to_type: dict[int, int] = {}
     by_type: dict[int, list[int]] = {}
-    for zmark, _end, content_type in W._flatten_block_bounds(data):
+    for zmark, _end, content_type in _block_bounds_sized_full(data):
         zmark_to_type[zmark] = content_type
         by_type.setdefault(content_type, []).append(zmark)
     for offsets in by_type.values():
@@ -747,8 +790,12 @@ def offset_holes(data: bytes) -> tuple["W.BlockRef | None", list[tuple[int, int,
     if ref is None:
         return None, []
     zmark_to_type, by_type = block_layout(data)
-    # AUGMENT THE MAP WITH THE SIZE-DRIVEN WALK. `block_layout` is built from
-    # `writer._flatten_block_bounds`, i.e. the SCAN parser, which undercounts 80 content types.
+    # AUGMENT THE MAP WITH THE SIZE-DRIVEN WALK. (STALE AS OF THE 0x48xx FIX: `block_layout` is
+    # ITSELF size-driven now, so this augmentation is belt-and-braces rather than the load-bearing
+    # correction it was. It used to be built from `writer._flatten_block_bounds`, the SCAN parser,
+    # which undercounts 80 content types -- and that mismatch, holes ranked against the full set
+    # but resolved against the short one, is what corrupted the index on the DWTS Ultimate
+    # sessions.)
     # `add()` below silently RETURNS when a hole's target is not in this map, so a hole pointing at
     # a block the scan parser missed is dropped -- and a dropped hole is never shifted on a resize,
     # leaving a stale master-index offset that nothing reports.
