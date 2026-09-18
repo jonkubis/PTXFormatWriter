@@ -1289,6 +1289,30 @@ def wav_clip_identity(wav_path) -> "tuple[int, bytes, bytes]":
     return sample_count, umid_material, id2
 
 
+def wav_format(wav_path) -> "tuple[int, int]":
+    """`(channels, bit_depth)` from a WAV's `fmt ` chunk. Both are recorded in the session's
+    descriptor for the file and BOTH gate linking: a descriptor that claims two channels for a
+    mono file leaves Pro Tools unable to match the two, and it asks to relink on every open."""
+    import struct
+    data = open(wav_path, "rb").read(8192)
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError(f"not a RIFF/WAVE file: {wav_path}")
+    i = 12
+    while i + 8 <= len(data):
+        cid = data[i:i + 4]; sz = struct.unpack("<I", data[i + 4:i + 8])[0]
+        if cid == b"fmt " and sz >= 16:
+            return (struct.unpack("<H", data[i + 10:i + 12])[0],
+                    struct.unpack("<H", data[i + 22:i + 24])[0])
+        i += 8 + sz + (sz & 1)
+    raise ValueError(f"WAV has no 'fmt ' chunk in its first 8 KB: {wav_path}")
+
+
+def wav_channels(wav_path) -> int:
+    """The channel count from a WAV's `fmt ` chunk. A clip occupies one region and one
+    placement LANE per channel, so this decides a clip's whole footprint."""
+    return wav_format(wav_path)[0]
+
+
 def _wav_chunks(data: bytes) -> "list[tuple[bytes, int, int]]":
     out, i = [], 12
     while i + 8 <= len(data):
@@ -1597,10 +1621,17 @@ def _file_filetime(path) -> int:
 
 
 def _build_wav_descriptor(template_1003: bytes, index: int, sample_count: int,
-                          umid: bytes, id2: bytes, mtime_ft: "int | None" = None) -> bytes:
-    """Build one 0x1003 wav descriptor: set the wav ordinal (@+9), the sample count (in
-    the 0x1001 child @+15), and the umid identity (0x1001 copy @+44 with 2a, 0x2106 copy
-    @+292 00-prefixed, 2-byte id @+301) — the same fields set_clip_wav patches.
+                          umid: bytes, id2: bytes, mtime_ft: "int | None" = None,
+                          channels: "int | None" = None, bits: "int | None" = None) -> bytes:
+    """Build one 0x1003 wav descriptor: set the wav ordinal (@+9), the FORMAT and length in the
+    0x1001 child (channels @+13, bit depth @+14, sample count @+15), and the umid identity
+    (0x1001 copy @+44 with 2a, 0x2106 copy @+292 00-prefixed, 2-byte id @+301) — the same fields
+    set_clip_wav patches.
+
+    `channels` and `bits` default to whatever the template carried, which is stereo/24. That is
+    wrong for any file of another format and Pro Tools notices: a descriptor claiming two channels
+    for a mono file cannot be matched to it, and PT asks to relink that track on every open. Pass
+    them (see `wav_format`) whenever the real file is known.
 
     When `mtime_ft` (the source WAV's mtime as a Windows FILETIME) is given, also stamp the
     file-timestamp fields the way a fresh Pro Tools IMPORT does — @+100 and @+172 = the file
@@ -1615,6 +1646,10 @@ def _build_wav_descriptor(template_1003: bytes, index: int, sample_count: int,
     i = 9
     while i + 9 <= len(u):
         if u[i] == 0x5A and struct.unpack_from("<H", u, i + 7)[0] == 0x1001:
+            if channels is not None:
+                u[i + 13] = channels
+            if bits is not None:
+                u[i + 14] = bits
             struct.pack_into("<I", u, i + 15, sample_count)
             break
         i += 1
@@ -1689,12 +1724,19 @@ def _build_filename_list(filenames: "list[str]", trailer: bytes) -> bytes:
     return bytes(out)
 
 
-def _build_placement_lanes(b1054: bytes, track_clips: "dict", tail_template: bytes) -> bytes:
+def _build_placement_lanes(b1054: bytes, track_clips: "dict", tail_template: bytes,
+                           lane_map: "list[tuple[int, int]] | None" = None) -> bytes:
     """Rebuild a 0x1054 placing each track's clips. `track_clips[t]` = list of
     (region_index, position); each track lane gets that many 0x1050 placements (the lane
-    count byte = K), each 0x104f's region/channel index (payload[2] = 2*region_index +
+    count byte = K), each 0x104f's region/channel index (payload[2] = region_index +
     channel) and position (payload[7:15]) patched. `tail_template` = one clip lane tail
-    (`01 00 00 00` + a 0x1050{0x104f})."""
+    (`01 00 00 00` + a 0x1050{0x104f}).
+
+    `lane_map[i] = (track, channel)` for the i-th 0x1052 lane. A track occupies one lane
+    per CHANNEL, so this cannot be assumed: a session with a mono track (a mono CLICK, as
+    the editors' own splits have) has lanes 0=(0,0), 1=(1,0), 2=(1,1), ..., and the old
+    `lane // 2` put every clip after the mono track on the wrong track and lane. Falls
+    back to all-stereo when no map is given, which is what every earlier caller meant."""
     import struct
     # tail_template = <count:4> <0x1050 block> <2-byte lane trailer>. Split the placement
     # block from the trailer: the trailer goes ONCE at the lane end, not per placement.
@@ -1710,14 +1752,14 @@ def _build_placement_lanes(b1054: bytes, track_clips: "dict", tail_template: byt
         cct = struct.unpack_from("<H", b1054, i + 7)[0]
         child = b1054[i:i + 7 + csz]
         if cct == 0x1052:
-            track, chan = lane // 2, lane % 2
+            track, chan = lane_map[lane] if lane_map and lane < len(lane_map) else (lane // 2, lane % 2)
             if track in track_clips and track_clips[track]:
                 nl = struct.unpack_from("<I", child, 9)[0]
                 placements = bytearray()
-                for region_index, pos in track_clips[track]:
+                for region_index, width, pos in track_clips[track]:
                     plc = bytearray(plc_block)
                     fi = plc.find(b"\x4f\x10") + 2      # 0x104f payload start
-                    plc[fi + 2] = 2 * region_index + chan
+                    plc[fi + 2] = region_index + min(chan, width - 1)
                     struct.pack_into("<Q", plc, fi + 7, int(pos))
                     placements += plc
                 placements += lane_trailer
@@ -1792,7 +1834,6 @@ def build_audio_clips(data: bytes, tracks, clip_ref: "bytes | None" = None) -> b
     for _t, w, _p, _n in clips:
         if w not in distinct:
             distinct.append(w)
-    region_of = {w: j for j, w in enumerate(distinct)}
     # region (clip) display name per distinct wav: the first clip's name, else filename stem
     name_of = {}
     for _t, w, _p, n in clips:
@@ -1800,25 +1841,42 @@ def build_audio_clips(data: bytes, tracks, clip_ref: "bytes | None" = None) -> b
             name_of[w] = n
 
     descs, regions, filenames = [], [], []
+    region_base, width_of = {}, {}
     for j, w in enumerate(distinct):
         sc, umid, id2 = wav_clip_identity(w)
+        width, depth = wav_format(w)
+        if width not in (1, 2):
+            raise ValueError(f"{w}: a clip must be mono or stereo, not {width}-channel")
         fn = os.path.basename(str(w))
         filenames.append(fn)
         stem = name_of.get(w) or fn.rsplit(".wav", 1)[0]  # clip name, decoupled from filename
-        descs.append(_build_wav_descriptor(t1003, j + 1, sc, umid, id2, _file_filetime(w)))
+        descs.append(_build_wav_descriptor(t1003, j + 1, sc, umid, id2, _file_filetime(w),
+                                           channels=width, bits=depth))
 
         def _guid(chan):
             return hashlib.sha256(f"ptformat-clip-{j}-{chan}".encode()).digest()[:16]
-        regions.append(_build_region(treg, stem + ".L", 0, sc, _guid(0), j))
-        regions.append(_build_region(treg, stem + ".R", 1, sc, _guid(1), j))
+        # One region per CHANNEL. A MONO clip has exactly one, named WITHOUT a lane suffix —
+        # PT-confirmed against hand-authored splits, whose mono CLICK track carries the region
+        # `<song> - CLICK - COUNT` while every stereo track carries a `.L`/`.R` pair.
+        region_base[w], width_of[w] = len(regions), width
+        if width == 1:
+            regions.append(_build_region(treg, stem, 0, sc, _guid(0), j))
+        else:
+            regions.append(_build_region(treg, stem + ".L", 0, sc, _guid(0), j))
+            regions.append(_build_region(treg, stem + ".R", 1, sc, _guid(1), j))
 
     blk1004 = _rebuild_count_block(h4, b"\x00\x00\x00\x00" + _build_filename_list(filenames, trailer),
                                    descs, tr4, len(distinct))
-    blk262a = _rebuild_count_block(h2a, b"\x00\x00\x00\x00", regions, b"", 2 * len(distinct))
+    blk262a = _rebuild_count_block(h2a, b"\x00\x00\x00\x00", regions, b"", len(regions))
+
+    # Lane i of the 0x1054 belongs to (track, channel): one lane per track CHANNEL, so a mono
+    # track takes one lane and a stereo track two. Read the widths off the session rather than
+    # assuming, or every clip after a mono track lands on the wrong track.
+    lane_map = [(t, c) for t, ti in enumerate(track_types(data)) for c in range(max(1, ti.channels))]
 
     track_clips: "dict" = {}
     for t, w, pos, _n in clips:
-        track_clips.setdefault(t, []).append((region_of[w], pos))
+        track_clips.setdefault(t, []).append((region_base[w], width_of[w], pos))
 
     refs = W.top_level_refs(data)
     if not refs or refs[-1].block.content_type != 0x0002:
@@ -1833,7 +1891,7 @@ def build_audio_clips(data: bytes, tracks, clip_ref: "bytes | None" = None) -> b
         elif ct == 0x0F3D:
             body += tpath
         elif ct == 0x1054:
-            body += _build_placement_lanes(r.data, track_clips, ttail)
+            body += _build_placement_lanes(r.data, track_clips, ttail, lane_map)
         else:
             body += r.data
     body = bytes(body)
@@ -2004,7 +2062,17 @@ def _resize_tempo_block(block: bytes, n_records: int) -> bytes:
     # sessions (up to 820 bytes), with the dominant transitions all `value -> 0`. `0x2029` had
     # exactly this bug and was already fixed the same way (`_resize_meter_safe`); `0x2028` was
     # missed. Growing behaves as before -- new records still come from the template.
-    kept = b"".join(block[rec0 + i * 61 : rec0 + (i + 1) * 61] if i < R else template
+    # A record GROWN from the template must not inherit record 0's `+21` flag. PT-CONFIRMED
+    # 2026-09-17: writing a 44-event map onto a session that held one record cloned record 0
+    # (+21 = 1) into all 44, and Pro Tools then showed NO tempo changes at all and anchored the
+    # session at the LAST record's position (bar 64|4|006 instead of 1|1|000). Measured over
+    # every PT-authored session of that project -- the 58-record show session and all 12
+    # hand-made splits, up to 61 records -- `+21` is set on record 0 and on NO other record.
+    # Clearing it only on template-derived records leaves the surviving ones (and therefore an
+    # identity replace) byte-identical, and preserves a real per-record value wherever PT wrote
+    # one. See the `+21` row in docs/ptx-format-spec.md §10.
+    grown = bytes(bytearray(template)[:21] + b"\x00" + bytearray(template)[22:])
+    kept = b"".join(block[rec0 + i * 61 : rec0 + (i + 1) * 61] if i < R else grown
                     for i in range(n_records))
     new_block = bytearray(block[:rec0] + kept + trailer)
     struct.pack_into("<I", new_block, rec0 - 8, n_records)            # count
@@ -2320,9 +2388,10 @@ def _rewrite_tempo_records(block: bytes, events) -> bytes:
         # boolean, set in 1,419 of 2,938 NON-first records (~half), and the two disagree in 1,417
         # records. Deriving +21 from the index therefore overwrote real data: an IDENTITY replace
         # rewrote it 1->0 in 1,247 records across 15 sessions. Records are cloned per index by
-        # `_resize_tempo_block`, so leaving +21 alone preserves each record's own value, and a
-        # newly grown record inherits the template's. Its MEANING is unknown (a linear-ramp flag
-        # is the obvious guess) and needs Pro Tools; preserving it does not require knowing it.
+        # `_resize_tempo_block`, so leaving +21 alone preserves each record's own value; a newly
+        # grown record is created with +21 = 0 there (PT-CONFIRMED 2026-09-17: a grown record
+        # that inherited record 0's +21 = 1 made Pro Tools drop the whole map -- see that
+        # function and §10). Its MEANING is still unknown; not propagating it is what matters.
         # Leave a record alone entirely when it ALREADY holds this event. +39 is the
         # first-record flag in 3,245 of 3,247 real records -- but two sessions of one project
         # carry it on record 2 instead, so even this one is not derivable, only overwhelmingly
