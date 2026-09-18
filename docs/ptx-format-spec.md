@@ -108,6 +108,13 @@ instance**, span ~8–12 bytes, an **implausible/high `content_type`** (e.g. `0x
 plausible-looking low `content_type`, so range alone is not a reliable filter.
 
 Real content-types are confined to `0x0002`, `~0x1000–0x27xx`, and `~0x4300–0x45xx`. A correct
+
+> **FALSIFIED (DWTS Season 35, 73 sessions).** The 0x4842-0x485E family lies outside every
+> range above, yet nine of its members are TOP-LEVEL blocks named by the 0x0002 master index in
+> 73/73 sessions. The rule was induced from corpora that lack that Pro Tools generation. Do not use
+> it to dismiss an out-of-range content type as a phantom -- use the structural tests (does it tile
+> its parent? is its parent consistent? is it index-referenced?) instead. See the 0x4842-0x485E
+> section at the end of this file.
 parser bounds recursion **by the grammar** — it only looks for children inside block types known
 to be containers, never inside leaves (strings, GUIDs, `0x1000`/`0x1017` records, etc.). The
 `0x0002` master index is the authority on which blocks are real; anything the walk finds that the
@@ -681,6 +688,18 @@ fields, in the 6-char-name template layout: **channel** at `+78`, region **GUID*
 > They disagree in 1,417 records, so `+21` cannot be derived from position. Its MEANING is
 > unknown (a linear-ramp flag is the obvious guess and needs Pro Tools), but a writer does not
 > need to know it — **preserve it per record.**
+>
+> **`+21` ON A NON-FIRST RECORD IS NOT INERT — PT-CONFIRMED 2026-09-17.** A 44-event map written
+> onto a session that held a single record grew the new records by cloning record 0, so all 44
+> carried its `+21 = 1`. Pro Tools opened that session with **no tempo changes at all** and
+> anchored it at the LAST record's position (bar `64|4|006`) instead of `1|1|000`; the `0x2028`
+> and `0x2718` records were otherwise byte-identical to a PT-authored session of the same map —
+> `+21` was the ONLY differing byte in all 44. Across every PT-authored session of that project
+> (a 58-record show session and its 12 hand-made splits, up to 61 records) `+21` is set on record
+> 0 and on no other record. So: preserve it on records PT wrote, but a record a WRITER creates
+> must start with `+21 = 0` (`_resize_tempo_block` now does). The measured ~half-of-non-first
+> figure above comes from a different corpus and is left standing as-is: whatever it means there,
+> a cloned `+21` breaks the map here.
 >
 > **AND `+39` IS NOT DERIVABLE EITHER, only overwhelmingly likely.** Two sessions of one project
 > carry it on record **2** rather than record 0. At 3,245/3,247 it is the kind of rule that looks
@@ -1991,7 +2010,13 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
 - **Fields (payload-relative):**
   - `+0 u32 count = 0` (empty collection) — const across all 32. Payload is exactly these 4 bytes; size=6 leaves no room for any member record, so the non-empty member schema is unobservable in this corpus.
 - **Notes:** Structural placeholder — an empty group with no members. One instance is always top-level (ROOT); in ~1/3 of sessions a second instance is owned by container 0x271b and sits immediately before the ROOT one. block_type=0x0001 with a single u32=0 payload is PT's canonical 'empty collection' idiom. 32 instances / 26 sessions (incl. the 7 huge Hipsters), all byte-identical — no non-empty instance ever appears, so the member schema cannot be observed. The earlier raw hex showing a trailing '5a05' was header bleed from the next block (the byte after the 13-byte span is 0x5A in 32/32). The semantic meaning of 'what collection' is inferred, not observable (always empty).
-- **Confidence:** high.
+- **Confidence:** high **for the corpora it was written from; the "always empty" claim is FALSIFIED.**
+
+> **CORRECTION (DWTS Season 35, 73 Pro Tools Ultimate sessions).** `0x2433` is NOT always an empty
+> leaf. In all 73 of those sessions it appears **146 times** (2 per session) with declared
+> **size = 26**, and each instance holds exactly one `0x2432` member — the record this entry says is
+> "unobservable in this corpus". The size-6/empty form above is real but is not the whole type; it
+> was induced from corpora that lack this session generation. See `0x2432` below.
 
 ### 0x2437 — Empty count-prefixed collection/list header
 
@@ -5977,3 +6002,162 @@ byte-identical to a fresh synth of N+1 tracks. Dense renumbering is *correct* on
 
 Until that is resolved, treat the editors as safe for synth-shaped sessions and as
 **renumbering** for real ones.
+
+## The 0x4842–0x485E family — Speech Analysis, ARA/Clip Effects, and per-signal-path flags
+
+Sixteen content types that appear in **73/73** Pro Tools **Ultimate** sessions (DWTS Season 35) and
+in **0** of the 282 `control_files` sessions. A scan of 280 further sessions across four drives
+found the family in none of them, so every instance known to this project comes from that one
+corpus. `0x4846`'s payload strings name the feature outright: `Speaker`, `Track`, `Clip`, `File`,
+`ChannelFormat`, `SpeechAnalysis`, `UsedInSession`, `Scene`, `Take`, `ChannelNames`,
+`ChannelSelection`, `SpeechTime`, `SpeechStart`, `SpeechEnd`, `SpeechDuration`, `Transcription`.
+
+**It is not one subsystem but three**, which the shared numeric range disguises:
+
+- **Speech Analysis / transcription UI state** — `0x4850` + `0x4846` (the column schema),
+  `0x4842`, `0x4843`, `0x4845`, `0x4848`→`0x4847`→`0x4849`, `0x484F`, `0x4858`.
+- **ARA / external-editor ("Clip Effects") registry** — `0x484E`, `0x484D`, `0x4852`. `0x484D` is
+  the same record shape as the documented `0x4807`.
+- **Per-track / per-signal-path attachments** — `0x4856` + `0x485E` (one per `0x261B`), and
+  `0x485A` (one per `0x260D`).
+
+Containment, with the two hooks into already-documented types in bold:
+
+```
+ROOT ── 0x4842   0x4843   0x4858   0x484F
+     ├─ 0x4845 ── 0x2011                        (empty window rect)
+     ├─ 0x4848 ── 0x4847 ── 0x4849 ── 0x1000    (one empty path)
+     ├─ 0x4850 ── 0x2011 + 32 x 0x4846          (window rect + 2 x 16-column schema)
+     ├─ 0x484E ── 1-2 x 0x484D                  (also 3 per session under 0x2553)
+     └─ 0x4852                                  (also 3 per session under 0x2553)
+**0x261B** ── ... ── 0x4856 ── 0x260E + 0x485E  (last child, one per track record)
+**0x260D** ── ... ── 0x485A                     (last child, 11 x 0x260D per 0x261B)
+```
+
+**This family falsifies the spec's own range rule.** The note above stating that real content types
+are confined to `0x0002`, `~0x1000-0x27xx` and `~0x4300-0x45xx` is wrong: nine of these are
+top-level blocks named by the `0x0002` master index in 73/73 sessions. The rule was a phantom
+filter derived from a corpus that lacked this generation of session, and it should not be used to
+dismiss an out-of-range type.
+
+**Corpus limitation, stated up front.** The subsystem is *instantiated* everywhere and *populated*
+nowhere. The schema's own defaults say so (`SpeechAnalysis` = `-1`, `UsedInSession` = `-1`), and
+every payload that could carry transcription *text* is zero or constant — `0x485E` is the same 7
+bytes in 496/496, and the whole `0x4846` schema is byte-identical boilerplate. **No transcript, no
+speaker name and no timecode appears anywhere in the corpus**, so the meaning of those value fields
+is inference, not observation.
+
+The single exception, and the only session-specific datum the family carries, is `0x485A`'s flag
+byte: set in **1098 of 5456** instances, and varying by session — 1 set instance in 48 sessions,
+2 in 3, 42 in 12, 52 in 5, 54 in 4, and 64 in one. Whatever it marks is per-signal-path and real.
+
+### 0x4850 — Speech Analysis window state + column schema
+
+- **Kind:** CONTAINER, top-level, exactly 1 per session (73/73). Children exactly `{0x2011: 1, 0x4846: 32}` in 73/73. block_type = 4.
+- **Size:** span 1104 (51 sessions, `0x4846` block_type 1) or 1136 (22 sessions, block_type 2).
+- **Fields:** `0x2011` window rect = (200, 200, 650, 300) in 73/73; then 16 zero bytes; `u32 = 1`; 3 zero bytes; `u32 count = 16`; list A of 16 `0x4846`; `u32 count = 16`; list B of 16; 8 trailing zero bytes.
+- **Notes:** The two 16-entry lists are **identical** — 1168/1168 pairwise-equal records across 73 sessions. Almost certainly "available columns" and "displayed columns" for the same view, but the corpus never differentiates them, so that reading is inference. Verified by round-trip synthesis: regenerating the whole subtree from `(block_type, name, value, param)` alone reproduced **73/73 subtrees byte-identically**.
+- **Confidence:** high (layout), medium (why the list is duplicated).
+
+### 0x4846 — one column definition
+
+- **Kind:** LEAF. Parent is always that `0x4850` — 2336/2336 instances, never anywhere else. block_type 1 (51 sessions) or 2 (22).
+- **Size:** Variable, `paylen == 4 + nl + 4 + vl + 4 + block_type`, with **0/2336 violations**.
+- **Fields (name/value are variable-length, so past `+4` only `name_end`/`value_end` anchors are meaningful):**
+  - `+0 u32 name_len` — observed {4,5,7,9,10,11,12,13,14,16}
+  - `+4 name` — ASCII column key
+  - `name_end+0 u32 value_len` — observed {0, 2, 4}
+  - `name_end+4 value` — ASCII default, one of `""`, `-1`, `-100`
+  - `value_end+0 u32 param` — **304 for `Transcription` (146/146), 0 for every other name (2190/2190)**
+  - `value_end+4` — `block_type` zero bytes (1 or 2), all zero
+- **Notes:** The 16 columns in file order: Speaker, Track, Clip, File, ChannelFormat(`-100`), SpeechAnalysis(`-1`), UsedInSession(`-1`), Scene, Take, ChannelNames, ChannelSelection, SpeechTime, SpeechStart, SpeechEnd, SpeechDuration, Transcription. Order is identical in 73/73. `param` reads naturally as a column width in pixels but only one column is non-zero, so that is inference. Stripping the final byte of a block_type-2 payload yields the block_type-1 payload exactly (32/32) — the two are the same record with one extra pad byte, i.e. a writer-build difference.
+- **Confidence:** high.
+
+### 0x4856 — per-track-record speech attachment
+
+- **Kind:** CONTAINER. Parent `0x261B` in 496/496; always the **LAST** child (`0x261B_end - 0x4856_end == 0`, 496/496). Children exactly `[0x260E, 0x485E]`, 496/496. block_type 4.
+- **Size:** `span - namelen == 151` in 496/496; observed spans 154/158/164.
+- **Fields (the `0x260E` child carries a variable-length name, so the trailer MUST be end-anchored):**
+  - `+0` 32 constant bytes: `00…00 01 00 00 00 00…00 01 00 00 00 ff ff ff ff 01 00 00 00`
+  - `payload+32` — the `0x260E` child (span = 68 + namelen)
+  - 25 constant bytes
+  - `end-17` — the `0x485E` child
+  - `end-1` — `01`
+- **Notes:** One per `0x261B`, not one per `track_types()` track — a 6-track session has 8 `0x261B` and 8 `0x4856`. The `0x261B` child sequence is one variant in 496/496: `0x102D, 0x2627, 0x260D ×11, 0x4856`. **Start-anchored offsets shift with the name** (measured: the `0x485E` offset is 137/141/147 for namelen 3/7/13), which is why the end anchor is required.
+- **Confidence:** high (framing/placement), low (meaning of the constants).
+
+### 0x485E — closes each 0x4856
+
+- **Kind:** LEAF, child of `0x4856`, exactly one each (496/496). block_type 2, span 16.
+- **Fields:** the whole 7-byte payload is `02 00 02 00 00 00 00` — **constant in 496/496**.
+- **Notes:** UNKNOWN what the two `02` values select. No instance differs anywhere in the corpus, so nothing can be correlated against.
+- **Confidence:** high (constancy), none (semantics).
+
+### 0x485A — per-signal-path flag
+
+- **Kind:** LEAF, child of `0x260D`, one per `0x260D` (5456/5456; 11 per `0x261B`). block_type 2, span 14.
+- **Fields:** `+0` 4 zero bytes, then **one boolean byte**: `00` in 4358 instances, `01` in **1098** (5456 total).
+- **Notes:** This is the ONLY field in the entire family that varies with the session. Set-count per session: 1 (48 sessions), 2 (3), 42 (12), 52 (5), 54 (4), 64 (1) — so it is not a global toggle but a per-signal-path property, and the two clusters (≈1 vs ≈40-64) suggest two session populations. What it marks is UNKNOWN; correlating it against signal-path identity is the obvious next experiment and has not been done.
+- **Confidence:** high (framing and distribution), none (semantics).
+
+### 0x484E / 0x484D / 0x4852 — ARA / Clip Effects registry
+
+- **Kind:** `0x484E` CONTAINER holding 1–2 `0x484D`; `0x4852` LEAF. Each appears **4 times per session**: 3 nested under `0x2553` (219 = 3 × 73) and 1 top-level (73). block_type 2 / 2 / 1.
+- **Size:** `0x484E` span 75 (under `0x2553`) or 46 (top-level); `0x484D` span 25 (511/511); `0x4852` span 13 (292/292).
+- **Fields:**
+  - `0x484D` payload: a 12-byte identifier + a length-0 name. The identifier is the ASCII `ngrtngrtngrt` in 438 instances and 12 zero bytes in 73.
+  - `0x4852` payload: `u32 = 0`, entire payload, 292/292.
+- **Notes:** `0x484D` is byte-for-byte the same record shape as the documented `0x4807` (plug-in / AudioSuite id), which is why this cluster reads as an ARA / external-editor registry rather than as speech. `ngrtngrtngrt` is a 4-byte token repeated three times; it is NOT decoded — whether it is a FourCC, three IDs, or padding is UNKNOWN. The `0x484D` name field is length-0 in 511/511, so every `payload+N` offset past it is stable **by accident of this corpus**; a writer must walk children by their declared size and anchor the 12-byte tail to block end.
+- **Confidence:** high (framing), low (role), none (`ngrtngrtngrt`).
+
+### 0x484F — transcription mode settings
+
+- **Kind:** LEAF, top-level, 1 per session (73/73). block_type 3 — unusual; most of the family is 1, 2 or 4.
+- **Size:** span 38, constant 73/73.
+- **Fields:** three length-prefixed ASCII strings with a 3-byte scalar group between the first two: `"multi"`, `00 04 01`, `"multi"`, `"auto"`.
+- **Notes:** Whole-block image identical in 73/73: `5a03001f0000004f48 05000000 6d756c7469 000401 05000000 6d756c7469 04000000 6175746f`. Reads as (language/speaker mode = multi, ... , multi, auto) but with zero variance the field-to-meaning mapping is UNKNOWN.
+- **Confidence:** high (layout), none (semantics).
+
+### 0x4842, 0x4843, 0x4845, 0x4858 — constant top-level singletons
+
+- **Kind:** all top-level, exactly 1 per session, 73/73. `0x4845` contains an all-zero `0x2011`; the rest are leaves.
+- **Fields and full images (each byte-identical in 73/73):**
+  - `0x4842` span 17, payload `00 00 01 e8 03 00 00 00` — a flag = 1 and a `u32 = 1000`.
+  - `0x4843` span 13, payload `u32 = 0`.
+  - `0x4845` span 37 — a wrapper whose entire content is an all-zero `0x2011` window rect.
+  - `0x4858` span 23, payload 14 zero bytes.
+- **Notes:** `0x4842`'s 1000 is UNKNOWN — a cap, a millisecond duration and a sub-version are all consistent with the data and none can be separated. `0x4845` carries no data at all; its information is its presence and its position. Seen beyond this corpus: an agent found `0x4842` in 163 other Pro Tools files on this machine, in two variants differing only by one appended zero byte (block_type 1, span 16 vs block_type 2, span 17) — so the family is not unique to DWTS, only to a Pro Tools generation the project's corpora otherwise lack.
+- **Confidence:** high (constancy), none (semantics).
+
+### 0x4848 → 0x4847 → 0x4849 → 0x1000 — an empty path holder
+
+- **Kind:** a 3-deep top-level wrapper chain, 1 per session (73/73), 63 bytes total, terminating in the documented `0x1000` (variable-length path).
+- **Fields:** bytes `+0..+61` are byte-identical in 73/73; the innermost `0x1000` holds **one empty filesystem path**.
+- **Notes:** Three nested wrappers around an empty path is PT's idiom for "a location this feature would write to, not yet set" — inference, not observation. What the path would point at (a transcript export folder?) is UNKNOWN.
+- **Confidence:** high (framing), none (purpose).
+
+### What this family cost, and the rule it broke
+
+`block_layout()` resolved index holes through the scan parser while `offset_holes()` ranked them
+size-driven. On these sessions the mismatch made `rebuild_index_offsets` raise `IndexError` on
+**73/73** files and `reindex_after_resize(d, d)` — an identity edit — return **22–29 corrupted
+master-index bytes** on every one, with `0x484E` and `0x4852` among the mis-resolved types. Fixed
+by making `block_layout` size-driven. `control_files` never triggered it, which is the whole lesson:
+a corpus that lacks a session generation cannot tell you your index rewriter is broken on it.
+
+### 0x2432 — the member record of 0x2433
+
+- **Kind:** LEAF. Parent is always `0x2433` — 146/146 instances, never elsewhere. Exactly 2 per session in 73/73.
+- **Size:** span 20, constant (declared size 13). The enclosing `0x2433` has declared size 26 in 146/146, against the size-6 empty form documented above.
+- **Fields (payload-relative; no variable-length field, so the anchor is unambiguous):**
+  - `+0` 11 bytes, `00 10 a5 d4 e8 00 00 00 01 01 00` — **one distinct payload in 146/146**.
+- **Notes:** This is the record whose schema the `0x2433` entry above calls unobservable; it is observable here, but with zero variance across 146 instances no field can be separated from any other. The `e8` at `+4` is tempting to read as part of a little-endian 1000 (`e8 03`), but the following byte is `00`, not `03` — do not read it that way. What the member IS remains UNKNOWN.
+- **Confidence:** high (framing, parentage, constancy), none (semantics).
+
+### 0x4F00 — NOT a content type; a phantom from an I/O-path ordinal
+
+- **Kind:** PHANTOM. Appears in 3 of 73 sessions, 1 instance each, always inside the top-level `0x2033` I/O name table.
+- **Cause, derived to the byte:** `0x2033` is a flat table of `<u32 ordinal><u32 len><ASCII name>` records. The ordinals run 1, 2, 3, … and when one reaches **90** its little-endian first byte is `0x5A` — the frame marker. The size-driven walker then reads the following `u32 len` as a block size and the next 2 bytes as a content type, framing a spurious block. Raw context, identical in all 3 files: `… 'Out 179-180' | 5a 00 00 00 | 0b 00 00 00 | 4f 75 74 20…` — the `5a 00 00 00` is the ordinal 90, and `4f 75` ("Ou" of the next name) becomes content_type `0x4F00`.
+- **Notes:** A session whose I/O list stops short of 90 entries produces no phantom, which is why only 3 sessions show it. **Do not add `0x4F00` to any type table.** It is listed here so the next census does not rediscover it as an undocumented type. This is the same class as `0x2757` (a `u32` count whose low byte is `0x5A`) documented earlier.
+- **Confidence:** high — the mechanism is derived from the raw bytes, not inferred from statistics.
+

@@ -13,6 +13,7 @@ from typing import Iterable, List, Optional
 BITCODE = b"0010111100101011"
 ZMARK = 0x5A
 ZERO_TICKS = 0xE8D4A51000
+TICK_LOCKED = 0x40        # top byte of a placement u64: musical (vs 0x00 sample)
 MAX_CHANNELS_PER_TRACK = 8
 
 
@@ -41,6 +42,11 @@ class Region:
     name: str = ""
     index: int = 0
     startpos: int = 0
+    #: Set when the placement is TICK-locked (musical): PT ticks (960000/quarter) from
+    #: session start. Pro Tools flags each placement position in the top byte of its u64
+    #: -- 0x00 sample-locked, 0x40 tick-locked (the same timebase encoding markers use).
+    #: `startpos` is 0 for these, because converting ticks to samples needs the tempo map.
+    startpos_ticks: Optional[int] = None
     sampleoffset: int = 0
     length: int = 0
     wave: Wav = field(default_factory=Wav)
@@ -125,6 +131,7 @@ def _copy_region(region: Region) -> Region:
         name=region.name,
         index=region.index,
         startpos=region.startpos,
+        startpos_ticks=region.startpos_ticks,
         sampleoffset=region.sampleoffset,
         length=region.length,
         wave=_copy_wav(region.wave),
@@ -769,13 +776,22 @@ class PTFFormat:
                             j = entry.offset + 4
                             rawindex = self._read4(j)
                             j += 5
-                            start = self._read4(j)
+                            # u64 with the timebase in the top byte. Reading only 4 bytes
+                            # kept the LOW half of a tick-locked value, which reports a
+                            # musical clip at ~2^32 samples (~24 h at 48 kHz).
+                            raw_pos = self._read8(j)
                             track = self.find_track(count)
                             region = self.find_region(rawindex)
                             if track is None or region is None:
                                 continue
                             track.reg = region
-                            track.reg.startpos = self._scale(start)
+                            if raw_pos >> 56 == TICK_LOCKED:
+                                track.reg.startpos = 0
+                                track.reg.startpos_ticks = (
+                                    raw_pos - (TICK_LOCKED << 56) - ZERO_TICKS)
+                            else:
+                                track.reg.startpos = self._scale(raw_pos)
+                                track.reg.startpos_ticks = None
                             if track.reg.index != 65535:
                                 self._tracks.append(track)
                     found = True
