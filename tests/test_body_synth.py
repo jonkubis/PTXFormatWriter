@@ -5657,3 +5657,51 @@ class PathRewriteFidelityTests(unittest.TestCase):
                 return
         self.assertGreater(ok, 0, "no PT-authored control session carried a single source path")
 
+
+
+class TrackVolumeTests(unittest.TestCase):
+    """The track fader: a signed int32 in TENTHS of a decibel at +10 of each track's first
+    0x1029. PT-CONFIRMED from a control pair — one session saved at unity and at -10.0 dB,
+    where those four bytes on each of the four tracks were the only thing that moved."""
+
+    def session(self):
+        return BS.synthesize([1, 2, 2, 2])
+
+    def test_a_fresh_session_is_at_unity(self):
+        self.assertEqual(BS.track_volumes(self.session()), [0.0, 0.0, 0.0, 0.0])
+
+    def test_setting_a_fader_is_size_neutral_and_reads_back(self):
+        d = self.session()
+        for db in (-10.0, -3.5, 0.0, -144.0, 12.0):
+            out = BS.set_track_volumes(d, db)
+            self.assertEqual(len(out), len(d), "%s dB changed the session size" % db)
+            self.assertEqual(BS.track_volumes(out), [db] * 4)
+
+    def test_only_the_fader_bytes_move(self):
+        d = self.session()
+        out = BS.set_track_volumes(d, -10.0)
+        self.assertEqual(sum(1 for a, b in zip(d, out) if a != b), 16)   # 4 tracks x int32
+
+    def test_writing_unity_onto_a_fresh_session_changes_nothing(self):
+        d = self.session()
+        self.assertEqual(BS.set_track_volumes(d, 0.0), d)
+
+    def test_a_fader_per_track_is_accepted(self):
+        d = self.session()
+        out = BS.set_track_volumes(d, [-10.0, -6.0, 0.0, -3.0])
+        self.assertEqual(BS.track_volumes(out), [-10.0, -6.0, 0.0, -3.0])
+
+    def test_the_encoding_is_tenths_of_a_decibel(self):
+        # what Pro Tools itself writes for -10.0 dB
+        out = BS.set_track_volumes(self.session(), -10.0)
+        z = BS._volume_records(out)[0]
+        self.assertEqual(out[z + 10:z + 14], b"\x9c\xff\xff\xff")
+
+    def test_a_fader_outside_pro_tools_range_is_refused(self):
+        d = self.session()
+        with self.assertRaises(ValueError):
+            BS.set_track_volumes(d, -200.0)
+        with self.assertRaises(ValueError):
+            BS.set_track_volumes(d, 24.0)
+        with self.assertRaises(ValueError):
+            BS.set_track_volumes(d, [-10.0, -10.0])       # wrong count

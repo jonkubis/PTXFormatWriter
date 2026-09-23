@@ -3449,6 +3449,21 @@ Measured parentage makes the shape unambiguous:
 - **`0x260D`** — parent `0x261B` (5,155) or `0x2621` (6), always holding one `0x1029`. Spans
   ~620–653, 290 distinct payloads: real per-track data.
 - **`0x1029`** — span 288 (`block_type` 13) or 164 (7); 446 distinct payloads.
+  **The track's FADER is the signed `int32` at +10 of the FIRST `0x1029` under each `0x261B`,
+  in TENTHS OF A DECIBEL** — `0` is unity, `-100` is -10.0 dB, and Pro Tools' floor reads
+  `-1440` (-144.0 dB). PT-CONFIRMED 2026-09-23 from a control pair: one session saved at unity
+  and at -10.0 dB, where these four bytes on each of the four tracks were the ONLY thing that
+  moved in the whole `0x1029` family (32 differing bytes, 4 of 44 blocks).
+
+  The FIRST one matters. A session Pro Tools has saved carries ELEVEN `0x1029` per track — the
+  fader followed by the sends, which sit at `-1440` when unused — so writing all of them sets
+  the sends too. A session written from scratch has only the one.
+
+  Pro Tools populates ~30 neighbouring fields in that record on save (a pan-like group of `100`s,
+  and several 16.16 fixed-point values) that a freshly written session leaves at zero, and it
+  raises the record's `block_type` from 13 to 14. Neither is required: sessions written with
+  zeros throughout and `block_type` 13 open at unity and take a patched fader correctly.
+  See `body_synth.set_track_volumes`.
 - **`0x260C`** — 2 per `0x260D` on average (10,322 vs 5,161), spans 62/23/68, only 28 distinct
   payloads: near-constant, so mostly fixture with a few variants.
 - **`0x260E`** — split between `0x260D` (routing) and `0x2613` (the plugin cluster), 654 distinct

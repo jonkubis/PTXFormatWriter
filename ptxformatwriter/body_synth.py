@@ -9380,6 +9380,62 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     return _set_index_offset(bytes(out))
 
 
+def track_volumes(data: bytes) -> "list[float]":
+    """Each audio track's fader, in dB, in track order. See `set_track_volumes`."""
+    import struct
+    out = []
+    for z in _volume_records(data):
+        out.append(struct.unpack_from("<i", data, z + 10)[0] / 10.0)
+    return out
+
+
+def _volume_records(data: bytes) -> "list[int]":
+    """The zmark of the volume record of each audio track, in track order.
+
+    Per-track routing lives under `0x261B` (one per track) as `0x260D` -> `0x1029`. A session
+    Pro Tools has saved carries ELEVEN `0x1029` under each track — the fader followed by the
+    sends, which sit at -144.0 dB when unused — so the fader is the FIRST one, not all of them.
+    A session this library writes has only the one.
+    """
+    bs = sorted(_size_driven_blocks(data))
+    out = []
+    for z, e, c in bs:
+        if c != 0x261B:
+            continue
+        kids = [zz for zz, _ee, cc in bs if cc == 0x1029 and z <= zz < e]
+        if kids:
+            out.append(kids[0])
+    return out
+
+
+def set_track_volumes(data: bytes, db) -> bytes:
+    """Set every audio track's fader to `db` (a number, or one per track). Size-neutral.
+
+    PT-CONFIRMED 2026-09-23 from a control pair — one session saved twice, unity and -10.0 dB,
+    every other field untouched: the fader is a SIGNED int32 in TENTHS OF A DECIBEL at offset
+    +10 of the track's first `0x1029` (`0` = unity, `-100` = -10.0 dB, and the unused sends in
+    the same family read `-1440` = -144.0 dB, Pro Tools' floor). It was the only field in the
+    pair that changed the same way on all four tracks.
+
+    Pro Tools also populates ~30 neighbouring fields in that record on save (pan, and several
+    16.16 fixed-point values) which a freshly written session leaves at zero. Those zeros are
+    accepted as defaults — sessions this library writes open at unity today — so only the fader
+    is written here, leaving the rest exactly as they were.
+    """
+    import struct
+    zs = _volume_records(data)
+    vals = [db] * len(zs) if isinstance(db, (int, float)) else list(db)
+    if len(vals) != len(zs):
+        raise ValueError(f"{len(vals)} volumes for {len(zs)} tracks")
+    out = bytearray(data)
+    for z, v in zip(zs, vals):
+        tenths = int(round(float(v) * 10))
+        if not -1440 <= tenths <= 120:
+            raise ValueError(f"fader {v} dB is outside Pro Tools' range (-144.0 .. +12.0)")
+        struct.pack_into("<i", out, z + 10, tenths)
+    return bytes(out)
+
+
 def set_track_names(data: bytes, names) -> bytes:
     """Rename the first `len(names)` tracks (in track order) via `rename_track`. `names`
     is a list (or per-track dict {index: name}); `None`/missing entries are left as-is.
