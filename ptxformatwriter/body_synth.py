@@ -9380,59 +9380,75 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     return _set_index_offset(bytes(out))
 
 
-def track_volumes(data: bytes) -> "list[float]":
-    """Each audio track's fader, in dB, in track order. See `set_track_volumes`."""
-    import struct
-    out = []
-    for z in _volume_records(data):
-        out.append(struct.unpack_from("<i", data, z + 10)[0] / 10.0)
-    return out
+#: A track's volume lives in THREE places, and Pro Tools needs all three to agree:
+#:   * the fader, a signed int32 in tenths of a dB, in the track's first `0x1029` — stored TWICE,
+#:     at +10 and +96;
+#:   * the volume AUTOMATION value, a signed int16 in the same units, at +35 of the track's first
+#:     `0x260a`.
+#: Writing only the fader gives a session that validates, reads back correctly and opens — and
+#: shows the fader for a moment before the automation lane snaps it back to unity. That is only
+#: visible by opening the session; nothing in the bytes says so.
+VOLUME_FADER_OFFSETS = (10, 96)
+VOLUME_AUTOMATION_OFFSET = 35
 
 
-def _volume_records(data: bytes) -> "list[int]":
-    """The zmark of the volume record of each audio track, in track order.
+def _volume_records(data: bytes) -> "list[tuple[int, int]]":
+    """`(fader_zmark, automation_zmark)` for each audio track, in track order.
 
-    Per-track routing lives under `0x261B` (one per track) as `0x260D` -> `0x1029`. A session
-    Pro Tools has saved carries ELEVEN `0x1029` under each track — the fader followed by the
-    sends, which sit at -144.0 dB when unused — so the fader is the FIRST one, not all of them.
-    A session this library writes has only the one.
+    Per-track routing lives under `0x261B` (one per track). The fader is in its first `0x1029`
+    — a session Pro Tools has saved carries ELEVEN of those per track, the fader followed by the
+    sends, which read -144.0 dB when unused, so it is the FIRST and not all of them — and the
+    automation value is in its first `0x260A`.
     """
     bs = sorted(_size_driven_blocks(data))
     out = []
     for z, e, c in bs:
         if c != 0x261B:
             continue
-        kids = [zz for zz, _ee, cc in bs if cc == 0x1029 and z <= zz < e]
-        if kids:
-            out.append(kids[0])
+        fader = [zz for zz, _ee, cc in bs if cc == 0x1029 and z <= zz < e]
+        auto = [zz for zz, _ee, cc in bs if cc == 0x260A and z <= zz < e]
+        if fader and auto:
+            out.append((fader[0], auto[0]))
     return out
 
 
+def track_volumes(data: bytes) -> "list[float]":
+    """Each audio track's volume, in dB, in track order. See `set_track_volumes`."""
+    import struct
+    return [struct.unpack_from("<h", data, a + VOLUME_AUTOMATION_OFFSET)[0] / 10.0
+            for _f, a in _volume_records(data)]
+
+
 def set_track_volumes(data: bytes, db) -> bytes:
-    """Set every audio track's fader to `db` (a number, or one per track). Size-neutral.
+    """Set every audio track's volume to `db` (a number, or one per track). Size-neutral.
 
-    PT-CONFIRMED 2026-09-23 from a control pair — one session saved twice, unity and -10.0 dB,
-    every other field untouched: the fader is a SIGNED int32 in TENTHS OF A DECIBEL at offset
-    +10 of the track's first `0x1029` (`0` = unity, `-100` = -10.0 dB, and the unused sends in
-    the same family read `-1440` = -144.0 dB, Pro Tools' floor). It was the only field in the
-    pair that changed the same way on all four tracks.
+    PT-CONFIRMED 2026-09-23 against Pro Tools itself, after two failed attempts that each
+    validated and read back correctly: the fader is a signed int32 in TENTHS OF A DECIBEL, stored
+    twice in the track's first `0x1029` (+10 and +96), and the volume AUTOMATION value is a signed
+    int16 in the same units at +35 of the track's first `0x260A`. `0` is unity; `-100` is -10.0 dB;
+    the unused sends in the same family read `-1440`, Pro Tools' floor.
 
-    Pro Tools also populates ~30 neighbouring fields in that record on save (pan, and several
-    16.16 fixed-point values) which a freshly written session leaves at zero. Those zeros are
-    accepted as defaults — sessions this library writes open at unity today — so only the fader
-    is written here, leaving the rest exactly as they were.
+    All three must be written. With the fader alone the track opens at unity. With both fader
+    copies but not the automation, the fader shows the value for a moment and the automation lane
+    then resets it — which is what a default-0.0 volume lane does to a fader that disagrees with it.
+
+    Pro Tools also populates ~30 neighbouring fields in the `0x1029` on save, and raises its
+    `block_type` from 13 to 14. Neither is needed: a session written with zeros throughout and
+    type 13 takes these values and holds them.
     """
     import struct
-    zs = _volume_records(data)
-    vals = [db] * len(zs) if isinstance(db, (int, float)) else list(db)
-    if len(vals) != len(zs):
-        raise ValueError(f"{len(vals)} volumes for {len(zs)} tracks")
+    recs = _volume_records(data)
+    vals = [db] * len(recs) if isinstance(db, (int, float)) else list(db)
+    if len(vals) != len(recs):
+        raise ValueError(f"{len(vals)} volumes for {len(recs)} tracks")
     out = bytearray(data)
-    for z, v in zip(zs, vals):
+    for (fader, auto), v in zip(recs, vals):
         tenths = int(round(float(v) * 10))
         if not -1440 <= tenths <= 120:
-            raise ValueError(f"fader {v} dB is outside Pro Tools' range (-144.0 .. +12.0)")
-        struct.pack_into("<i", out, z + 10, tenths)
+            raise ValueError(f"volume {v} dB is outside Pro Tools' range (-144.0 .. +12.0)")
+        for off in VOLUME_FADER_OFFSETS:
+            struct.pack_into("<i", out, fader + off, tenths)
+        struct.pack_into("<h", out, auto + VOLUME_AUTOMATION_OFFSET, tenths)
     return bytes(out)
 
 

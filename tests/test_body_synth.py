@@ -5677,10 +5677,11 @@ class TrackVolumeTests(unittest.TestCase):
             self.assertEqual(len(out), len(d), "%s dB changed the session size" % db)
             self.assertEqual(BS.track_volumes(out), [db] * 4)
 
-    def test_only_the_fader_bytes_move(self):
+    def test_only_the_volume_bytes_move(self):
         d = self.session()
         out = BS.set_track_volumes(d, -10.0)
-        self.assertEqual(sum(1 for a, b in zip(d, out) if a != b), 16)   # 4 tracks x int32
+        # 4 tracks x (two int32 faders + one int16 automation)
+        self.assertEqual(sum(1 for a, b in zip(d, out) if a != b), 4 * (4 + 4 + 2))
 
     def test_writing_unity_onto_a_fresh_session_changes_nothing(self):
         d = self.session()
@@ -5691,11 +5692,21 @@ class TrackVolumeTests(unittest.TestCase):
         out = BS.set_track_volumes(d, [-10.0, -6.0, 0.0, -3.0])
         self.assertEqual(BS.track_volumes(out), [-10.0, -6.0, 0.0, -3.0])
 
-    def test_the_encoding_is_tenths_of_a_decibel(self):
-        # what Pro Tools itself writes for -10.0 dB
+    def test_the_encoding_is_tenths_of_a_decibel_in_all_three_places(self):
+        """What Pro Tools itself writes for -10.0 dB. All three, because two attempts that set
+        fewer both validated, read back correctly, and were wrong when opened."""
         out = BS.set_track_volumes(self.session(), -10.0)
-        z = BS._volume_records(out)[0]
-        self.assertEqual(out[z + 10:z + 14], b"\x9c\xff\xff\xff")
+        fader, auto = BS._volume_records(out)[0]
+        self.assertEqual(out[fader + 10:fader + 14], b"\x9c\xff\xff\xff")   # fader
+        self.assertEqual(out[fader + 96:fader + 100], b"\x9c\xff\xff\xff")  # its second copy
+        self.assertEqual(out[auto + 35:auto + 37], b"\x9c\xff")              # the automation
+
+    def test_every_track_gets_all_three(self):
+        out = BS.set_track_volumes(self.session(), -10.0)
+        for fader, auto in BS._volume_records(out):
+            self.assertEqual(out[fader + 10:fader + 14], out[fader + 96:fader + 100])
+            self.assertEqual(int.from_bytes(out[auto + 35:auto + 37], "little", signed=True),
+                             int.from_bytes(out[fader + 10:fader + 14], "little", signed=True))
 
     def test_a_fader_outside_pro_tools_range_is_refused(self):
         d = self.session()
