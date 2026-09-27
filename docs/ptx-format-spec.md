@@ -587,6 +587,9 @@ Within a 321-byte stereo descriptor (offsets relative to the descriptor block st
 | Offset | Field |
 |---|---|
 | `+9` | wav ordinal (1-based) |
+| inside the `0x1001` child, `+9` | sample rate (`u32`) |
+| inside the `0x1001` child, `+13` | **channel count** (`u8`) — descriptor `+26` |
+| inside the `0x1001` child, `+14` | **bit depth** (`u8`) — descriptor `+27` |
 | inside the `0x1001` child, `+15` | sample length (`u32`) |
 | `+44` | UMID material (8 bytes, `2a <hash4> ef <b> 80`) — the `0x1001` copy, keeps its `2a` |
 | `+100`, `+172` | source-WAV mtime as Windows FILETIME (`u64`) |
@@ -597,6 +600,14 @@ Within a 321-byte stereo descriptor (offsets relative to the descriptor block st
 
 The UMID is what Pro Tools matches the on-disk WAV against; the mtime/flag fields are what
 it keys waveform-cache **freshness** on (§13).
+
+**The channel count and bit depth must describe the file on disk (PT-confirmed).** A descriptor
+that declares two channels for a mono WAV cannot be matched to it, and Pro Tools asks to relink
+that track on every open — even though the UMID and length agree. Declaring every file stereo is
+invisible until a session carries a mono file. Measured on a hand-authored split, every
+descriptor's rate, channels and depth equal its WAV's own header, and depth varies per file
+within one session (32-bit float bounces beside 24-bit renders): these are per-file facts, not
+session settings. See `body_synth.wav_format`.
 
 ### The filename list (`0x103a`) — **(PT-confirmed)**
 
@@ -641,8 +652,25 @@ The `0x1054` map contains, per lane (one per channel; a stereo track has two lan
 
 | Payload offset | Field |
 |---|---|
-| `+2` | **channel / region index** = `2 * region_index + channel` (single-clip: 0 = `.L`, 1 = `.R`; multi-clip: a global lane/region selector) |
+| `+0` | **clip MUTE**: `0` playing, `1` muted (PT-confirmed; see below) |
+| `+2` | **region index** — the 0-based position, in the region list, of the region this lane plays |
 | `+7 .. +15` | **timeline position**, an 8-byte LE count of **file samples** (not ticks) |
+
+**One region per clip CHANNEL.** A mono clip has exactly ONE region, carrying the clip's plain
+name; a stereo clip has two, suffixed `.L` and `.R`. The region list follows its own order, which
+is NOT clip order, so `+2` cannot be derived from a clip's position: in a hand-authored split the
+list reads `CLICK - COUNT`, `REF ACA.L/.R`, `REF INST.L/.R`, `REF.L/.R`, and the REF track's two
+lanes point at regions 5 and 6. The formula `2 * region_index + channel` holds only for a writer
+that lists regions clip by clip with every clip stereo — a mono clip anywhere breaks it, and a
+writer that keeps assuming two regions and two lanes per clip puts every later clip on the WRONG
+TRACK in a session that still opens and validates. Lanes, likewise, are one per track CHANNEL.
+
+**Clip mute (PT-confirmed).** Established from a control pair — one session saved twice,
+identical but for four stereo clips muted: payload `+0` was the only per-clip field that moved,
+`0 -> 1` on all eight placements (4 clips × 2 lanes) and `0` everywhere else. A current show
+session of 8,587 placements carries only `0` and `1` there (815 set, on clips an editor has
+muted — old click prints). The corpus survey below found this field "not a constant"; that is
+why.
 
 Lanes are emitted in lane-major order; a lane carrying K clips has K `0x1050` placements
 and the 2-byte lane trailer appears **once** at the lane's end (not per placement —
@@ -4139,7 +4167,7 @@ sessions, occasionally much larger.
   - child 0x1054 payload `+0` u32 = ENTRY COUNT; VERIFIED == number of 0x1052 sub-blocks in every session (0,2,4,15,362). 0 ⇒ empty. The 0x2428 block itself has no scalar fields of its own; its payload IS the 0x1054 child.
   - each 0x1052 payload `+0` u32 = 1 in every record (a fixed sub-count/version marker), then M × 0x1050 sub-blocks.
   - each 0x1050 wraps exactly one 0x104f leaf and carries no scalar fields of its own beyond that child.
-  - 0x104f leaf payload (offsets from z+9; 32 B small / 35 B large variant): `+0` u16 usually 0 (0 in 2761/2879, 1 in 118 — NOT a constant); `+2` u32 object index/id (822 distinct, range 1..4739); `+6` 8 bytes object HANDLE/ADDRESS, not a unique GUID (only 456 distinct across 2879 records, heavily reused; no 2A-00-00-00 GUID tag precedes it); `+14` u16 small enum, 6 values {0x100,0x140,0x200,0x240,0x300,0x340}; `+16` u16 mostly 0xfffe (2494/2879) but 0x0001 in 381 and rarely 0x0003/0x0005/0x0007 — NOT constant; `+18` u32 = 0 (0 in 2876, 1 in 3); `+22` 8 bytes = `0xFFFFFFFFFFFFFFFF` null-link sentinel, CONSTANT in all 2879; `+30` u16 = 0. SMALL variant ends at +32. LARGE (0x000a) variant has 3 EXTRA tail bytes at +32 that VARY (00-00-00 ×1578, 00-01-00 ×468, 00-02-00 ×48).
+  - 0x104f leaf payload (offsets from z+9; 32 B small / 35 B large variant): `+0` u16 = the clip MUTE flag (0 in 2761/2879, 1 in 118 — the 118 are muted clips; see §8); `+2` u32 object index/id (822 distinct, range 1..4739); `+6` 8 bytes object HANDLE/ADDRESS, not a unique GUID (only 456 distinct across 2879 records, heavily reused; no 2A-00-00-00 GUID tag precedes it); `+14` u16 small enum, 6 values {0x100,0x140,0x200,0x240,0x300,0x340}; `+16` u16 mostly 0xfffe (2494/2879) but 0x0001 in 381 and rarely 0x0003/0x0005/0x0007 — NOT constant; `+18` u32 = 0 (0 in 2876, 1 in 3); `+22` 8 bytes = `0xFFFFFFFFFFFFFFFF` null-link sentinel, CONSTANT in all 2879; `+30` u16 = 0. SMALL variant ends at +32. LARGE (0x000a) variant has 3 EXTRA tail bytes at +32 that VARY (00-00-00 ×1578, 00-01-00 ×468, 00-02-00 ×48).
 - **Notes:** Root container holding a length-counted list of N binary link/cross-reference records; no printable strings. Entry count scales with session edit/clip history (0..362 across corpus), 0 in lightly-edited sessions → a session-wide dependency/link table, not a per-track structure. The 0x1054/0x1052/0x1050/0x104f family is PT's generic nested list/record container. Only the +22 8-byte 0xFF sentinel is a true constant; many earlier 'constant' claims are only majority values. Per-record semantics (what each +2 index / +6 handle points at, what +14/+16 select) are NOT pinned; may be internal edit-history/undo or object-linking state.
 - **Confidence:** MEDIUM. Structure (container nesting, 1-per-session, count==#0x1052, empty=count-0, size scaling) is CONFIRMED byte-exactly across the corpus (≥3 projects, 19 files, 2879 leaf records). Semantics are inferential.
 
