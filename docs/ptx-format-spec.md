@@ -580,6 +580,17 @@ parallel). **It is stored twice:**
 Setting only the first gives correct region *names* but plays the first file on every
 track (the "all tracks play the same stem" failure). **A writer must set both.**
 
+**A reader must take the first** (corpus-measured, 2026-10). The trailer copy is not always
+filled: an older session leaves it 0. On `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126
+playlists) 344 of 346 regions carry 0 in the trailer, while the copy after `0x2628` names each
+region's own file — `BD in_63-10` → `BD in_63.wav`, where the trailer sends all 346 to the first
+file in the list, a click print. In a show master 37 of 7,142 regions carry a trailer value
+outside the file list; in four other sessions the copies agree on every region (5,208, 10,870,
+263 and 45). The copy after `0x2628` was in range on every region measured, so read it and fall
+back to the trailer only when it is out of range. Which copy Pro Tools itself reads when they
+disagree — the writer result above says the trailer, the older sessions say otherwise, so
+perhaps it depends on the session's format version — is not established.
+
 ### The descriptor (`0x1003`) — **(PT-confirmed)**
 
 Within a 321-byte stereo descriptor (offsets relative to the descriptor block start):
@@ -677,23 +688,89 @@ and the 2-byte lane trailer appears **once** at the lane's end (not per placemen
 emitting it per placement is an EOS/"Audio Playlists magic ID" bug). Moving a clip is a
 size-neutral edit of `payload[+7:+15]`; no reindex needed.
 
+### Which track a lane belongs to — its POSITION, not its name (corpus-measured, 2026-10)
+
+A session holds two `0x1054` lane lists (§5b). The tracks' clips are in the one that is NOT under
+`0x2428`: it holds every audio track header's lanes, one per channel, in the headers' order (the
+order `track_types` returns). On every session measured the headers' channels account for its
+lanes exactly — 1,403, 1,140, 1,029, 308, 154 and 4 lanes in six sessions — so lane *k* belongs to
+the header that owns position *k* (`lane_owners`).
+
+The name in a lane's head is not reliable:
+
+- Pro Tools does not rewrite it when an import renames a track. A show master with six imported
+  copies of its edit track — `EDIT IMPORTz` and `EDIT IMPORTz.1` … `.5` — has every one of their
+  lanes headed `EDIT IMPORTz`; read by name they merge into one twelve-channel track. 271, 200 and
+  327 lanes of three show masters carry a head that is not their track's name, mostly `X` on an
+  imported `X.1`.
+- A head can be empty (two of the four lanes of one session, whose tracks are `CLICK - PRINT` and
+  `COUNT`), and a name outside printable ASCII defeats a head scan (`00 PRINT_CLIX 105·5BPM_1`
+  reads as `Z`).
+
+**Playlists.** A track with alternate playlists has a header — and a lane set — for each playlist
+that has lanes, named as Pro Tools names it (`BD in.04`, `BD in.07`, … `BD in`): the 126-playlist
+session of §6 has 113 headers for its 36 tracks, and their 154 channels are its 154 lanes. So the
+owner by position is the playlist. `track_playlists` groups the names by track, and the group's
+first name is the selected playlist — the one the track displays (10 of 10 multi-playlist groups
+there open with it). Every take is an ordinary clip.
+
+### The `0x2428` placements are not clips (corpus-measured, 2026-10)
+
+The second `0x1054`, under `0x2428`, holds `0x1052 → 0x1050 → 0x104F` records in exactly the
+placement layout, and they are not the tracks' clips. Their `+2` falls inside the region list,
+but their position field sits at the bar-1 tick origin give or take a few hundred beats
+(1,000,000,000,000 − 3,840,000 … + 257,280,102 ticks in one master) whatever their timebase byte
+says — relative to something, not the timeline. Show masters carry 16 to 2,120 of them; read as
+clips, one put a clip some ten million bars into the session (its timebase byte said samples).
+What they place is not established. A reader enumerating placements takes the track lane list
+only: `clip_lanes`, `placement_lanes`, `clips`, `clip_positions` and `set_clip_position` skip
+this subtree, and `set_clip_position(lanes=None)` no longer writes a position into it.
+
 ---
 
 ## 9. Region geometry: the variable-width "three-point" — **(PT-confirmed)**
 
-A `0x2629` region's **length** (and start/offset) is **not** a fixed-width integer. It is
-an Ardour-style three-point encoding placed just after the region name:
+A `0x2629` region's **length** (and start/offset) is **not** a fixed-width integer. A 5-byte
+descriptor follows the region name; its bytes 1–4 declare **eight** field widths, two per byte,
+**low nibble first**, and the fields follow back to back from `j+5` in that order, each at its
+declared width — a zero width is an absent field:
 
 ```
 let j = 22 + namelen                 (region-relative; name is at +22)
-byte[j+1] high nibble = offsetbytes   (# bytes for the sampleoffset value)
-byte[j+2] high nibble = lengthbytes   (# bytes for the length value)
-byte[j+3] high nibble = startbytes    (# bytes for the start value)
-values are packed LE at j+5 in the order: offset, length, start
+slot    0       1       2       3       4       5       6       7
+nibble  j+1 lo  j+1 hi  j+2 lo  j+2 hi  j+3 lo  j+3 hi  j+4 lo  j+4 hi
+field   -       offset  sync    length  ?       start   ?       -
+values packed LE from j+5 in slot order
 ```
 
-So a clip ≤ 65535 samples uses `lengthbytes = 2`; longer clips need 3–4 bytes, and the
-nibble **must** widen accordingly. Writing a fixed 2-byte length silently truncates any
+- **offset** (slot 1) trims the head of the source file.
+- **sync** (slot 2) is an offset INTO the region that its placements' positions refer to: the
+  region starts `sync` samples before its placement. A show session's REF stems carry one (a
+  2-byte sync of 1,064 before a 3-byte length of 3,108,096), and renders built with it match the
+  editors' own bounces sample for sample.
+- **length** (slot 3) is the region's length in samples.
+- **start** (slot 5) is the earlier model's name for that slot. Slots 4 and 6 are present in most
+  regions of real sessions; whatever they mean, a reader skips them by their declared widths.
+  Slots 0 and 7 were empty in every region measured.
+
+The earlier model — offset, length, start, high nibbles only, packed in that order — reads every
+region this library writes, whose low nibbles are 0, but misreads real ones: a trimmed region's
+first field is its trim, a sync point's bytes come before the length, and slot 4 sits between
+length and start. `region_length` / `set_region_length` read and write slot 3 (until 2026-10-12
+they took the first field present, which on a trimmed region is the trim), and `region_geometry`
+returns offset, sync and length. Regions declaring each slot:
+
+| session | regions | 0 | 1 offset | 2 sync | 3 length | 4 | 5 start | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|---|
+| show master | 5,208 | 0 | 3,500 | 88 | 5,208 | 4,855 | 4,353 | 4,659 | 0 |
+| show master | 7,142 | 0 | 2,889 | 78 | 7,142 | 6,785 | 6,180 | 4,315 | 0 |
+| show master | 10,870 | 0 | 4,568 | 90 | 10,870 | 10,441 | 9,398 | 5,898 | 0 |
+| show master | 263 | 0 | 54 | 66 | 263 | 126 | 126 | 150 | 0 |
+| `SANTA CLAUS IS COMIN.bak.011` | 346 | 0 | 118 | 0 | 346 | 214 | 142 | 168 | 0 |
+| show session, 4 tracks | 45 | 0 | 2 | 22 | 45 | 2 | 0 | 11 | 0 |
+
+So a clip ≤ 65535 samples uses a 2-byte length (`j+2`'s high nibble = 2); longer clips need 3–4
+bytes, and the nibble **must** widen accordingly. Writing a fixed 2-byte length silently truncates any
 clip over ~1.5 s to its low 16 bits (the "region only 0.9 s long" bug). Other region
 fields, in the 6-char-name template layout: **channel** at `+78`, region **GUID** at `+97`,
 **name** (length-prefixed) at `+22`. The two `findex` copies are at `16 + size(0x2628)` and
@@ -3577,7 +3654,8 @@ rule is about. Measured shapes:
 | `0x2624` | `0x2604`/`0x2107 → · → 0x202B`/`0x2062` | 13…3,607 | tallies ALL per-track subtrees; also holds the display-order element list |
 
 - **Note the `0x1054` duplication:** 2 per session (one top-level, one under `0x2428`), which is
-  why a count-fixer must locate the right one rather than the first.
+  why a count-fixer must locate the right one rather than the first — and why a clip reader takes
+  its lanes from the one NOT under `0x2428` (§8).
 - **Confidence:** HIGH on framing/position/count-role (the role is independently confirmed by the
   end-of-stream work in §5); payload layouts beyond the count are documented per-type elsewhere.
 
@@ -4169,6 +4247,7 @@ sessions, occasionally much larger.
   - each 0x1050 wraps exactly one 0x104f leaf and carries no scalar fields of its own beyond that child.
   - 0x104f leaf payload (offsets from z+9; 32 B small / 35 B large variant): `+0` u16 = the clip MUTE flag (0 in 2761/2879, 1 in 118 — the 118 are muted clips; see §8); `+2` u32 object index/id (822 distinct, range 1..4739); `+6` 8 bytes object HANDLE/ADDRESS, not a unique GUID (only 456 distinct across 2879 records, heavily reused; no 2A-00-00-00 GUID tag precedes it); `+14` u16 small enum, 6 values {0x100,0x140,0x200,0x240,0x300,0x340}; `+16` u16 mostly 0xfffe (2494/2879) but 0x0001 in 381 and rarely 0x0003/0x0005/0x0007 — NOT constant; `+18` u32 = 0 (0 in 2876, 1 in 3); `+22` 8 bytes = `0xFFFFFFFFFFFFFFFF` null-link sentinel, CONSTANT in all 2879; `+30` u16 = 0. SMALL variant ends at +32. LARGE (0x000a) variant has 3 EXTRA tail bytes at +32 that VARY (00-00-00 ×1578, 00-01-00 ×468, 00-02-00 ×48).
 - **Notes:** Root container holding a length-counted list of N binary link/cross-reference records; no printable strings. Entry count scales with session edit/clip history (0..362 across corpus), 0 in lightly-edited sessions → a session-wide dependency/link table, not a per-track structure. The 0x1054/0x1052/0x1050/0x104f family is PT's generic nested list/record container. Only the +22 8-byte 0xFF sentinel is a true constant; many earlier 'constant' claims are only majority values. Per-record semantics (what each +2 index / +6 handle points at, what +14/+16 select) are NOT pinned; may be internal edit-history/undo or object-linking state.
+- **Read with §8's placement layout (2026-10, four show masters, 16 to 2,120 records each):** the `+2` u32 falls inside the session's region list on every record, and the 8 bytes at placement `+7` decode as a position whose timebase byte varies but whose value sits at the bar-1 tick origin give or take a few hundred beats — relative to something, not the timeline. So these are placements of something (what is open), and NOT the tracks' clips: §8's readers skip this subtree. Read as clips, one put a clip some ten million bars into its session.
 - **Confidence:** MEDIUM. Structure (container nesting, 1-per-session, count==#0x1052, empty=count-0, size scaling) is CONFIRMED byte-exactly across the corpus (≥3 projects, 19 files, 2879 leaf records). Semantics are inferential.
 
 ### 0x2508 — Network/host-identity record (name + IPv4)

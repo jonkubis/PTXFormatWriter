@@ -1901,11 +1901,16 @@ def build_audio_clips(data: bytes, tracks, clip_ref: "bytes | None" = None) -> b
 
 def clip_positions(data: bytes) -> "list[int]":
     """Return the timeline start (in FILE samples) of every 0x104f placement lane,
-    in body order. A single stereo clip has two (lane .L, lane .R) with equal values."""
+    in body order. A single stereo clip has two (lane .L, lane .R) with equal values.
+
+    The `0x104F` records under `0x2428` are not timeline placements and are not listed
+    (see `_cross_reference_spans`)."""
     import struct
     out = []
-    for z, _e, c in _size_driven_blocks(data):
-        if c == 0x104F and z >= 31:
+    bl = _size_driven_blocks(data)
+    xr = _cross_reference_spans(bl)
+    for z, _e, c in bl:
+        if c == 0x104F and z >= 31 and not _in_spans(z, xr):
             out.append(struct.unpack_from("<Q", data, z + 16)[0])
     return out
 
@@ -1925,7 +1930,8 @@ def set_clip_position(data: bytes, position_file_samples: int,
     nonzero position if it was built from a pos>0 template (the 0->nonzero transition
     adds a 0x2038 sub-block to 0x2624 / +19 bytes); use a `one clip bar 2`-style ref.
     With `lanes` None, ALL placements move (correct for a single-clip session); pass a
-    tuple of lane indices (body order) to move one clip's lane-pair. Returns unxored bytes."""
+    tuple of lane indices (body order, as `clip_positions` lists them) to move one clip's
+    lane-pair. Returns unxored bytes."""
     import struct
     out = bytearray(data)
     # SIZE-DRIVEN, not `flat_blocks`. The scan parser UNDERCOUNTS on real sessions -- measured on
@@ -1933,7 +1939,11 @@ def set_clip_position(data: bytes, position_file_samples: int,
     # `DWTS PT 2603 h.bak.006` -- and `lanes` indexes positionally into this very list. A placement
     # missing from the middle shifts every later index, so the caller silently moves THE WRONG
     # CLIP, with nothing in the result to show it. Same defect class as the 0x251A lane count.
-    zs = [z for z, _e, c in _size_driven_blocks(data) if c == 0x104F and z >= 31]
+    # The records under 0x2428 are not timeline placements: with `lanes` None this used to write
+    # the position into every one of them too (none exist in a template or a synthesized session).
+    bl = _size_driven_blocks(data)
+    xr = _cross_reference_spans(bl)
+    zs = [z for z, _e, c in bl if c == 0x104F and z >= 31 and not _in_spans(z, xr)]
     field = struct.pack("<Q", int(position_file_samples))
     sel = range(len(zs)) if lanes is None else lanes
     for i in sel:
@@ -4965,21 +4975,86 @@ def _lane_track_name(data: bytes, lane_zmark: int, lane_end: int) -> str:
     return ""
 
 
+def _cross_reference_spans(bl: "list[tuple[int, int, int]]") -> "list[tuple[int, int]]":
+    """`(zmark, end)` of the session's `0x2428` blocks.
+
+    `0x2428` holds a SECOND `0x1054 -> 0x1052 -> 0x1050 -> 0x104F` tree in the placement layout,
+    and it is not the tracks' clips. Its positions sit at the bar-1 tick origin give or take a few
+    hundred beats, whatever their timebase byte says -- relative to something, not the timeline.
+    Measured on four show masters (16 to 2,120 records each); read as clips, one of them put a clip
+    some ten million bars into the session. Every reader that enumerates placements across the
+    session skips this subtree (spec §8)."""
+    return [(z, e) for z, e, c in bl if c == 0x2428]
+
+
+def _in_spans(z: int, spans: "list[tuple[int, int]]") -> bool:
+    return any(a < z < b for a, b in spans)
+
+
+def _owners_by_position(lanes: "list[int]", tracks: "list[tuple[str, int]]"
+                        ) -> "list[tuple[int, str, int, int]] | None":
+    """Pair the track lane list's lanes with the audio track headers, in order: each header owns
+    `channels` consecutive lanes. `(lane_zmark, track_name, channel, channels)` per lane, or None
+    unless the headers' channels account for the lanes exactly."""
+    if not tracks or any(ch <= 0 for _n, ch in tracks) or sum(ch for _n, ch in tracks) != len(lanes):
+        return None
+    out: "list[tuple[int, str, int, int]]" = []
+    it = iter(lanes)
+    for name, ch in tracks:
+        for k in range(ch):
+            out.append((next(it), name, k, ch))
+    return out
+
+
+def lane_owners(data: bytes) -> "list[tuple[int, str, int, int]] | None":
+    """Which track each audio lane belongs to: `(lane_zmark, track_name, channel, channels)` for
+    every lane of the session's track lane list, in order -- or None when the audio track headers'
+    channels do not account for its lanes exactly.
+
+    The track lane list is the `0x1054` NOT under `0x2428`. It holds every audio header's lanes,
+    one per channel, in `track_types` order: on every session measured the channels match the lanes
+    exactly (1,403, 1,140, 1,029, 308, 154 and 4 lanes), so a lane belongs to the header at its
+    position. The NAME in a lane's head is not reliable. Pro Tools does not rewrite it when an
+    import renames a track -- `EDIT IMPORTz.1` to `.5` all keep lanes headed `EDIT IMPORTz`; 271,
+    200 and 327 lanes of three show masters carry a stale head -- and a name outside printable
+    ASCII defeats the head scan (`00 PRINT_CLIX 105·5BPM_1` reads as `Z`). A track with alternate
+    playlists has a header and a lane set for each playlist that has lanes (113 headers for 36
+    tracks), so the owner is the playlist, named as Pro Tools names it (`BD in.04`). Spec §8."""
+    return _lane_owners(data, _size_driven_blocks(data))
+
+
+def _lane_owners(data: bytes, bl: "list[tuple[int, int, int]]") -> "list[tuple[int, str, int, int]] | None":
+    xr = _cross_reference_spans(bl)
+    lists = [(z, e) for z, e, c in bl if c == 0x1054 and not _in_spans(z, xr)]
+    if len(lists) != 1:
+        return None
+    lz, le = lists[0]
+    lanes = sorted(z for z, _e, c in bl if c == 0x1052 and lz < z < le)
+    return _owners_by_position(lanes, [(t.name, t.channels) for t in track_types(data) if t.kind != "midi"])
+
+
 def clip_lanes(data: bytes) -> "list[tuple[int, str, int]]":
     """Enumerate every audio-playlist lane (0x1052) holding clips, as
     `(lane_zmark, track_name, n_clips)`. A clip is a 0x1050 placement nested in
-    the lane's byte range (lane -> 0x1050 placement -> 0x104f position). A track
-    can expose more than one lane with the same name (alternate playlists). Pass a
-    lane's zmark to `remove_clip`."""
+    the lane's byte range (lane -> 0x1050 placement -> 0x104f position). A stereo
+    track has two lanes; a track with alternate playlists has a lane set per playlist.
+    Pass a lane's zmark to `remove_clip`.
+
+    `track_name` is the lane's owner by position (`lane_owners`), the name Pro Tools shows; the
+    name in the lane's own head -- stale after an import renames a track -- is used only when the
+    headers do not account for the lanes. The `0x1052`s under `0x2428` are not clips and are
+    skipped."""
     bl = _size_driven_blocks(data)
+    xr = _cross_reference_spans(bl)
+    owners = {z: name for z, name, _ch, _n in (_lane_owners(data, bl) or [])}
     placements = sorted((z, e) for z, e, c in bl if c == 0x1050)
     out: "list[tuple[int, str, int]]" = []
     for z, e, c in bl:
-        if c != 0x1052:
+        if c != 0x1052 or _in_spans(z, xr):
             continue
         n = sum(1 for pz, _pe in placements if z < pz < e)
         if n:
-            out.append((z, _lane_track_name(data, z, e), n))
+            out.append((z, owners[z] if z in owners else _lane_track_name(data, z, e), n))
     return out
 
 
@@ -5011,9 +5086,14 @@ def placement_lanes(data: bytes, kinds=("audio", "midi", "video")) -> "list[tupl
 
     A zmark from here can be passed straight to `remove_clip`, which selects the chain from the
     holder's own content type. (Until 2026-07-27 that was not true and this docstring said so;
-    `remove_clip` was hardwired to the audio pair.)"""
+    `remove_clip` was hardwired to the audio pair.)
+
+    As in `clip_lanes`, an audio lane is named by its owner and the holders under `0x2428` are
+    skipped."""
     want = {k for k in kinds}
     bl = _size_driven_blocks(data)
+    xr = _cross_reference_spans(bl)
+    owners = {z: name for z, name, _ch, _n in (_lane_owners(data, bl) or [])} if "audio" in want else {}
     by_type: "dict[int, list[tuple[int, int]]]" = {}
     for z, e, c in bl:
         by_type.setdefault(c, []).append((z, e))
@@ -5023,9 +5103,11 @@ def placement_lanes(data: bytes, kinds=("audio", "midi", "video")) -> "list[tupl
             continue
         wrappers = sorted(by_type.get(wrapper_ct, ()))
         for z, e in sorted(by_type.get(holder_ct, ())):
+            if _in_spans(z, xr):
+                continue
             n = sum(1 for wz, _we in wrappers if z < wz < e)
             if n:
-                out.append((z, _lane_track_name(data, z, e), n, kind))
+                out.append((z, owners[z] if z in owners else _lane_track_name(data, z, e), n, kind))
     out.sort()
     return out
 
@@ -5122,23 +5204,63 @@ def remove_clip(data: bytes, lane_zmark: int, clip_index: int) -> bytes:
     return bytes(out)
 
 
-def region_length(data: bytes, region_index: int) -> "int | None":
-    """The region's length in samples: the FIRST present field of its `0x2628` variable section.
+# A region's variable section (spec §9): bytes 1..4 of the 5-byte descriptor after its name
+# declare EIGHT field widths, two per byte, LOW nibble first, and the fields follow back to back
+# in that order -- a zero width is an absent field. Slot 1 is the head trim (the offset into the
+# file), slot 2 the sync point (the offset INTO the region that its placements' positions refer
+# to), slot 3 the length.
+_SLOT_OFFSET, _SLOT_SYNC, _SLOT_LENGTH = 1, 2, 3
 
-    Proven against the source WAVs -- for every corpus region whose file is on disk, this field
-    equals `wav_clip_identity(wav)[0]` exactly (40/40). The field's width comes from the
-    descriptor nibbles (2 bytes in ~94% of records, sometimes 3 or 4), so it is read at the width
-    the descriptor declares, not a fixed one. Returns None if the region declares no field."""
+
+def _region_slots(data: bytes, desc_at: int) -> "list[tuple[int, int]]":
+    """`[(width, field_offset)]` for the eight slots of the descriptor at `desc_at`."""
+    out: "list[tuple[int, int]]" = []
+    q = desc_at + 5
+    for byte in data[desc_at + 1 : desc_at + 5]:
+        for w in (byte & 15, byte >> 4):
+            out.append((w, q))
+            q += w
+    return out
+
+
+def region_geometry(data: bytes, region_index: int) -> "dict | None":
+    """`{"offset", "sync", "length"}` (samples) for region `region_index`, an absent field reading
+    0; None when the region has no `0x2628` record. `offset` trims the head of the file; `sync` is
+    the offset INTO the region that its placements' positions refer to, so the region starts
+    `sync` samples before its placement. Spec §9."""
     z28 = _region_2628(data, region_index)
     if z28 is None:
         return None
     z, nl = z28
-    desc = data[z + 13 + nl : z + 13 + nl + 5]
-    widths = [desc[1] >> 4, desc[1] & 15, desc[2] >> 4, desc[2] & 15, desc[3] >> 4, desc[3] & 15]
-    w = next((x for x in widths if x), 0)
+    slots = _region_slots(data, z + 13 + nl)
+
+    def field(i: int) -> int:
+        w, at = slots[i]
+        return int.from_bytes(data[at : at + w], "little") if w else 0
+    return {"offset": field(_SLOT_OFFSET), "sync": field(_SLOT_SYNC), "length": field(_SLOT_LENGTH)}
+
+
+def region_length(data: bytes, region_index: int) -> "int | None":
+    """The region's length in samples: slot 3 of its `0x2628` variable section, whose width the
+    HIGH nibble of descriptor byte 2 declares (spec §9).
+
+    Proven against the source WAVs -- for every corpus region whose file is on disk, this field
+    equals `wav_clip_identity(wav)[0]` exactly (40/40). The field's width comes from the
+    descriptor nibbles, so it is read at the width the descriptor declares, not a fixed one.
+    Returns None if the region declares no length.
+
+    Until 2026-10-12 this read the FIRST field present, which is the length only when nothing
+    precedes it -- true of the 40 above and of every region this library writes, but not of a
+    trimmed region, which declares its head trim first (3,500 of 5,208 regions in one show master,
+    4,568 of 10,870 in another), nor of one with a sync point (a REF stem: sync 1,064, length
+    3,108,096 -- read the old way, the length came out of the sync's bytes)."""
+    z28 = _region_2628(data, region_index)
+    if z28 is None:
+        return None
+    z, nl = z28
+    w, at = _region_slots(data, z + 13 + nl)[_SLOT_LENGTH]
     if not w:
         return None
-    at = z + 13 + nl + 5
     return int.from_bytes(data[at : at + w], "little")
 
 
@@ -5162,8 +5284,10 @@ def _region_2628(data: bytes, region_index: int) -> "tuple[int, int] | None":
 
 
 def set_region_length(data: bytes, region_index: int, sample_count: int) -> bytes:
-    """Set region `region_index`'s length (samples) -- the first field of its `0x2628` variable
-    section. Size-neutral; raises rather than guessing when the value will not fit.
+    """Set region `region_index`'s length (samples) -- slot 3 of its `0x2628` variable section
+    (see `region_length`). Size-neutral; raises rather than guessing when the value will not fit.
+    Until 2026-10-12 this wrote the FIRST field present: on a trimmed region that is the head
+    trim, which it overwrote while leaving the length alone.
 
     This is the field `retarget_audio_file` deliberately leaves alone: retargeting a registration
     at a WAV of a DIFFERENT length leaves the region's geometry describing the old one. Call this
@@ -5171,9 +5295,10 @@ def set_region_length(data: bytes, region_index: int, sample_count: int) -> byte
 
     WIDTH. The field's byte width is declared by the descriptor nibbles. This used to say it is
     "2 bytes in ~94% of corpus records, so counts above 65535 do not fit", which is close to
-    inverted. Measured over 102,599 `0x2628` records in 342 sessions, using the very nibble logic
-    below: 3 bytes 90.8%, 2 bytes 6.4%, 4 bytes 2.1%, 5 bytes 0.5%, 1 byte 0.2%. The common case
-    therefore holds up to 16,777,215 samples, not 65,535.
+    inverted. Measured over 102,599 `0x2628` records in 342 sessions, using the nibble logic of the
+    time (the first field present, which on a trimmed region is the trim): 3 bytes 90.8%, 2 bytes
+    6.4%, 4 bytes 2.1%, 5 bytes 0.5%, 1 byte 0.2%. The common case therefore holds up to 16,777,215
+    samples, not 65,535.
 
     The same passage said this "raises instead of silently truncating" when the value does not
     fit. It does NOT raise -- it WIDENS: the branch below splices in the extra bytes, rewrites the
@@ -5185,33 +5310,29 @@ def set_region_length(data: bytes, region_index: int, sample_count: int) -> byte
     if z28 is None:
         raise ValueError(f"no 0x2628 record for region {region_index}")
     z, nl = z28
-    desc = data[z + 13 + nl : z + 13 + nl + 5]
-    widths = [desc[1] >> 4, desc[1] & 15, desc[2] >> 4, desc[2] & 15, desc[3] >> 4, desc[3] & 15]
-    w = next((x for x in widths if x), 0)
+    dz = z + 13 + nl                                # descriptor start
+    w, at = _region_slots(data, dz)[_SLOT_LENGTH]
     if not w:
+        desc = data[dz : dz + 5]
         raise ValueError(f"region {region_index} declares no length field (descriptor {desc.hex()})")
     if sample_count < 0:
         raise ValueError(f"sample_count must be non-negative, got {sample_count}")
     need = max(1, (sample_count.bit_length() + 7) // 8)
-    at = z + 13 + nl + 5
     if need <= w:
         out = bytearray(data)                       # fits: size-neutral in-place write
         out[at : at + w] = int(sample_count).to_bytes(w, "little")
         return bytes(out)
 
     # WIDEN: the value needs more bytes than the descriptor declares. Grow the field in place by
-    # splicing the extra bytes in and bumping the descriptor nibble that declares this slot. The
-    # slot is the first NON-ZERO width, and zero-width slots consume no bytes, so the field always
-    # starts at the variable section's origin. `_splice_in` handles every enclosing block size and
-    # every master-index offset (0x2628/0x2629/0x262A are not index targets, so no new entries).
+    # splicing the extra bytes in after its last byte and bumping the nibble that declares it --
+    # the HIGH nibble of descriptor byte 2. Any field before it (head trim, sync) keeps its bytes.
+    # `_splice_in` handles every enclosing block size and every master-index offset
+    # (0x2628/0x2629/0x262A are not index targets, so no new entries).
     if need > 15:
         raise ValueError(f"sample_count {sample_count} needs {need} bytes; a nibble caps a slot at 15")
-    slot = next(i for i, x in enumerate(widths) if x)
     out = bytearray(_splice_in(data, at + w, b"\x00" * (need - w)))
-    dz = z + 13 + nl                                # descriptor start (before `at`, so unmoved)
-    bi, hi = dz + 1 + slot // 2, (slot % 2 == 0)
-    cur = out[bi]
-    out[bi] = ((need << 4) | (cur & 0x0F)) if hi else ((cur & 0xF0) | need)
+    bi = dz + 1 + _SLOT_LENGTH // 2                 # descriptor byte 2 (before `at`, so unmoved)
+    out[bi] = (need << 4) | (out[bi] & 0x0F)
     out[at : at + need] = int(sample_count).to_bytes(need, "little")
     return bytes(out)
 
@@ -5729,7 +5850,8 @@ def session_info(data: bytes) -> dict:
 
 
 def clips(data: bytes) -> "list[dict]":
-    """Every placed AUDIO clip in the session, as dicts with: `track` (the lane's track name),
+    """Every placed AUDIO clip in the session, as dicts with: `track` (the track the lane belongs
+    to, by position -- see `clip_lanes`, which also keeps the `0x2428` records out),
     `clip_index` (rank within the lane, as `remove_clip`/`move_clip` take), `name` (the
     region/source name), `position` (the raw `u64` timeline position), and `lane_zmark`
     (to pass to the edit functions). Combines `clip_lanes`, the placement `0x104F` fields, and

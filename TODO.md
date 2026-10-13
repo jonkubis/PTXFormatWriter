@@ -3,6 +3,27 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## OPEN — what the show masters taught the readers (2026-10-12)
+
+Backported from the session splitter, which reads show masters with hundreds of renamed imported
+tracks, thousands of `0x2428` records and mostly trimmed regions (spec §6, §8, §9). The readers are
+fixed; these remain:
+
+* **The track editors find a track's lanes by NAME.** Removing, duplicating or renaming a track
+  collects the `0x1052` whose head holds the track's name. A lane's head is stale after an import
+  renames its track (`EDIT IMPORTz.1` … `.5` keep lanes headed `EDIT IMPORTz`; 200-327 such lanes
+  per show master), so on such a session an edit of `EDIT IMPORTz` would take five other tracks'
+  lanes with it and an edit of `EDIT IMPORTz.1` would find none. The fix is ownership by position
+  (`lane_owners`), but it changes what a writer touches, so it waits for a Pro Tools round trip.
+* **What the `0x2428` placements place.** Region-list `+2`, positions at the bar-1 tick origin give
+  or take a few hundred beats: relative to something — clip-group contents and edit history are
+  both candidates. Not needed to read clips; needed before anything writes one.
+* **Region descriptor slots 4 and 6** are present in most real regions and unexplained; slots 0
+  and 7 were never seen. Slot 5 keeps the name `start` from the earlier model, unverified.
+* **Which file-index copy Pro Tools reads** when the copy after `0x2628` and the trailer disagree:
+  a synthesized session with a stale trailer played the wrong file, yet older sessions with a 0
+  trailer play correctly. Perhaps it follows the session's format version.
+
 
 
 
