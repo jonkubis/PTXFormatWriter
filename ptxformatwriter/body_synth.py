@@ -1872,7 +1872,7 @@ def build_audio_clips(data: bytes, tracks, clip_ref: "bytes | None" = None) -> b
     # Lane i of the 0x1054 belongs to (track, channel): one lane per track CHANNEL, so a mono
     # track takes one lane and a stereo track two. Read the widths off the session rather than
     # assuming, or every clip after a mono track lands on the wrong track.
-    lane_map = [(t, c) for t, ti in enumerate(track_types(data)) for c in range(max(1, ti.channels))]
+    lane_map = [(t, c) for t, ti in enumerate(playlist_headers(data)) for c in range(max(1, ti.channels))]
 
     track_clips: "dict" = {}
     for t, w, pos, _n in clips:
@@ -4130,6 +4130,9 @@ def synthesize_mixed_midi(
     # spec like [1,0,2,0] emitted [1,2,4,3] -- the grown MIDI took 4 while the stereo kept 3. Pro
     # Tools never writes that: the value is the index of the track's FIRST PLAYLIST, so the column
     # is a running total and strictly increasing by construction. No-op when already correct.
+    # ...and each track's ownership list at ITS OWN playlist: the grow keyed it to the internal
+    # position too, so a grown MIDI or later audio track claimed an index past its registry's end.
+    out = _normalize_one_playlist_lists(out)
     return _normalize_one_playlist_ordinals(set_waveform_view(out))
 
 
@@ -4306,15 +4309,22 @@ def _index_offset_holes(data: bytes) -> "tuple[list[tuple[int, int]], set[int]]"
 
 
 def playlist_names(data: bytes) -> "list[str]":
-    """Every playlist in the session, in `0x210B` file order -- the order the per-track `0x2015`
-    ordinal indexes into.
+    """Every playlist in the session, by name: the audio registry (`0x1014`) then the MIDI registry
+    (`0x1057`), each in file order. See `session_playlists` for the records and the section comment
+    at `_PLAYLIST_LIST_LAYOUT` for how the registries and the per-track ownership lists work.
 
-    The playlists live in ONE flat `0x2107` container (126/126 on the reference session), NOT nested
-    per track, so a playlist's owner is established by POSITION, not containment. Each `0x210B`
-    holds its name as the first length-prefixed ASCII string in the block; the name is located by
-    scanning for that shape rather than at an offset, because `0x210B` spans vary (54-68 bytes on
-    the same session, with the length driven by the name).
+    Until 2026-10-15 this read the `0x2107 > 0x210B` list. That list is NOT the playlists: it is
+    Playlists-view lane state -- one row per track plus a `gutterN` row, with a track's alternates
+    listed only while that track is shown in Playlists view. On `SANTA CLAUS IS COMIN.bak.011` it
+    happened to hold 126 rows for 113 playlists; on `REMEMBER MAIN.bak.022` it holds 36 rows for 285.
     """
+    return [p.name for p in session_playlists(data)]
+
+
+def _view_lane_names(data: bytes) -> "list[str]":
+    """The `0x2107 > 0x210B` Playlists-view lane rows, by name, in file order (the list
+    `playlist_names` returned before 2026-10-15). Each `0x210B` holds its name as the first
+    length-prefixed ASCII string in the block."""
     out: "list[str]" = []
     for z, e, c in _size_driven_blocks(data):
         if c != 0x210B:
@@ -4333,41 +4343,17 @@ def playlist_names(data: bytes) -> "list[str]":
 
 
 def track_playlists(data: bytes) -> "list[list[str]]":
-    """The playlists owned by each track, in track order -- `[[name, ...], ...]`.
+    """The playlists owned by each audio/MIDI/instrument track, in `track_types` order --
+    `[[name, ...], ...]`, each group in the track's own list order (name order, as Pro Tools keeps
+    it) and including the active playlist. Empty when the ownership lists cannot all be
+    read. `track_playlist_sets` returns the same thing as records (active playlist, lanes, indices).
 
-    HOW IT IS DERIVED. Each track's `0x2015` carries a `u32` (at the `_ORD2015_ANCHOR` + 18) that is
-    the 1-BASED INDEX OF THAT TRACK'S FIRST PLAYLIST in the flat `0x210B` list, so track `i` owns
-    the half-open slice `[ord[i], ord[i+1])` and the last track owns the rest.
-
-    PROVEN BY NAME, not just by arithmetic. On `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126
-    playlists) the ordinals are `[1, 2, 12, 22, ...]`, so track 1 -- displayed as `BD in.04`, Pro
-    Tools' `trackname.NN` convention for "playlist NN is selected" -- claims indices 2..11, and those
-    ten `0x210B` entries read:
-
-        BD in.04, BD in.07, BD in.06, BD in.05, BD in.08, BD in.01, BD in, BD in.02, BD in.03,
-        gutter1
-
-    i.e. every playlist of `BD in` and nothing else. The arithmetic check agrees independently:
-    `sum(gaps) + 1 == 126 ==` the `0x210B` count exactly.
-
-    On a session where every track owns one playlist -- which is EVERY session in `control_files`
-    and `/Volumes/Samples` -- this degenerates to one name per track, which is why the field read as
-    a plain positional counter for so long.
+    Read from each track's ownership list (see `_PLAYLIST_LIST_LAYOUT`). The previous derivation --
+    slicing the `0x210B` list at the per-track `0x2015` ordinals -- matched on the one session it
+    was proven on because every multi-playlist track there was open in Playlists view; on
+    `REMEMBER MAIN.bak.022` it cannot see 250 of the 285 playlists.
     """
-    names = playlist_names(data)
-    if not names:
-        return []
-    ords: "list[int]" = []
-    for z, e, c in _size_driven_blocks(data):
-        if c != 0x2015:
-            continue
-        a = data.find(_ORD2015_ANCHOR, z, e)
-        if a >= 0 and a + 22 <= e:
-            ords.append(int.from_bytes(data[a + 18 : a + 22], "little"))
-    if not ords or ords[0] != 1 or any(b <= a for a, b in zip(ords, ords[1:])):
-        return []                       # not the convention -- say nothing rather than guess
-    bounds = ords + [len(names) + 1]
-    return [names[bounds[i] - 1 : bounds[i + 1] - 1] for i in range(len(ords))]
+    return [[p.name for p in t.playlists] for t in track_playlist_sets(data)]
 
 
 def session_self_name(data: bytes) -> "str | None":
@@ -5030,7 +5016,7 @@ def _lane_owners(data: bytes, bl: "list[tuple[int, int, int]]") -> "list[tuple[i
         return None
     lz, le = lists[0]
     lanes = sorted(z for z, _e, c in bl if c == 0x1052 and lz < z < le)
-    return _owners_by_position(lanes, [(t.name, t.channels) for t in track_types(data) if t.kind != "midi"])
+    return _owners_by_position(lanes, [(t.name, t.channels) for t in playlist_headers(data) if t.kind != "midi"])
 
 
 def clip_lanes(data: bytes) -> "list[tuple[int, str, int]]":
@@ -5410,6 +5396,248 @@ def retarget_audio_file(data: bytes, file_index: int, wav_path) -> bytes:
     for _off, _val in _retarget_field_writes(z, e, sample_count, umid_material, id2):
         out[_off : _off + len(_val)] = _val
     return bytes(out)
+
+
+def _splice_replace(data: bytes, a: int, b: int, blob: bytes) -> bytes:
+    """Replace the raw bytes `[a, b)` -- a field run inside ONE block, crossing no block boundary --
+    with `blob`, growing or shrinking every block that contains the run and sliding every master-index
+    offset past it. Same bookkeeping as `_splice_in`, for a run that can also shrink."""
+    delta = len(blob) - (b - a)
+    if delta == 0:
+        return data[:a] + blob + data[b:]
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    out = bytearray(data[:a] + blob + data[b:])
+    for z, e, _c in bl:
+        if z < a and b <= e:
+            out[z + 3 : z + 7] = (int.from_bytes(out[z + 3 : z + 7], "little") + delta).to_bytes(4, "little")
+    recs = _FI.parse_records(ref.data, {c for _z, _e, c in bl}, {z for z, _e, _c in bl})
+
+    def slide(abs_pos: int, val: int) -> None:
+        if val >= b:
+            out[abs_pos + delta : abs_pos + delta + 4] = (val + delta).to_bytes(4, "little")
+    for r in recs:
+        for c in r.child_refs:
+            slide(ref.start + r.start + c.rel + 2, c.offset)
+        for el in r.elements:
+            for i, o in enumerate(el.offsets):
+                slide(ref.start + r.start + el.rel + 5 + 4 * i, o)
+    first_offset = min(z for z, _e, _c in bl) + 7
+    out[first_offset : first_offset + 4] = (ref.start + delta).to_bytes(4, "little")
+    return bytes(out)
+
+
+def _ownership_lists(data: bytes, bl) -> "list[tuple[int, int, int, list[int], int, int]] | None":
+    """Every track container's raw ownership list in BLOCK order: `(zmark, content_type, active,
+    indices, start, end)` -- or None when one does not parse. `_track_playlist_sets` is the reader;
+    this is what the editors rewrite."""
+    audio, midi = _playlist_registries(data, bl)
+    anchors = _list_anchors(bl)
+    bl_end = {z: e for z, e, _c in bl}
+    out = []
+    for z0, e0, c0 in sorted(bl):
+        if c0 not in _PLAYLIST_LIST_LAYOUT or z0 < 0:
+            continue
+        got = _container_playlist_list(data, z0, e0, c0, anchors, bl_end,
+                                       len(audio if c0 == 0x261C else midi))
+        if got is None:
+            return None
+        out.append((z0, c0, got[0], got[1], got[2], got[3]))
+    return out
+
+
+def _encode_playlist_list(c0: int, active: int, indices: "list[int]") -> bytes:
+    width = _PLAYLIST_LIST_LAYOUT[c0][1]
+    return (active.to_bytes(4, "little") + len(indices).to_bytes(width, "little")
+            + b"".join(i.to_bytes(4, "little") for i in indices))
+
+
+def _playlist_identities(data: bytes, bl) -> "tuple[list, list]":
+    """A stable identity per registry entry, to follow playlists across an edit: an audio playlist by
+    its header GUID, a MIDI one by `(name, occurrence)` -- `0x1057` carries no GUID."""
+    audio, midi = _playlist_registries(data, bl)
+    seen: "dict[str, int]" = {}
+    mids = []
+    for p in midi:
+        seen[p.name] = seen.get(p.name, -1) + 1
+        mids.append((p.name, seen[p.name]))
+    return [p.guid for p in audio], mids
+
+
+def _rebind_playlists(before: bytes, after: bytes, *, copy_after: "int | None" = None,
+                      removed: "int | None" = None) -> bytes:
+    """Restore the playlist cross-references after `duplicate_track` / `remove_track` spliced a track
+    in or out of a session that is NOT synth-shaped (the synth path re-keys them positionally).
+
+    The splice inserts or deletes a playlist header, so every registry index after it moves -- but
+    the tracks' ownership lists still hold the old indices: duplicating track 2 of 4 left tracks 3
+    and 4 claiming the playlists of 2 and 3, the copy claiming its source's, and the last playlist
+    owned by nobody. This rewrites each list by playlist IDENTITY (`_playlist_identities`), gives
+    the copy exactly the playlist header(s) the splice added, and returns `after` unchanged when the
+    lists did not parse before the edit or the edit is not the one described.
+
+    `copy_after` is the source container's position among the track containers (block order) of
+    `before`, the copy sitting right after it in `after`; `removed` the removed container's position.
+    MIDI registry indices are also held by the `0x202E` group records (one member each), remapped
+    with the lists."""
+    bl0 = _size_driven_blocks(before)
+    bl1 = _size_driven_blocks(after)
+    lists0 = _ownership_lists(before, bl0)
+    if lists0 is None:
+        return after
+    ids0 = _playlist_identities(before, bl0)
+    ids1 = _playlist_identities(after, bl1)
+    new_index = [{ident: i for i, ident in enumerate(ids1[k])} for k in (0, 1)]
+    if any(len(new_index[k]) != len(ids1[k]) for k in (0, 1)):
+        return after                                   # duplicate identities: cannot follow them
+    kind_of = lambda c0: 0 if c0 == 0x261C else 1
+
+    # The containers of `after`, located structurally (their lists are stale, possibly unparseable).
+    conts1 = [(z, e, c) for z, e, c in sorted(bl1) if c in _PLAYLIST_LIST_LAYOUT and z >= 0]
+    n0, n1 = len(lists0), len(conts1)
+    if copy_after is not None:
+        if n1 != n0 + 1:
+            return after
+        src_of = {j: (j if j <= copy_after else j - 1) for j in range(n1) if j != copy_after + 1}
+    elif removed is not None:
+        if n1 != n0 - 1:
+            return after
+        src_of = {j: (j if j < removed else j + 1) for j in range(n1)}
+    else:
+        return after
+
+    added = [{i for i, ident in enumerate(ids1[k]) if ident not in set(ids0[k])} for k in (0, 1)]
+    anchors: "dict[int, list[int]]" = {}
+    for z, _e, c in bl1:
+        if c in (0x200B, 0x2611, 0x2010):
+            anchors.setdefault(c, []).append(z)
+
+    edits = []                                          # (start, end, new bytes) in `after`
+    for j, (z1, e1, c1) in enumerate(conts1):
+        anchor_t, width, trail = _PLAYLIST_LIST_LAYOUT[c1]
+        a = next((z for z in sorted(anchors.get(anchor_t, ())) if z1 < z < e1), None)
+        if a is None:
+            return after
+        k = kind_of(c1)
+        if j in src_of:
+            _z0, c0, act0, idx0, s0, t0 = lists0[src_of[j]]
+            if c0 != c1:
+                return after
+            try:
+                act = new_index[k][ids0[k][act0]]
+                idx = [new_index[k][ids0[k][i]] for i in idx0]
+            except KeyError:
+                return after                            # a survivor owned a playlist that is gone
+            old_len = t0 - s0
+        else:                                           # the copy: it owns what the splice added
+            idx = sorted(added[k], key=lambda i: ids1[k][i] if k else i)
+            if not idx:
+                return after
+            act = idx[0]
+            _z0, c0, _a, idx0, s0, t0 = lists0[copy_after]
+            old_len = t0 - s0
+        end = a - trail
+        start = end - old_len
+        blob = _encode_playlist_list(c1, act, idx)
+        if after[start:end] != blob:
+            edits.append((start, end, blob))
+
+    out = after
+    for start, end, blob in sorted(edits, reverse=True):   # back to front: earlier offsets hold
+        out = _splice_replace(out, start, end, blob)
+
+    out = _rebind_lanes(before, out, copy_after=copy_after, lists0=lists0)
+
+    # MIDI registry indices held by the 0x202E group records (one member each).
+    if ids0[1] != ids1[1]:
+        old_to_new = {i: new_index[1].get(ident) for i, ident in enumerate(ids0[1])}
+        if any(v is not None and v != i for i, v in old_to_new.items()):
+            ob = bytearray(out)
+            bl2 = _size_driven_blocks(out)
+            parent = next(((z, e) for z, e, c in bl2 if c == 0x202E), None)
+            if parent is not None:
+                for z, e, c in bl2:
+                    if c == 0x202C and parent[0] < z < parent[1]:
+                        n = int.from_bytes(ob[z + 17 : z + 21], "little")
+                        for m in range(n):
+                            p = z + 21 + 4 * m
+                            v = old_to_new.get(int.from_bytes(ob[p : p + 4], "little"))
+                            if v is not None:
+                                ob[p : p + 4] = v.to_bytes(4, "little")
+            out = bytes(ob)
+    return out
+
+
+def _rebind_lanes(before: bytes, after: bytes, *, copy_after: "int | None", lists0) -> bytes:
+    """Keep the track lane list the way Pro Tools writes it after a non-synth duplicate/remove:
+    each audio playlist's lanes CONSECUTIVE and in registry order, and every header's lane indices
+    the cumulative channel count (as in every PT-written session but one).
+
+    The duplicate splice inserts each copy lane right after its source lane -- `[srcL, copyL, srcR,
+    copyR]` for stereo -- and gave the copy header the next unused indices, so its header named
+    lanes at the END of the list while its lanes sat in the middle. This regroups the copy's lanes
+    after its source's (an equal-size block swap: the index's lane offsets are unchanged) and
+    rewrites the lane fields of every header. Runs only when `before` was cumulative and `after`'s
+    headers account for its lanes exactly; otherwise returns `after` unchanged."""
+    bl0 = _size_driven_blocks(before)
+    audio0, _m0 = _playlist_registries(before, bl0)
+    cum = 0
+    for p in audio0:
+        if p.lanes != tuple(range(cum, cum + p.channels)):
+            return after
+        cum += p.channels
+    out = after
+    if copy_after is not None:
+        _z0, c0, act0, _idx0, _s0, _t0 = lists0[copy_after]
+        if c0 == 0x261C:
+            src = audio0[act0]
+            bl1 = _size_driven_blocks(out)
+            try:
+                _h, lanes1, _a, _b = _playlist_runs(out, bl1)
+            except ValueError:
+                return after
+            p0, ch = src.lanes[0], src.channels
+            grp = lanes1[p0 : p0 + 2 * ch]
+            if ch > 1 and len(grp) == 2 * ch and len({e - z for z, e in grp}) == 1:
+                srcs = [grp[2 * t] for t in range(ch)]
+                cps = [grp[2 * t + 1] for t in range(ch)]
+                nm = lambda z, e: _lane_track_name(out, z, e)
+                if all(nm(*x) == src.name for x in srcs) and len({nm(*x) for x in cps}) == 1 \
+                        and nm(*cps[0]) != src.name:
+                    rs, re_ = grp[0][0], grp[-1][1]
+                    out = out[:rs] + b"".join(out[z:e] for z, e in srcs + cps) + out[re_:]
+    bl2 = _size_driven_blocks(out)
+    try:
+        heads2, lanes2, _a, _b = _playlist_runs(out, bl2)
+    except ValueError:
+        return after
+    audio2, _m2 = _playlist_registries(out, bl2)
+    if sum(p.channels for p in audio2) != len(lanes2):
+        return after
+    ob = bytearray(out)
+    cum = 0
+    for p, (z, e) in zip(audio2, heads2):
+        nb = _header_with(out[z:e], lanes=list(range(cum, cum + p.channels)))
+        ob[z:e] = nb                                     # same size: lane fields are fixed-width
+        cum += p.channels
+    return bytes(ob)
+
+
+def _playlist_container_position(data: bytes, track_name: str) -> "int | None":
+    """Position, among the track containers in block order, of the one track whose ACTIVE playlist is
+    called `track_name`; None when there is not exactly one or the lists do not parse."""
+    try:
+        bl = _size_driven_blocks(data)
+    except Exception:
+        return None
+    sets = _track_playlist_sets(data, bl)
+    if not sets:
+        return None
+    hits = [t.container for t in sets if t.name == track_name]
+    if len(hits) != 1:
+        return None
+    conts = sorted(z for z, _e, c in bl if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+    return conts.index(hits[0])
 
 
 def _splice_in(data: bytes, at: int, blob: bytes, *, container: "tuple[int, int] | None" = None) -> bytes:
@@ -6490,8 +6718,10 @@ def _gen_eid_base(kind: int, k: int) -> int:
 
 
 def _track_kinds(data: bytes) -> "list[int]":
-    """Per-track channel count (1=mono, 2=stereo) in display/slot order."""
-    return [t.channels for t in track_types(data)]
+    """Per-slot channel count (1=mono, 2=stereo) in display/slot order. A slot is a `0x1014` header
+    -- the positional re-keys index both `0x1014` and `0x261C` by it -- which is one per track on
+    every session those re-keys run on (synth-shaped: one playlist per track)."""
+    return [t.channels for t in playlist_headers(data)]
 
 
 def _norm_guids(b: bytes) -> bytes:
@@ -6658,7 +6888,7 @@ def _is_synth_shaped(data: bytes) -> bool:
     an O(blocks) scan for content a synth never emits (`_REAL_CONTENT_MARKERS`) -- otherwise every
     edit on a large real session would pay a full synth rebuild just to answer "no".
     """
-    tts = track_types(data)
+    tts = playlist_headers(data)          # a synth owns one playlist per track; alternates fail below
     kinds = [t.channels for t in tts]
     if not tts or any(k not in (1, 2) for k in kinds):
         return False
@@ -7721,9 +7951,14 @@ def _assert_name_table_complete(data: bytes, bl=None, where: str = "appears trun
             "them. Refused.")
 
 
-def remove_track(data: bytes, track_name: str) -> bytes:
+def remove_track(data: bytes, track_name: str, *, keep_alternates: bool = False) -> bytes:
     """Remove an AUDIO track (with all its clips) from an arbitrary session, leaving every
     other track/clip/plugin/automation intact.
+
+    An audio track's ALTERNATE playlists go with it, as Pro Tools did when it deleted a track with
+    ten (`REMEMBER MAIN WITH HALEY` bak.026 -> .027, the one such step in 2,918 backups); pass
+    `keep_alternates=True` to leave them in the session as playlists no track owns, a state Pro Tools
+    also writes and loads (29 of 342 real sessions carry some).
 
     Splices out the track's COMPLETE per-track block-set: its track-list entries
     (0x1014/0x251A), lane(s) (0x1052, with their placements) in the shared 0x1054, its 0x261C
@@ -7752,6 +7987,20 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         raise ValueError(
             "cannot remove the session's only track (a .ptx needs at least one track); "
             "create the replacement track first, or synthesize a new session")
+    if not keep_alternates:
+        _t = [t for t in track_playlist_sets(data) if t.name == track_name]
+        if len(_t) == 1 and len(_t[0].playlists) > 1:
+            if _t[0].kind == "audio":                   # by GUID: alternates can share a name
+                for _g in [p.guid for p in _t[0].playlists if p != _t[0].active]:
+                    data = _delete_playlist_key(_AudioPlaylistPlan(data), _g)
+            else:                                       # MIDI: by registry index, last first
+                for _i in sorted((p.index for p in _t[0].playlists if p != _t[0].active), reverse=True):
+                    try:
+                        data = _delete_playlist_key(_MidiPlaylistPlan(data), ("old", _i))
+                    except ValueError:
+                        # A `0x202E` group record refers to it; deleting those is not modelled, so
+                        # the alternate stays, unowned -- what this did for every track before.
+                        pass
     nb = track_name.encode()
     # AN AMBIGUOUS NAME REMOVED EVERY MATCH. The docstring said "Unique names." and nothing
     # enforced it: on a session carrying two tracks called `Audio 2`, this went from 11 tracks
@@ -8076,6 +8325,11 @@ def remove_track(data: bytes, track_name: str) -> bytes:
         # a track through this ordinal -- a session with two tracks on slot 4 crashed on close --
         # so the column must stay a running total with no holes.
         out = repair_playlist_ordinals_after_remove(data, out)
+        # ...and the playlist ownership lists: the removed header shifted every registry index
+        # after it, and the survivors' lists still held the old ones (see `_rebind_playlists`).
+        _pos = _playlist_container_position(data, track_name)
+        if _pos is not None:
+            out = _rebind_playlists(data, out, removed=_pos)
     # ...and drop the removed playlist's 0x2506 row from every marker, the exact inverse.
     out = _sync_marker_rows_for_playlist_delta(data, out)
     return out
@@ -8378,6 +8632,47 @@ def _selection_flag_offsets(data: bytes) -> "list[tuple[str, int]]":
     return sites
 
 
+def _normalize_one_playlist_lists(data: bytes) -> bytes:
+    """Point every single-playlist track's OWNERSHIP LIST at its own playlist: `[k][1][k]`, `k` the
+    track's ordinal among the containers of its kind (audio `0x261C`; MIDI `0x2620` + instrument
+    `0x2621`), which is its playlist's registry index in a session saved the way Pro Tools saves.
+
+    The MIDI unit template carries the list at fixed offsets and the mixed-MIDI grow keyed it to the
+    track's INTERNAL position, so `[1,0,2,0,1,2]` had a MIDI track claiming MIDI playlist 3 (of 2)
+    and audio tracks claiming audio playlists 4 and 5 (of 4) -- out of range, and the playlists those
+    tracks really own claimed by nobody. Acts only when every container of a kind holds a one-entry
+    list and the containers and the registry of that kind are equally many; otherwise untouched.
+    A no-op on every session that is already right."""
+    bl = _size_driven_blocks(data)
+    audio, midi = _playlist_registries(data, bl)
+    anchors: "dict[int, list[int]]" = {}
+    for z, _e, c in bl:
+        if c in (0x200B, 0x2611, 0x2010):
+            anchors.setdefault(c, []).append(z)
+    sites: "dict[str, list[tuple[int, int]]]" = {"audio": [], "midi": []}   # (act pos, entry pos)
+    for z0, e0, c0 in bl:
+        lay = _PLAYLIST_LIST_LAYOUT.get(c0)
+        if lay is None or z0 < 0:
+            continue
+        anchor_t, width, trail = lay
+        a = next((z for z in anchors.get(anchor_t, ()) if z0 < z < e0), None)
+        if a is None:
+            return data
+        entry = a - trail - 4
+        count = entry - width
+        if int.from_bytes(data[count : count + width], "little") != 1:
+            return data
+        sites["audio" if c0 == 0x261C else "midi"].append((count - 4, entry))
+    out = bytearray(data)
+    for kind, reg in (("audio", audio), ("midi", midi)):
+        if len(sites[kind]) != len(reg):
+            continue
+        for k, (act, entry) in enumerate(sites[kind]):
+            out[act : act + 4] = k.to_bytes(4, "little")
+            out[entry : entry + 4] = k.to_bytes(4, "little")
+    return bytes(out)
+
+
 def _normalize_one_playlist_ordinals(data: bytes) -> bytes:
     """Put the `0x2015` playlist ordinals in BLOCK order when every track owns one playlist.
 
@@ -8639,7 +8934,13 @@ def repair_playlist_ordinals_after_add(before: bytes, after: bytes,
     if copy_index is None or not (0 < copy_index <= len(counts)):
         return after
     src = copy_index - 1                       # a copy is inserted directly after its source
-    return _write_playlist_ordinals(after, counts[:copy_index] + [counts[src]] + counts[copy_index:])
+    # The copy owns as many view rows as the splice gave it -- ONE, its own playlist -- not its
+    # source's count: a track shown in Playlists view has a row per playlist, and inserting that
+    # count made every ordinal below the copy overshoot by the difference.
+    n_before = sum(1 for _z, _e, c in _size_driven_blocks(before) if c == 0x210B)
+    n_after = sum(1 for _z, _e, c in _size_driven_blocks(after) if c == 0x210B)
+    copy_count = n_after - n_before if n_after > n_before else counts[src]
+    return _write_playlist_ordinals(after, counts[:copy_index] + [copy_count] + counts[copy_index:])
 
 
 def repair_playlist_ordinals_after_remove(before: bytes, after: bytes,
@@ -8821,7 +9122,7 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # corrupting the master index into "bad element tag". Failed on all 28 corpus sessions with an
     # accented track name, while an ASCII-named track in the SAME session duplicated cleanly.
     if len(new_name.encode()) != len(source_track.encode()):
-        taken = {t.name for t in track_types(data)} | {source_track, new_name}
+        taken = {t.name for t in playlist_headers(data)} | {source_track, new_name}   # every playlist name
         placeholder = _unique_same_length_name(len(source_track.encode()), taken)
         return rename_track(duplicate_track(data, source_track, placeholder),
                             placeholder, new_name)
@@ -9075,6 +9376,25 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     units = sorted((z, zend[z]) for z in ident
                    if not any(zz < z and zend[zz] >= zend[z] for zz in ident if zz != z))
     inserts = [(e, transform(data[z:e]), z) for z, e in units]
+    # A track shown in Playlists view owns SEVERAL consecutive 0x210B rows (one per playlist it shows
+    # there), and its 0x2015 ordinal points at the first of them. The copy's single row has to follow
+    # the whole group: spliced after the source's FIRST row it split the group, the ordinal column
+    # stopped being a running total, and `duplicate -> remove` failed to round-trip on every such
+    # track (`DWTS PT 2603` b2..f, track `Horn 4 D`, which shows three rows).
+    _rows210b = sorted((z, e) for z, e, c in bl if c == 0x210B)
+    _firsts = {v - 1 for _p, v in _playlist_ordinal_sites(data)}
+    if _playlist_counts(data) is not None:
+        for _k, (_at, _blob, _zs) in enumerate(inserts):
+            if _zs is None or (_zs, _at) not in _rows210b:
+                continue
+            _i = _rows210b.index((_zs, _at))
+            if _i not in _firsts:
+                continue
+            _j = _i
+            while _j + 1 < len(_rows210b) and (_j + 1) not in _firsts:
+                _j += 1
+            if _j != _i:
+                inserts[_k] = (_rows210b[_j][1], _blob, _zs)
     inserts += [(b, transform(data[a:b]), None) for a, b in nt_ranges]
 
     # The copy is spliced in IMMEDIATELY AFTER the source entry, so the source's `next_kind` -- a
@@ -9346,6 +9666,12 @@ def duplicate_track(data: bytes, source_track: str, new_name: str) -> bytes:
     # cannot regress silently again -- `remove_track` applies the exact inverse.
     if not _do_renumber:
         out = repair_playlist_ordinals_after_add(data, out)
+        # ...and the playlist ownership lists. The copy's header went in right after its source's,
+        # moving every registry index after it, while the copy's list still named its SOURCE's
+        # playlist and the tracks below kept their old indices (see `_rebind_playlists`).
+        _pos = _playlist_container_position(data, source_track)
+        if _pos is not None:
+            out = _rebind_playlists(data, out, copy_after=_pos)
     # The copy is a new PLAYLIST, and every 0x2077 marker holds one 0x2506 row per playlist. Pro
     # Tools adds those rows when it adds a track; we added none, leaving the matrix short by
     # n(0x2077) on any session WITH markers. That never surfaced because every session confirmed
@@ -9415,7 +9741,8 @@ def track_name_occurrences(data: bytes, name: str | bytes) -> list[int]:
     return out
 
 
-def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> bytes:
+def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes, *,
+                 _only: "set[int] | None" = None) -> bytes:
     """Rename a track in a full unxored session. Replaces every length-prefixed
     occurrence of `old_name` with `new_name`, updates each occurrence's u32 length
     prefix, grows/shrinks every containing block's `block_size` (and its
@@ -9448,6 +9775,8 @@ def rename_track(data: bytes, old_name: str | bytes, new_name: str | bytes) -> b
     body = bytearray(data[:old_index_start])
     index = data[old_index_start:]
     occ = track_name_occurrences(bytes(body), old)
+    if _only is not None:                            # a targeted rename (see `_rename_track_entries`)
+        occ = [j for j in occ if j in _only]
     if not occ:
         raise ValueError(f"track name {old!r} not found (length-prefixed) in body")
     # block bounds from the ORIGINAL full session (body alone has no index for
@@ -9654,12 +9983,17 @@ def _hdr_name(data: bytes, b: Block) -> tuple[str, int]:
     return name, nlen
 
 
-def track_types(data: bytes) -> list[TrackInfo]:
-    """Enumerate audio/MIDI tracks with their type, in header-offset order.
+def playlist_headers(data: bytes) -> list[TrackInfo]:
+    """Every audio/MIDI PLAYLIST HEADER (`0x1014` / `0x1057`), in header-offset order -- one entry per
+    playlist, so a track with alternate playlists contributes one entry for each of them.
 
-    Mono vs stereo is read from the 0x1014 channel-count byte; MIDI is any
-    0x1057 header. This is the structural basis for mix-and-match composition
-    (you must know each track's type + channel footprint to place it)."""
+    This is what `track_types` returned until 2026-10-15, and it is still the right enumeration for
+    anything that walks the playlist registries: the audio lanes are allocated per playlist channel
+    (`channel_count`, `_lane_owners`), and the positional re-keys index `0x1014` by slot. On a
+    session where every track owns one playlist -- everything the synthesizers build -- it equals
+    `track_types` exactly. For "one entry per TRACK" use `track_types`.
+
+    Mono vs stereo is read from the 0x1014 channel-count byte; MIDI is any 0x1057 header."""
     # SIZE-DRIVEN. The scan parser misses an UNNAMED track header -- a `0x1057` whose u32 name
     # length is 0 -- so `track_types` under-reported by one on `Alabama.bak.019/020/022`
     # (101 of 102, 102 of 103). Fifth reader switched off the scan parser for the same class of
@@ -9695,10 +10029,929 @@ def track_types(data: bytes) -> list[TrackInfo]:
     return out
 
 
+# --- playlists: which playlists a track owns, and which one it plays -------------------------
+#
+# A track owns one or more PLAYLISTS and plays exactly one of them (the ACTIVE playlist, whose name
+# Pro Tools shows as the track name). Two structures carry this, and nothing else does:
+#
+#   * the REGISTRIES -- every playlist header, in one flat list per kind: audio `0x1014` (in the
+#     `0x1015` container) and MIDI `0x1057`. A playlist's position in its registry is its INDEX.
+#     An audio header names the lanes it owns (one `0x1052` per channel, in the track lane list).
+#   * each track's OWNERSHIP LIST, a raw field in its track container just before a fixed child:
+#
+#         audio       0x261C  [u32 active][u16 n][n x u32 index][ff ff]  then the 0x200B child
+#         MIDI        0x2620  [u32 active][u32 n][n x u32 index][u8]     then the 0x2611 child
+#         instrument  0x2621  [u32 active][u16 n][n x u32 index][u8]     then the 0x2010 child
+#
+#     The indices point into the registry of the track's kind (audio -> 0x1014, MIDI and instrument
+#     -> 0x1057). `active` is one of them. The list is kept in byte-wise NAME order (the active
+#     playlist included, wherever its name sorts) -- 10,944 of 10,948 lists on the real sessions;
+#     the 4 exceptions, all on two sessions, are left as Pro Tools wrote them.
+#
+# Measured on 342 real sessions (10,948 track containers): every list parses, exactly one layout
+# fits each container, no playlist is claimed by two tracks, and the lists account for every
+# playlist except true ORPHANS -- playlists no track owns, which Pro Tools keeps (29 sessions, up to
+# 22 of them, some holding clips). Things that are NOT the ownership record, each of which was
+# tried first: the `0x2107/0x210B` list (Playlists-view lane state -- it has a `gutterN` row and
+# lists alternates only for tracks shown in that view), the `0x2015` ordinal, playlist NAMES
+# (renames, typos and `.dup1` chains break any stem match), and the GUID maps at the end of a newer
+# `0x261C` (written only once a track has been opened in Playlists view; they omit playlists the
+# list above includes).
+#
+# Pro Tools SAVES the registries in a canonical order -- active playlists first, in track order,
+# then the inactive ones sorted by name -- and remaps every list to match, so switching the active
+# playlist moves the headers (and, for audio, their lanes). Sessions written by other versions do
+# not always follow it (`Christmas Time In Southern California` has its actives at 6, 8, 10, ...),
+# so readers take the active index from the list, never from a position.
+
+_PLAYLIST_LIST_LAYOUT = {
+    # track container: (anchor child type, count width, trailer length)
+    0x261C: (0x200B, 2, 2),
+    0x2620: (0x2611, 4, 1),
+    0x2621: (0x2010, 2, 1),
+}
+_PLAYLIST_TRACK_KIND = {0x261C: "audio", 0x2620: "midi", 0x2621: "instrument"}
+
+
+@dataclass(frozen=True)
+class Playlist:
+    index: int        # position in its registry -- the value the ownership lists hold
+    name: str
+    kind: str         # "audio" | "midi"
+    channels: int     # audio lanes (1 mono, 2 stereo, ...); 0 for MIDI
+    offset: int       # header zmark + 7, as `TrackInfo.offset`
+    lanes: tuple      # audio: the lanes it owns, as indices into the track lane list; MIDI: ()
+    guid: "bytes | None"   # audio: the header's 8-byte identity; MIDI headers carry none
+
+
+@dataclass(frozen=True)
+class TrackPlaylists:
+    name: str               # the active playlist's name -- what Pro Tools shows as the track name
+    kind: str               # "audio" | "midi" | "instrument"
+    container: int          # zmark of the track's 0x261C / 0x2620 / 0x2621
+    active: Playlist
+    playlists: tuple        # every playlist the track owns, in list (= name) order; includes `active`
+    list_span: "tuple[int, int]"   # [start, end) of the ownership list, trailer excluded
+
+
+def _playlist_registries(data: bytes, bl) -> "tuple[list[Playlist], list[Playlist]]":
+    """The audio (`0x1014`) and MIDI (`0x1057`) registries, in file order. An audio header reads
+    `<u32 len><name> <u8 format> <u32 channels> <channels x u16 lane> 00 00 00 00 2a 00 00 00
+    <8-byte guid> ...`; the format byte is 0 mono, 1 stereo, 3 quad, 10 for 7.1."""
+    audio: "list[Playlist]" = []
+    midi: "list[Playlist]" = []
+    for z, e, c in bl:
+        if c not in (_AUDIO_HDR, _MIDI_HDR) or z < 0:
+            continue
+        nlen = int.from_bytes(data[z + 9 : z + 13], "little")
+        if nlen > 255 or z + 13 + nlen > e:
+            continue
+        name = _decode_name(data[z + 13 : z + 13 + nlen])
+        q = z + 13 + nlen
+        if c == _AUDIO_HDR:
+            nch = int.from_bytes(data[q + 1 : q + 5], "little")
+            lanes = tuple(int.from_bytes(data[q + 5 + 2 * i : q + 7 + 2 * i], "little")
+                          for i in range(min(nch, 64)))
+            r = q + 5 + 2 * nch
+            guid = data[r + 8 : r + 16] if data[r : r + 8] == b"\0\0\0\0\x2a\0\0\0" else None
+            audio.append(Playlist(len(audio), name, "audio", nch, z + 7, lanes, guid))
+        else:
+            midi.append(Playlist(len(midi), name, "midi", 0, z + 7, (), None))
+    return audio, midi
+
+
+def _read_playlist_list(data: bytes, z0: int, anchor: int, width: int, trail: int,
+                        pool: int) -> "tuple[int, list[int], int, int] | None":
+    """Parse an ownership list that ends `trail` bytes before `anchor`: `(active, indices, start,
+    end)`, or None. Read BACKWARD from the anchor, smallest count first, accepting only a list whose
+    active is one of its indices and whose indices all exist.
+
+    Sound only for a u16 count (audio, instrument): read at a wrong length the u16 lands on the high
+    half of a u32 index, which is 0 for any index below 65,536, so no shorter list can fit. A u32
+    count can: `[1][2][1, 2]` also reads as `[2][1][2]`, and 3 of 335 real MIDI-track lists fit
+    twice. MIDI lists are read forward instead (`_container_playlist_list`)."""
+    end = anchor - trail
+    for n in range(1, pool + 1):
+        pc = end - 4 * n - width
+        if pc - 4 < z0:
+            return None
+        if int.from_bytes(data[pc : pc + width], "little") != n:
+            continue
+        act = int.from_bytes(data[pc - 4 : pc], "little")
+        idx = [int.from_bytes(data[pc + width + 4 * i : pc + width + 4 + 4 * i], "little")
+               for i in range(n)]
+        if act in idx and all(i < pool for i in idx):
+            return act, idx, pc - 4, end
+    return None
+
+
+def _list_anchors(bl) -> "dict[int, list[int]]":
+    """Sorted zmarks of the child types the ownership lists are located by."""
+    anchors: "dict[int, list[int]]" = {}
+    for z, _e, c in bl:
+        if c in (0x200B, 0x2611, 0x2010, 0x102D):
+            anchors.setdefault(c, []).append(z)
+    for v in anchors.values():
+        v.sort()
+    return anchors
+
+
+def _container_playlist_list(data: bytes, z0: int, e0: int, c0: int, anchors, bl_end,
+                             pool: int) -> "tuple[int, list[int], int, int] | None":
+    """The ownership list of the track container `[z0, e0)` of type `c0`: `(active, indices, start,
+    end)` or None. A MIDI track's list (u32 count) is read FORWARD from the end of the container's
+    `0x102D` child, where it starts on all 335 real MIDI tracks; the u16-count layouts backward
+    from their anchor (`_read_playlist_list`)."""
+    import bisect
+    anchor_t, width, trail = _PLAYLIST_LIST_LAYOUT[c0]
+    zs = anchors.get(anchor_t, [])
+    k = bisect.bisect_right(zs, z0)
+    if k >= len(zs) or zs[k] >= e0:
+        return None
+    anchor = zs[k]
+    if c0 == 0x2620:
+        ts = anchors.get(0x102D, [])
+        j = bisect.bisect_right(ts, z0)
+        if j >= len(ts) or ts[j] >= anchor:
+            return None
+        s = bl_end[ts[j]]
+        act = int.from_bytes(data[s : s + 4], "little")
+        n = int.from_bytes(data[s + 4 : s + 8], "little")
+        if n < 1 or n > pool or s + 8 + 4 * n + trail != anchor:
+            return None
+        idx = [int.from_bytes(data[s + 8 + 4 * i : s + 12 + 4 * i], "little") for i in range(n)]
+        if act not in idx or any(i >= pool for i in idx):
+            return None
+        return act, idx, s, s + 8 + 4 * n
+    return _read_playlist_list(data, z0, anchor, width, trail, pool)
+
+
+def _track_playlist_sets(data: bytes, bl) -> "list[TrackPlaylists] | None":
+    """Every audio/MIDI/instrument track's playlists, in active-header order (`track_types` order),
+    or None when any track's list does not parse or two tracks claim one playlist -- a reader that
+    cannot account for every track says nothing rather than guess."""
+    audio, midi = _playlist_registries(data, bl)
+    anchors = _list_anchors(bl)
+    bl_end = {z: e for z, e, _c in bl}
+    out: "list[TrackPlaylists]" = []
+    claimed: "set[tuple[str, int]]" = set()
+    for z0, e0, c0 in bl:
+        if c0 not in _PLAYLIST_LIST_LAYOUT or z0 < 0:
+            continue
+        reg = audio if c0 == 0x261C else midi
+        got = _container_playlist_list(data, z0, e0, c0, anchors, bl_end, len(reg))
+        if got is None:
+            return None
+        act, idx, start, end = got
+        for i in idx:
+            key = (reg[0].kind, i)
+            if key in claimed:
+                return None
+            claimed.add(key)
+        owned = tuple(reg[i] for i in idx)
+        out.append(TrackPlaylists(reg[act].name, _PLAYLIST_TRACK_KIND[c0], z0, reg[act], owned,
+                                  (start, end)))
+    out.sort(key=lambda t: t.active.offset)
+    return out
+
+
+def track_playlist_sets(data: bytes) -> "list[TrackPlaylists]":
+    """Every audio, MIDI and instrument track with the playlists it owns and the one it plays, in
+    `track_types` order. Empty when the session's ownership lists cannot all be read (see the
+    section comment above for the structures and how they were established)."""
+    try:
+        bl = _size_driven_blocks(data)
+    except Exception:
+        return []
+    return _track_playlist_sets(data, bl) or []
+
+
+def session_playlists(data: bytes) -> "list[Playlist]":
+    """Every playlist in the session: the audio registry, then the MIDI registry. `index` is the
+    position within its own registry (the two are numbered independently)."""
+    audio, midi = _playlist_registries(data, _size_driven_blocks(data))
+    return audio + midi
+
+
+def unassigned_playlists(data: bytes) -> "list[Playlist]":
+    """Playlists that no track owns. Pro Tools keeps them -- 29 of 342 real sessions have some, up to
+    22, and some hold clips -- so a faithful import has to carry them and an export must not drop
+    them. Empty when the ownership lists cannot be read."""
+    bl = _size_driven_blocks(data)
+    sets = _track_playlist_sets(data, bl)
+    if sets is None:
+        return []
+    owned = {(p.kind, p.index) for t in sets for p in t.playlists}
+    audio, midi = _playlist_registries(data, bl)
+    return [p for p in audio + midi if (p.kind, p.index) not in owned]
+
+
+def track_types(data: bytes) -> list[TrackInfo]:
+    """Enumerate the audio/MIDI TRACKS with their type, in header-offset order: one entry per track,
+    named and typed by its ACTIVE playlist (the name Pro Tools shows), `offset` locating that
+    playlist's header.
+
+    Until 2026-10-15 this returned one entry per PLAYLIST HEADER, so a track with alternate
+    playlists was reported once per playlist -- 285 "tracks" for a 35-track session. That
+    enumeration is `playlist_headers`, which this filters to the active playlists. On a session
+    where every track owns one playlist the two are identical; when the ownership lists cannot be
+    read (a synthesis path's mid-construction body has no index to walk) this falls back to the
+    header list rather than guess.
+
+    Mono vs stereo is read from the 0x1014 channel-count byte; MIDI is any 0x1057 header. This is
+    the structural basis for mix-and-match composition (you must know each track's type + channel
+    footprint to place it)."""
+    heads = playlist_headers(data)
+    try:
+        sets = _track_playlist_sets(data, _size_driven_blocks(data))
+    except Exception:
+        sets = None
+    if not sets:
+        return heads
+    active = {t.active.offset for t in sets}
+    out = [h for h in heads if h.offset in active]
+    return out if len(out) == len(sets) else heads
+
+
 def channel_count(data: bytes) -> int:
-    """Total audio channels (mono=1, stereo=2 per audio track). Mirrors the
-    session field at 0x1054 + 2."""
-    return sum(t.channels for t in track_types(data))
+    """Total audio channels: one per lane, i.e. per channel of every audio PLAYLIST (alternates
+    included). Mirrors the session field at 0x1054 + 2."""
+    return sum(t.channels for t in playlist_headers(data))
+
+
+# --- playlist editing ----------------------------------------------------------------------------
+#
+# What Pro Tools changes when it edits playlists, read off its own saves (backup chains):
+#
+#   New Playlist   `JON VH NOT YET` bak.010 -> .011: a fresh `0x1014` header (new GUID) takes the
+#                  track's ACTIVE slot in the registry with a new empty lane at that slot's lane
+#                  position; the old active header moves into the inactive run at its name-sorted
+#                  place and its lane (with its clips) moves with it; `0x1015` +1, `0x1054` +lanes;
+#                  the track's list gains the new index; the TRACK is renamed -- its `0x2519` entry
+#                  and both `0x251A` -- while the old playlist's own header and lanes keep their name.
+#   Switch         `CHRISTMAS IN MY HEART` bak.000 -> .001 (instrument track): the registry is
+#                  re-saved with the new active in the active slot, every list is remapped, the
+#                  `0x202E` MIDI-index records are remapped, and the track is renamed in `0x2519`,
+#                  `0x210B` and both `0x251A`.
+#
+# In the master index the only references to playlist objects are two element lists: one in the
+# `0x1015` record (the container, then every header, then its `0x4829` child) and one in the
+# `0x1054` record (the container, every lane, its `0x4828` child), each in ascending offset order.
+# Placements inside lanes are not index targets, so whole lanes can move with their clips. Marker
+# rows (`0x2506`) follow tracks, not playlists (they match the `0x2015` count, 210/230 sessions with
+# markers), so a playlist edit leaves them alone.
+#
+# The editors keep Pro Tools' canonical registry order (active playlists first in track order,
+# the rest sorted by name) when the session already has it, and otherwise change as little as
+# possible: a new or displaced playlist is appended. Audio and MIDI/instrument playlists alike; a
+# MIDI playlist is one `0x1057` block (header and placements), so its plan has no lanes.
+
+_TRACK_NAME_TYPES = frozenset({0x2519, 0x251A, 0x210B})
+
+
+def _playlist_runs(data: bytes, bl) -> "tuple[list, list, tuple[int, int], tuple[int, int]]":
+    """`(headers, lanes, 0x1015 span, 0x1054 span)`: the audio registry's `0x1014` headers and the
+    track lane list's `0x1052` lanes as `(zmark, end)`, each verified to be ONE contiguous run of
+    siblings. Raises ValueError otherwise -- nothing here edits a layout it has not seen."""
+    xr = _cross_reference_spans(bl)
+    c15 = [(z, e) for z, e, c in bl if c == 0x1015 and z >= 0]
+    c54 = [(z, e) for z, e, c in bl if c == 0x1054 and z >= 0 and not _in_spans(z, xr)]
+    if len(c15) != 1 or len(c54) != 1:
+        raise ValueError("expected one 0x1015 registry and one track lane list")
+    (z15, e15), (z54, e54) = c15[0], c54[0]
+    heads = sorted((z, e) for z, e, c in bl if c == 0x1014 and z15 < z < e15)
+    lanes = sorted((z, e) for z, e, c in bl if c == 0x1052 and z54 < z < e54 and not _in_spans(z, xr))
+    for run, what in ((heads, "0x1014 headers"), (lanes, "0x1052 lanes")):
+        if any(a[1] != b[0] for a, b in zip(run, run[1:])):
+            raise ValueError(f"the {what} are not one contiguous run")
+    return heads, lanes, (z15, e15), (z54, e54)
+
+
+def _rewrite_playlist_runs(data: bytes, headers: "list[bytes]", lanes: "list[bytes]") -> bytes:
+    """Replace the audio header run and the track lane run with `headers` / `lanes` (complete
+    blocks, in order). See `_rewrite_runs`. An identity rewrite returns `data` byte-for-byte."""
+    bl = _size_driven_blocks(data)
+    heads, old_lanes, (z15, _e15), (z54, _e54) = _playlist_runs(data, bl)
+    if not heads or not old_lanes:
+        raise ValueError("no playlist header or lane run to rewrite")
+    return _rewrite_runs(data, [(z15, heads, headers), (z54, old_lanes, lanes)])
+
+
+def _rewrite_runs(data: bytes, runs) -> bytes:
+    """Replace contiguous runs of sibling blocks. `runs` is `[(container zmark, [(zmark, end) of the
+    old blocks], [new block bytes])]`. Each container's payload `+0` u32 is set to its new block
+    count; every block containing a run grows or shrinks; the index elements that pointed at the old
+    blocks are regenerated from the new positions -- one per new block, cloned from the first old
+    one, the record's elements kept in ascending offset order -- and every other index offset slides.
+    This is all a playlist edit needs from the index: the registries' and the lane list's element
+    lists are the only references to playlist objects (spec §8)."""
+    ref = _FI.final_index_ref(data)
+    bl = sorted(_raw_block_bounds(data, ref.start))
+    spans = sorted((olds[0][0], olds[-1][1], b"".join(blobs), k, cz)
+                   for k, (cz, olds, blobs) in enumerate(runs))
+
+    def shift(o: int) -> int:
+        d = 0
+        for a, b, blob, _k, _cz in spans:
+            if o >= b:
+                d += len(blob) - (b - a)
+            elif o > a:
+                raise ValueError("offset inside a rewritten run")
+        return o + d
+
+    body = bytearray()
+    prev = 0
+    for a, b, blob, _k, _cz in spans:
+        body += data[prev:a] + blob
+        prev = b
+    body += data[prev : ref.start]
+    for z, e, _c in bl:
+        grow = sum(len(blob) - (b - a) for a, b, blob, _k, _cz in spans if z < a and b <= e)
+        if grow:
+            nz = shift(z)
+            body[nz + 3 : nz + 7] = (int.from_bytes(body[nz + 3 : nz + 7], "little") + grow).to_bytes(4, "little")
+    new_pos: "dict[int, list[int]]" = {}
+    for a, _b, _blob, k, cz in spans:
+        body[shift(cz) + 9 : shift(cz) + 13] = len(runs[k][2]).to_bytes(4, "little")
+        p = shift(a)
+        seq = []
+        for blob in runs[k][2]:
+            seq.append(p)
+            p += len(blob)
+        new_pos[k] = seq
+    old_sets = {k: {z for z, _e in runs[k][1]} for k in range(len(runs))}
+
+    recs = _FI.parse_records(ref.data, {c for _z, _e, c in bl}, {z for z, _e, _c in bl})
+    for r in recs:
+        for c in r.child_refs:
+            c.offset = shift(c.offset)
+        hit: "dict[int, list]" = {k: [] for k in old_sets}
+        keep = []
+        for el in r.elements:
+            k = next((k for k, st in old_sets.items() if len(el.offsets) == 1 and el.offsets[0] in st), None)
+            if k is None:
+                el.offsets = [shift(o) for o in el.offsets]
+                keep.append(el)
+            else:
+                hit[k].append(el)
+        if not any(hit.values()):
+            continue
+        for k, els in hit.items():
+            if els:
+                t = els[0]
+                keep += [_FI.Element(rel=t.rel, tag1=t.tag1, offsets=[o], tail=t.tail) for o in new_pos[k]]
+        r.elements = sorted(keep, key=lambda el: el.offsets[0] if el.offsets else -1)
+    return _set_index_offset(bytes(body) + _FI.serialize_final_block(recs))
+
+
+def _header_fields(blob: bytes) -> dict:
+    """Field positions in a `0x1014` header blob (see `_playlist_registries` for the layout)."""
+    bt = int.from_bytes(blob[1:3], "little")
+    n = int.from_bytes(blob[9:13], "little")
+    q = 13 + n
+    nch = int.from_bytes(blob[q + 1 : q + 5], "little")
+    r = q + 5 + 2 * nch
+    if blob[r : r + 8] != b"\0\0\0\0\x2a\0\0\0":
+        raise ValueError("unrecognised 0x1014 header layout")
+    return {"bt": bt, "name": (13, q), "nch": nch, "lanes16": q + 5, "guid": r + 8,
+            "lanes32": r + 23 if bt >= 8 else None}
+
+
+def _header_with(blob: bytes, *, name: "str | None" = None, guid: "bytes | None" = None,
+                 lanes: "list[int] | None" = None) -> bytes:
+    """A `0x1014` header with its name, GUID and/or lane indices replaced (block size kept right)."""
+    f = _header_fields(blob)
+    out = bytearray(blob)
+    if lanes is not None:
+        if len(lanes) != f["nch"]:
+            raise ValueError("lane count does not match the header's channels")
+        for i, v in enumerate(lanes):
+            out[f["lanes16"] + 2 * i : f["lanes16"] + 2 * i + 2] = v.to_bytes(2, "little")
+            if f["lanes32"] is not None:
+                out[f["lanes32"] + 4 * i : f["lanes32"] + 4 * i + 4] = v.to_bytes(4, "little")
+    if guid is not None:
+        out[f["guid"] : f["guid"] + 8] = guid
+    if name is not None:
+        nb = name.encode()
+        out[9 : f["name"][1]] = len(nb).to_bytes(4, "little") + nb
+    out[3:7] = (len(out) - 7).to_bytes(4, "little")
+    return bytes(out)
+
+
+def _lane_with(data: bytes, z: int, e: int, bl, *, name: "str | None" = None, empty: bool = False) -> bytes:
+    """A copy of the lane `[z, e)` renamed and/or emptied of its placements. A lane is
+    `<u32 len><name> <u32 placement count> <placements> <trailer>`; the trailer (1 byte in block
+    version 2, 2 in version 3, measured on 27,000 lanes) is kept as it is."""
+    n = int.from_bytes(data[z + 9 : z + 13], "little")
+    q = z + 13 + n
+    blob = bytearray(data[z:e])
+    if empty:
+        kids = sorted((cz, ce) for cz, ce, _c in bl if z < cz < e)
+        last = q + 4
+        for cz, ce in kids:                              # direct children only
+            if cz >= last:
+                last = ce
+        tail = data[last:e]
+        blob = bytearray(data[z:q]) + (0).to_bytes(4, "little") + tail
+    if name is not None:
+        nb = name.encode()
+        blob[9 : 13 + n] = len(nb).to_bytes(4, "little") + nb
+    blob[3:7] = (len(blob) - 7).to_bytes(4, "little")
+    return bytes(blob)
+
+
+def _fresh_playlist_guid(taken: "set[bytes]", seed: bytes) -> bytes:
+    """An 8-byte playlist GUID that no header in the session uses, deterministic in `seed`, and
+    free of the 0x5A block magic and the 0x2A GUID-tag byte (both have broken readers before)."""
+    import hashlib
+    k = 0
+    while True:
+        g = bytes(0x5B if b == 0x5A else 0x2B if b == 0x2A else b
+                  for b in hashlib.sha1(seed + k.to_bytes(4, "little")).digest()[:8])
+        if g not in taken:
+            return g
+        k += 1
+
+
+def _next_playlist_name(track_name: str, taken: "set[str]") -> str:
+    """Pro Tools' name for a track's next playlist: its base name plus the next `.NN`
+    (`PRE GT MUTE` -> `PRE GT MUTE.01`, `BC CHROUS.35` -> `BC CHROUS.36`)."""
+    import re
+    base = re.sub(r"\.\d+$", "", track_name)
+    nums = [int(m.group(1)) for t in taken for m in [re.fullmatch(re.escape(base) + r"\.(\d+)", t)] if m]
+    k = max(nums, default=0) + 1
+    while "%s.%02d" % (base, k) in taken:
+        k += 1
+    return "%s.%02d" % (base, k)
+
+
+class _AudioPlaylistPlan:
+    """The audio registry of a session as an editable plan: an ordered list of playlist GUIDs, a
+    header and lane blobs per GUID, and per track container the list it should hold."""
+
+    def __init__(self, data: bytes):
+        bl = _size_driven_blocks(data)
+        heads, lanes, _c15, _c54 = _playlist_runs(data, bl)
+        audio, _midi = _playlist_registries(data, bl)
+        sets = _track_playlist_sets(data, bl)
+        lists = _ownership_lists(data, bl)
+        if sets is None or lists is None:
+            raise ValueError("the session's playlist ownership lists do not parse")
+        if len(audio) != len(heads) or any(p.guid is None for p in audio) \
+                or len({p.guid for p in audio}) != len(audio):
+            raise ValueError("audio playlists are not uniquely identified by GUID")
+        cum = 0
+        for p in audio:
+            if p.lanes != tuple(range(cum, cum + p.channels)):
+                raise ValueError(f"playlist {p.name!r} does not own its cumulative lanes; "
+                                 "lane layouts other than Pro Tools' cumulative one are not edited")
+            cum += p.channels
+        if cum != len(lanes):
+            raise ValueError("the playlists' channels do not account for the track lane list")
+        self.data, self.bl = data, bl
+        self.order = [p.guid for p in audio]
+        self.name = {p.guid: p.name for p in audio}
+        self.channels = {p.guid: p.channels for p in audio}
+        self.header = {p.guid: data[z:e] for p, (z, e) in zip(audio, heads)}
+        self.lanes = {p.guid: [data[z:e] for z, e in lanes[p.lanes[0] : p.lanes[0] + p.channels]]
+                      for p in audio}
+        self.lane_spans = {p.guid: lanes[p.lanes[0] : p.lanes[0] + p.channels] for p in audio}
+        self.tracks = {}                    # container zmark -> [active guid, [guids]] (audio only)
+        self.list_spans = {}
+        for z0, c0, act, idx, start, end in lists:
+            if c0 == 0x261C:
+                self.tracks[z0] = [self.order[act], [self.order[i] for i in idx]]
+                self.list_spans[z0] = (start, end)
+        self.by_track_name = {t.name: t.container for t in sets if t.kind == "audio"}
+        active = {a for a, _l in self.tracks.values()}
+        self.canonical = (set(self.order[: len(active)]) == active
+                          and [self.name[g].encode() for g in self.order[len(active):]]
+                          == sorted(self.name[g].encode() for g in self.order[len(active):]))
+        self.renames: "list[tuple[str, str]]" = []
+
+    def track(self, track_name: str) -> int:
+        if track_name not in self.by_track_name:
+            raise ValueError(f"no audio track whose active playlist is {track_name!r}")
+        return self.by_track_name[track_name]
+
+    def guid_of(self, playlist_name: str) -> bytes:
+        hits = [g for g in self.order if self.name[g] == playlist_name]
+        if len(hits) != 1:
+            raise ValueError(f"{len(hits)} audio playlists are named {playlist_name!r}")
+        return hits[0]
+
+    def place_inactive(self, g: bytes) -> None:
+        """Put `g` (not in `order`) where Pro Tools would: its name-sorted place among the
+        inactive playlists if the registry is canonical, else at the end."""
+        if not self.canonical:
+            self.order.append(g)
+            return
+        n_active = len({a for a, _l in self.tracks.values()})
+        key = self.name[g].encode()
+        i = n_active
+        while i < len(self.order) and self.name[self.order[i]].encode() < key:
+            i += 1
+        self.order.insert(i, g)
+
+    def sorted_list(self, guids: "list[bytes]") -> "list[bytes]":
+        return sorted(guids, key=lambda g: self.name[g].encode())
+
+    def insert_sorted(self, keys: list, k) -> list:
+        """`keys` with `k` inserted before the first entry whose name sorts after its name. Pro Tools
+        keeps the lists in name order; the few it left unsorted stay as they are, so an insertion and
+        the matching removal are exact inverses."""
+        key = self.name[k].encode()
+        i = next((n for n, x in enumerate(keys) if self.name[x].encode() > key), len(keys))
+        return keys[:i] + [k] + keys[i:]
+
+    def build(self) -> bytes:
+        data = self.data
+        headers, lanes, cum = [], [], 0
+        for g in self.order:
+            n = self.channels[g]
+            headers.append(_header_with(self.header[g], lanes=list(range(cum, cum + n))))
+            lanes += self.lanes[g]
+            cum += n
+        conts0 = sorted(z for z, _e, c in self.bl if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+        out = _rewrite_playlist_runs(data, headers, lanes)
+        bl1 = _size_driven_blocks(out)
+        conts1 = sorted(z for z, _e, c in bl1 if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+        if len(conts0) != len(conts1):
+            raise ValueError("track containers moved unexpectedly")
+        moved = dict(zip(conts0, conts1))
+        pos = {g: i for i, g in enumerate(self.order)}
+        edits = []
+        for z0, (act, guids) in self.tracks.items():
+            start, end = self.list_spans[z0]
+            d = moved[z0] - z0
+            blob = _encode_playlist_list(0x261C, pos[act], [pos[g] for g in guids])
+            if out[start + d : end + d] != blob:
+                edits.append((start + d, end + d, blob))
+        for start, end, blob in sorted(edits, reverse=True):
+            out = _splice_replace(out, start, end, blob)
+        return _apply_track_renames(out, conts0, self.renames)
+
+
+def _midi_run(data: bytes, bl) -> "tuple[list[tuple[int, int]], int]":
+    """The MIDI registry: the `0x1057` playlists of the one `0x1058` that holds them (a session also
+    carries an empty `0x1058`), verified to be one contiguous run, and that container's zmark."""
+    c58 = [(z, e) for z, e, c in bl if c == 0x1058 and z >= 0
+           and any(z < z2 < e and c2 == 0x1057 for z2, _e2, c2 in bl)]
+    if len(c58) != 1:
+        raise ValueError("expected one 0x1058 holding the MIDI playlists")
+    z58, e58 = c58[0]
+    heads = sorted((z, e) for z, e, c in bl if c == 0x1057 and z58 < z < e58)
+    if any(a[1] != b[0] for a, b in zip(heads, heads[1:])):
+        raise ValueError("the 0x1057 MIDI playlists are not one contiguous run")
+    return heads, z58
+
+
+def _midi_guid(blob: bytes) -> "bytes | None":
+    """The GUID a block-version-4 MIDI playlist carries at its end (`02 00000000 2a000000 <guid>`)."""
+    t = blob.rfind(b"\0\0\0\0\x2a\0\0\0")
+    return blob[t + 8 : t + 16] if t >= 0 and t + 16 == len(blob) else None
+
+
+def _midi_with(data: bytes, z: int, e: int, bl, *, name: "str | None" = None, empty: bool = False,
+               guid: "bytes | None" = None) -> bytes:
+    """A copy of the MIDI playlist `[z, e)` -- `<u32 len><name> <u32 count> <count x 0x1056>
+    0x2502 <trailer>` -- renamed, emptied of its placements (the `0x2502` settings child and the
+    trailer stay, as in every empty MIDI playlist on the corpus) and/or given a new trailer GUID."""
+    n = int.from_bytes(data[z + 9 : z + 13], "little")
+    q = z + 13 + n
+    blob = bytearray(data[z:e])
+    if empty:
+        last = q + 4
+        for cz, ce, c in sorted((cz, ce, c) for cz, ce, c in bl if z < cz < e):
+            if cz >= last and c == 0x1056:
+                last = ce
+        blob = bytearray(data[z:q]) + (0).to_bytes(4, "little") + data[last:e]
+    if guid is not None and _midi_guid(bytes(blob)) is not None:
+        blob[len(blob) - 8 :] = guid
+    if name is not None:
+        nb = name.encode()
+        blob[9 : 13 + n] = len(nb).to_bytes(4, "little") + nb
+    blob[3:7] = (len(blob) - 7).to_bytes(4, "little")
+    return bytes(blob)
+
+
+class _MidiPlaylistPlan:
+    """The MIDI registry as an editable plan, the counterpart of `_AudioPlaylistPlan` without lanes
+    (a MIDI playlist holds its own placements). Keys are `("old", i)` / `("new", n)`: a MIDI header
+    of block version 3 carries no GUID. The `0x202E` group records hold MIDI registry indices and
+    are remapped on build, as Pro Tools does (`CHRISTMAS IN MY HEART` bak.000 -> .001)."""
+
+    def __init__(self, data: bytes):
+        bl = _size_driven_blocks(data)
+        heads, z58 = _midi_run(data, bl)
+        _audio, midi = _playlist_registries(data, bl)
+        lists = _ownership_lists(data, bl)
+        if lists is None:
+            raise ValueError("the session's playlist ownership lists do not parse")
+        if len(midi) != len(heads):
+            raise ValueError("the MIDI registry does not match its 0x1057 run")
+        self.data, self.bl, self.z58, self.heads = data, bl, z58, heads
+        self.order = [("old", i) for i in range(len(midi))]
+        self.name = {("old", i): p.name for i, p in enumerate(midi)}
+        self.blob = {("old", i): data[z:e] for i, (z, e) in enumerate(heads)}
+        self.span = {("old", i): (z, e) for i, (z, e) in enumerate(heads)}
+        self.tracks, self.list_spans, self.kind = {}, {}, {}
+        for z0, c0, act, idx, start, end in lists:
+            if c0 in (0x2620, 0x2621):
+                self.tracks[z0] = [("old", act), [("old", i) for i in idx]]
+                self.list_spans[z0] = (start, end)
+                self.kind[z0] = c0
+        sets = _track_playlist_sets(data, bl) or []
+        self.by_track_name = {t.name: t.container for t in sets if t.kind in ("midi", "instrument")}
+        active = {a for a, _l in self.tracks.values()}
+        self.canonical = (set(self.order[: len(active)]) == active
+                          and [self.name[k].encode() for k in self.order[len(active):]]
+                          == sorted(self.name[k].encode() for k in self.order[len(active):]))
+        self.renames: "list[tuple[str, str]]" = []
+        self._n = 0
+
+    def new_key(self):
+        self._n += 1
+        return ("new", self._n)
+
+    def track(self, track_name: str) -> int:
+        if track_name not in self.by_track_name:
+            raise ValueError(f"no MIDI or instrument track whose active playlist is {track_name!r}")
+        return self.by_track_name[track_name]
+
+    def key_of(self, playlist_name: str):
+        hits = [k for k in self.order if self.name[k] == playlist_name]
+        if len(hits) != 1:
+            raise ValueError(f"{len(hits)} MIDI playlists are named {playlist_name!r}")
+        return hits[0]
+
+    place_inactive = None        # bound below (shared with the audio plan)
+    sorted_list = None
+
+    def build(self) -> bytes:
+        data = self.data
+        out = _rewrite_runs(data, [(self.z58, self.heads, [self.blob[k] for k in self.order])])
+        bl1 = _size_driven_blocks(out)
+        conts0 = sorted(z for z, _e, c in self.bl if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+        conts1 = sorted(z for z, _e, c in bl1 if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+        if len(conts0) != len(conts1):
+            raise ValueError("track containers moved unexpectedly")
+        moved = dict(zip(conts0, conts1))
+        pos = {k: i for i, k in enumerate(self.order)}
+        edits = []
+        for z0, (act, keys) in self.tracks.items():
+            start, end = self.list_spans[z0]
+            d = moved[z0] - z0
+            blob = _encode_playlist_list(self.kind[z0], pos[act], [pos[k] for k in keys])
+            if out[start + d : end + d] != blob:
+                edits.append((start + d, end + d, blob))
+        for start, end, blob in sorted(edits, reverse=True):
+            out = _splice_replace(out, start, end, blob)
+        old_to_new = {i: pos.get(("old", i)) for i in range(len(self.heads))}
+        if any(v != i for i, v in old_to_new.items()):
+            ob = bytearray(out)
+            bl2 = _size_driven_blocks(out)
+            parent = next(((z, e) for z, e, c in bl2 if c == 0x202E), None)
+            if parent is not None:
+                for z, _e, c in bl2:
+                    if c == 0x202C and parent[0] < z < parent[1]:
+                        n = int.from_bytes(ob[z + 17 : z + 21], "little")
+                        for m in range(n):
+                            p = z + 21 + 4 * m
+                            v = int.from_bytes(ob[p : p + 4], "little")
+                            if v in old_to_new:
+                                if old_to_new[v] is None:
+                                    raise ValueError("a 0x202E group record refers to the MIDI playlist "
+                                                     "being deleted; that edit is not supported")
+                                ob[p : p + 4] = old_to_new[v].to_bytes(4, "little")
+            out = bytes(ob)
+        return _apply_track_renames(out, conts0, self.renames)
+
+
+_MidiPlaylistPlan.place_inactive = lambda self, k: _AudioPlaylistPlan.place_inactive(self, k)
+_MidiPlaylistPlan.sorted_list = lambda self, keys: _AudioPlaylistPlan.sorted_list(self, keys)
+_MidiPlaylistPlan.insert_sorted = lambda self, keys, k: _AudioPlaylistPlan.insert_sorted(self, keys, k)
+
+
+def _plan_key(plan, playlist):
+    """The plan key of `playlist` -- a name, or a `Playlist` record (from `track_playlist_sets` /
+    `session_playlists`), which also picks one of several playlists sharing a name (one show master
+    has two alternates called `gutter1`)."""
+    if isinstance(playlist, Playlist):
+        k = playlist.guid if isinstance(plan, _AudioPlaylistPlan) else ("old", playlist.index)
+        if k not in plan.name or plan.name[k] != playlist.name:
+            raise ValueError(f"{playlist.name!r} is not a playlist of this session")
+        return k
+    return plan.guid_of(playlist) if isinstance(plan, _AudioPlaylistPlan) else plan.key_of(playlist)
+
+
+def _playlist_name_of(playlist) -> str:
+    return playlist.name if isinstance(playlist, Playlist) else playlist
+
+
+def _playlist_plan_for_track(data: bytes, track_name: str):
+    """The plan that edits `track_name`'s playlists: audio or MIDI by the track's kind."""
+    kinds = {t.kind for t in track_playlist_sets(data) if t.name == track_name}
+    if kinds == {"audio"}:
+        return _AudioPlaylistPlan(data)
+    if kinds and kinds <= {"midi", "instrument"}:
+        return _MidiPlaylistPlan(data)
+    raise ValueError(f"no single audio, MIDI or instrument track named {track_name!r}")
+
+
+def _playlist_plan_for_playlist(data: bytes, playlist):
+    if isinstance(playlist, Playlist):
+        return _AudioPlaylistPlan(data) if playlist.kind == "audio" else _MidiPlaylistPlan(data)
+    playlist_name = playlist
+    kinds = {p.kind for p in session_playlists(data) if p.name == playlist_name}
+    if kinds == {"audio"}:
+        return _AudioPlaylistPlan(data)
+    if kinds == {"midi"}:
+        return _MidiPlaylistPlan(data)
+    raise ValueError(f"no single playlist kind is named {playlist_name!r}")
+
+
+def _apply_track_renames(out: bytes, conts0: "list[int]", renames) -> bytes:
+    """Apply a plan's `(old name, new name, container zmark in the original)` track renames. The
+    containers keep their order through an edit, so each is found again by its position."""
+    for old, new, z0 in renames:
+        conts = sorted(z for z, _e, c in _size_driven_blocks(out) if c in _PLAYLIST_LIST_LAYOUT and z >= 0)
+        out = _rename_track_entries(out, old, new, conts[conts0.index(z0)] if len(conts) == len(conts0) else None)
+    return out
+
+
+def _rename_track_entries(data: bytes, old: str, new: str, container: "int | None" = None) -> bytes:
+    """Rename a TRACK without renaming any playlist: its name-table entry (`0x2519`) and its two lane
+    entries (`0x251A`) -- the places Pro Tools changed when it switched or created a playlist -- and,
+    in the Playlists-view rows (`0x210B`), only the track's OWN row: the one its `0x2015` ordinal
+    points at (`container` is the track's container zmark). A track shown in Playlists view has a row
+    per playlist after that one, so the playlist it switches to may already have a row; the two rows
+    swap names, keeping the group "active first, then the alternates". Matching rows by name alone
+    renamed the alternate's row too (`S3101 PT PREP`). A playlist's own header and lanes, and any clip
+    or stale copy that happens to share the name, keep it."""
+    if old == new:
+        return data
+    bl = _size_driven_blocks(data)
+    body = data[: _FI.final_index_ref(data).start]
+    occ_old = track_name_occurrences(body, old.encode())
+    occ_new = track_name_occurrences(body, new.encode())
+    starts = sorted(bl)
+
+    def inner_type(j: int) -> "int | None":
+        best = None
+        for z, e, c in starts:
+            if z <= j < e and (best is None or e - z < best[1] - best[0]):
+                best = (z, e, c)
+        return best[2] if best else None
+
+    edits = [(j, old, new) for j in occ_old if inner_type(j) in (0x2519, 0x251A)]
+    rows = sorted((z, e) for z, e, c in bl if c == 0x210B)
+    if rows:
+        ce = next((e for z, e, _c in bl if z == container), None) if container is not None else None
+        sites = [v for p, v in _playlist_ordinal_sites(data) if ce is not None and container < p < ce]
+        if sites and 1 <= sites[0] <= len(rows):
+            first = sites[0] - 1
+            nxt = min((v - 1 for _p, v in _playlist_ordinal_sites(data) if v - 1 > first), default=len(rows))
+            group = rows[first:nxt]
+            z, e = group[0]
+            edits += [(j, old, new) for j in occ_old if z <= j < e]
+            swap = next((j for z, e in group[1:] for j in occ_new if z <= j < e), None)
+            if swap is not None:                        # one row: names need not be unique
+                edits.append((swap, new, old))
+        else:
+            hits = [j for j in occ_old if inner_type(j) == 0x210B]
+            if len(hits) == 1:
+                edits.append((hits[0], old, new))
+    for j, a, b in sorted(edits, reverse=True):          # high to low: lower positions stay valid
+        data = rename_track(data, a, b, _only={j})
+    return data
+
+
+def new_playlist(data: bytes, track_name: str, name: "str | None" = None, *,
+                 activate: bool = True) -> bytes:
+    """Give the audio track `track_name` (named by its active playlist) a new EMPTY playlist --
+    Pro Tools' New Playlist. With `activate` (the default, as in Pro Tools) the track switches to
+    it and takes its name; the playlist it was playing stays, with its clips, as an alternate.
+    `name` defaults to Pro Tools' next `.NN` name. Returns full unxored bytes."""
+    return _add_playlist(data, track_name, name, activate=activate, copy_clips=False)
+
+
+def duplicate_playlist(data: bytes, track_name: str, name: "str | None" = None, *,
+                       activate: bool = True) -> bytes:
+    """Pro Tools' Duplicate Playlist: a new playlist on `track_name` holding a copy of the clips of
+    the playlist it is playing. Pro Tools copies the placements byte for byte (9/9 on
+    `CELEBRATE Pno OD Stagg 091018 COMP` bak.004 -> .005), so the copy references the same regions.
+    Otherwise as `new_playlist`."""
+    return _add_playlist(data, track_name, name, activate=activate, copy_clips=True)
+
+
+def _add_playlist(data: bytes, track_name: str, name: "str | None", *, activate: bool,
+                  copy_clips: bool) -> bytes:
+    plan = _playlist_plan_for_track(data, track_name)
+    z0 = plan.track(track_name)
+    act, keys = plan.tracks[z0]
+    taken = {p.name for p in session_playlists(data)}
+    name = name or _next_playlist_name(track_name, taken)
+    if name in taken:
+        raise ValueError(f"a playlist named {name!r} already exists")
+    if isinstance(plan, _AudioPlaylistPlan):
+        k = _fresh_playlist_guid(set(plan.order), name.encode() + act)
+        plan.channels[k] = plan.channels[act]
+        plan.header[k] = _header_with(plan.header[act], name=name, guid=k)
+        plan.lanes[k] = [_lane_with(data, z, e, plan.bl, name=name, empty=not copy_clips)
+                         for z, e in plan.lane_spans[act]]
+    else:
+        k = plan.new_key()
+        z, e = plan.span[act]
+        taken_g = {g for g in (_midi_guid(b) for b in plan.blob.values()) if g}
+        g = _fresh_playlist_guid(taken_g, name.encode() + b"MIDI") if _midi_guid(plan.blob[act]) else None
+        plan.blob[k] = _midi_with(data, z, e, plan.bl, name=name, empty=not copy_clips, guid=g)
+    plan.name[k] = name
+    if activate:
+        plan.order[plan.order.index(act)] = k
+        plan.place_inactive(act)
+        plan.tracks[z0] = [k, plan.insert_sorted(keys, k)]
+        plan.renames.append((track_name, name, z0))
+    else:
+        plan.place_inactive(k)
+        plan.tracks[z0] = [act, plan.insert_sorted(keys, k)]
+    return plan.build()
+
+
+def set_active_playlist(data: bytes, track_name: str, playlist_name: "str | Playlist") -> bytes:
+    """Switch the track `track_name` (audio, MIDI or instrument) to its playlist `playlist_name`, as
+    Pro Tools' playlist selector does: the track takes the playlist's name, and the registry keeps
+    its canonical order when it had one. On Pro Tools' own switches this reproduces its save in every
+    playlist structure (a 22-track audio switch and an instrument-track switch, byte for byte).
+    Returns full unxored bytes."""
+    plan = _playlist_plan_for_track(data, track_name)
+    z0 = plan.track(track_name)
+    act, keys = plan.tracks[z0]
+    k = _plan_key(plan, playlist_name)
+    playlist_name = plan.name[k]
+    if k not in keys:
+        raise ValueError(f"{playlist_name!r} is not one of {track_name!r}'s playlists")
+    if k == act:
+        return data
+    if plan.canonical:
+        plan.order.remove(k)
+        plan.order[plan.order.index(act)] = k
+        plan.place_inactive(act)
+    else:
+        i, j = plan.order.index(act), plan.order.index(k)
+        plan.order[i], plan.order[j] = k, act
+    plan.tracks[z0] = [k, keys]
+    plan.renames.append((track_name, playlist_name, z0))
+    return plan.build()
+
+
+def rename_playlist(data: bytes, old_name: "str | Playlist", new_name: str) -> bytes:
+    """Rename a playlist (audio or MIDI). An ACTIVE playlist is its track's name, so this is
+    `rename_track`; an alternate is renamed in its own blocks only and moved to its name-sorted place
+    in the registry's inactive run when the registry is canonical. Its place in its track's list is
+    kept."""
+    plan = _playlist_plan_for_playlist(data, old_name)
+    k = _plan_key(plan, old_name)
+    old_name = plan.name[k]
+    if new_name in {p.name for p in session_playlists(data)}:
+        raise ValueError(f"a playlist named {new_name!r} already exists")
+    if any(a == k for a, _l in plan.tracks.values()):
+        return rename_track(data, old_name, new_name)
+    if isinstance(plan, _AudioPlaylistPlan):
+        plan.header[k] = _header_with(plan.header[k], name=new_name)
+        plan.lanes[k] = [_lane_with(data, z, e, plan.bl, name=new_name) for z, e in plan.lane_spans[k]]
+    else:
+        z, e = plan.span[k]
+        plan.blob[k] = _midi_with(data, z, e, plan.bl, name=new_name)
+    plan.name[k] = new_name
+    if plan.canonical:
+        plan.order.remove(k)
+        plan.place_inactive(k)
+    # The track's list keeps the playlist where it was: Pro Tools' own lists are not always in byte
+    # order (`DEREK MASTER CALSS`: `short.1` before `short.02`), so re-sorting could reorder a list
+    # it wrote, and a rename and its inverse would no longer cancel.
+    return plan.build()
+
+
+def delete_playlist(data: bytes, playlist_name: "str | Playlist") -> bytes:
+    """Delete a playlist (audio or MIDI) that no track is playing -- an alternate, or one no track
+    owns -- with its clips (their regions stay in the clip list, as in Pro Tools). Delete an active
+    playlist by switching its track away from it first."""
+    plan = _playlist_plan_for_playlist(data, playlist_name)
+    return _delete_playlist_key(plan, _plan_key(plan, playlist_name))
+
+
+def _delete_playlist_key(plan, g) -> bytes:
+    playlist_name = plan.name[g]
+    if any(a == g for a, _l in plan.tracks.values()):
+        raise ValueError(f"{playlist_name!r} is a track's active playlist; switch the track first")
+    if len(plan.order) == 1:
+        raise ValueError("cannot delete the session's only playlist of its kind")
+    plan.order.remove(g)
+    for z0, (act, guids) in plan.tracks.items():
+        if g in guids:
+            plan.tracks[z0] = [act, [x for x in guids if x != g]]
+    return plan.build()
 
 
 def set_track_channels(data: bytes, track_offset: int, channels: list[int]) -> bytes:

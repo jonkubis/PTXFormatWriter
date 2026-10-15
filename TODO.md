@@ -3,6 +3,55 @@
 Open research / feature items. Each entry should say what we want, what's unknown,
 and why it matters. (Resolved items kept briefly for provenance.)
 
+## PLAYLISTS — characterized, read, and edited; Pro Tools verdict PENDING (2026-10-15)
+
+Spec §8 "Playlists: two registries and one ownership list per track". In short: playlists live in
+two registries (audio `0x1014`, MIDI `0x1057`); each track container holds an OWNERSHIP LIST
+`[u32 active][count][indices]` just before `0x200B` / `0x2611` / `0x2010`. Measured on 342 real
+sessions (10,948 containers): all parse, none double-claimed, orphans are real (29 sessions).
+The `0x210B` list is Playlists-VIEW rows and the `0x2015` ordinal indexes it -- neither is the
+playlist record, which is why `track_playlists` was right on SANTA CLAUS and blind on REMEMBER.
+
+Done:
+* `track_types` is one entry per TRACK (31 for REMEMBER, was 285); `playlist_headers` keeps the
+  per-header enumeration for the lane/channel arithmetic. Synthesis outputs byte-identical.
+* Readers: `track_playlist_sets`, `session_playlists`, `unassigned_playlists`; `playlist_names` /
+  `track_playlists` rebuilt on the registries.
+* Editors (audio and MIDI/instrument): `new_playlist`, `duplicate_playlist`, `set_active_playlist`,
+  `rename_playlist`, `delete_playlist`; `remove_track` takes a track's alternates
+  (`keep_alternates=True` to keep). Every edit + inverse returns the original bytes on 76 real
+  sessions, and replaying Pro Tools' own edits reproduces its saves (see the spec).
+* FIXED, latent since the editors were written: off the synth path `duplicate_track` /
+  `remove_track` never updated the ownership lists -- a duplicate left every track below the copy
+  pointing one playlist up and the last playlist orphaned; a removal left the next track pointing
+  past the registry. They also left the copy's lanes interleaved with its source's and its header
+  naming lanes at the end. Now lists, lane grouping and lane indices follow (71/71 sessions).
+* FIXED: the mixed-MIDI synth keyed grown tracks' lists to the internal position (out of range).
+* FIXED (pre-existing): duplicating a track shown in Playlists view (several `0x210B` rows) split
+  its row group and broke `duplicate -> remove` (5 DWTS sessions, also failing on the old code).
+
+Open:
+* **PT verdict** on `~/Desktop/PTX_VERIFY_2026-10-15_PLAYLISTS` (READ ME there). 01 vs 02 decides
+  whether Pro Tools reads the ownership lists at all (the July duplicate it confirmed had a wrong
+  list and looked fine -- every duplicate tested so far played the same clips as its source).
+* DONE (same day): MIDI/instrument playlist editing, and MIDI lists are now read FORWARD (a u32
+  count is ambiguous backwards; 3 of 335 real lists fit two ways). Replays of Pro Tools' own
+  switch (23 tracks) and New Playlist match its saves in every playlist structure.
+* Deleting a MIDI playlist that a `0x202E` record refers to is refused -- what Pro Tools does with
+  the record (drop it? and its `0x202D` partner?) needs a backup step that shows it.
+* Wider check, 300 families of the `/Volumes/Backups` corpus: every edit valid on all 296 editable
+  sessions; every inverse byte-exact except one switch between two playlists that share a name
+  (their relative order is undefined). Two sessions (`DWTS 2201 PTa`, `S2205 PT New Preacher Man`)
+  cannot be edited at all: the index parser cannot frame their `0x2624` record -- PRE-EXISTING, the
+  old `rename_track` / `duplicate_track` fail on them identically (13 of the 300 in all).
+* `duplicate_track` -> `remove_track` on the same 300: ownership lists, survivors, the copy and
+  orphans correct on 284/284; the round trip is not byte-exact on 5 (`S2302A PT SHOW`, `DWTS 2105
+  v5`, `REC TEMPLATE`, two BGV preps) -- PRE-EXISTING: the old code leaves the same 2-80 bytes.
+* One real session (`SpatialWorkstation_PT`) has non-cumulative lane indices; the editors refuse it.
+* Delete-track-with-alternates rests on ONE Pro Tools example (`REMEMBER MAIN WITH HALEY`).
+* `remove_track` / `duplicate_track` still find lanes by name (see the 2026-10-12 item below); the
+  playlist registry now gives the exact lanes, so that item can be closed with it.
+
 ## OPEN — what the show masters taught the readers (2026-10-12)
 
 Backported from the session splitter, which reads show masters with hundreds of renamed imported

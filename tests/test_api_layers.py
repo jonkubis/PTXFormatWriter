@@ -42,6 +42,7 @@ class PublicSurfaceTests(unittest.TestCase):
         # placements and the objects they refer to
         "clips", "clip_lanes", "clip_names", "clip_positions", "placement_lanes",
         "playlist_names", "track_playlists", "track_types", "region_list", "region_names",
+        "track_playlist_sets", "playlist_headers", "session_playlists", "unassigned_playlists",
         # conductor
         "markers", "tempo_map", "meter_map",
         # machine context
@@ -60,6 +61,8 @@ class PublicSurfaceTests(unittest.TestCase):
         "replace_tempo_map", "replace_meter_map",
         "set_region_length", "duplicate_region",
         "retarget_audio_file", "duplicate_audio_file", "set_waveform_view",
+        "new_playlist", "duplicate_playlist", "set_active_playlist", "rename_playlist",
+        "delete_playlist",
     )
 
     def test_every_editor_is_reachable_from_the_package_root(self):

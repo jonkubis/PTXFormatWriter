@@ -2738,18 +2738,18 @@ class NameTablePreambleTests(unittest.TestCase):
                             "equal the renamed-PT-session cases are being misclassified as ours")
 
 
-    def test_playlists_are_attributed_to_tracks_by_the_0x2015_ordinal(self):
-        """The per-track `0x2015` ordinal is the 1-based index of that track's FIRST playlist in the
-        flat `0x2107` > `0x210B` list, so track `i` owns the slice `[ord[i], ord[i+1])`.
+    def test_playlists_are_attributed_to_tracks_by_their_ownership_lists(self):
+        """Each track's container ends its fixed children with an OWNERSHIP LIST -- `[u32 active]
+        [count][count x u32 index]` -- whose indices point into the playlist registry of its kind.
+        `track_playlists` reads it, so the groups must partition the registries, every member must
+        carry its track's base name on this session (no renames in it), and the active playlist
+        must be the one the track is named after.
 
-        Verified BY NAME, which is what makes it more than arithmetic: on a 36-track / 126-playlist
-        session every group's members carry their track's base name, `36/36`, including the
-        systematic `gutterN` extra that each multi-playlist track carries.
+        This test used to pin the `0x2015`-ordinal slicing of the `0x210B` list. That reading matched
+        here only because every multi-playlist track of this session was open in Playlists view;
+        the `0x210B` list is that view's lane state (126 rows incl. `gutterN` for 113 playlists).
 
-        On a single-playlist session -- every session in `control_files` and `/Volumes/Samples` --
-        this degenerates to one playlist per track, which is exactly why the field read as a plain
-        positional counter for so long and was twice documented wrongly.
-        """
+        The degenerate case -- one playlist per track -- is checked on the local mono ladder."""
         import re
         base = lambda s: re.sub(r"\.\d{2}$", "", s)
 
@@ -2757,20 +2757,19 @@ class NameTablePreambleTests(unittest.TestCase):
             "SANTA CLAUS IS COMIN.bak.011.ptx")) if pathlib.Path("/Volumes/Hack 2TB SSD Old").exists() else []
         if ref:
             data = _load_path(ref[0])
-            groups = BS.track_playlists(data)
-            bl = BS._size_driven_blocks(data)
-            z, e = [(z, e) for z, e, c in bl if c == 0x2519][0]
-            names = [n for n, _p in BS._inline_name_entries(data, z, e, bl)]
-            self.assertEqual(len(groups), len(names), msg="one playlist group per track")
-            self.assertEqual(sum(len(g) for g in groups), len(BS.playlist_names(data)),
-                             msg="the groups must partition the playlist list exactly")
-            for track, group in zip(names, groups):
-                self.assertTrue(group, msg=f"{track!r} owns no playlist")
-                shared = sum(1 for x in group if base(x) == base(track))
-                self.assertGreaterEqual(shared, max(1, len(group) - 1),
-                                        msg=f"{track!r} -> {group}: members do not share its name")
+            sets = BS.track_playlist_sets(data)
+            self.assertEqual(len(sets), 33, msg="33 audio/MIDI/instrument tracks own playlists")
+            self.assertEqual(sum(len(t.playlists) for t in sets), len(BS.playlist_names(data)),
+                             msg="the groups must partition the registries exactly (no orphans here)")
+            self.assertEqual(BS.unassigned_playlists(data), [])
+            for t in sets:
+                names = [p.name for p in t.playlists]
+                self.assertIn(t.active, t.playlists)
+                self.assertEqual(t.name, t.active.name)
+                self.assertTrue(all(base(x) == base(t.name) for x in names),
+                                msg=f"{t.name!r} -> {names}: members do not share its name")
+            self.assertEqual([len(t.playlists) for t in sets][:3], [1, 9, 9])
 
-        # and the degenerate case, on the local controls
         checked = 0
         for path in sorted(ROOT.glob("control_files/lots of mono tracks/*.ptx")):
             try:
@@ -2785,8 +2784,8 @@ class NameTablePreambleTests(unittest.TestCase):
                 self.assertTrue(all(len(g) == 1 for g in groups),
                                 msg=f"{path.name}: expected one playlist per track, got "
                                     f"{[len(g) for g in groups]}")
+                self.assertEqual([g[0] for g in groups], [t.name for t in BS.track_types(data)])
         self.assertGreater(checked, 3, "mono ladder not found -- the degenerate case proved nothing")
-
 
     def test_playlist_ordinal_repair_reproduces_pro_tools_own_column(self):
         """The strongest local check available for the repair FORMULA: recomputing the ordinal
@@ -4658,8 +4657,14 @@ class TrackTypesUnnamedHeaderTests(unittest.TestCase):
                 continue
             sized = sum(1 for z, _e, c in BS._size_driven_blocks(d)
                         if z >= 31 and c in (0x1014, 0x1057))
-            self.assertEqual(len(BS.track_types(d)), sized,
+            # Every HEADER is a playlist; `track_types` is one entry per TRACK (2026-10-15), which is
+            # the headers less the alternates and the unowned ones (`mixedmidi_5_AMSmM.bak.000`,
+            # our own old output, has 5 tracks and 7 headers).
+            self.assertEqual(len(BS.playlist_headers(d)), sized,
                              f"{path.name}: reader disagrees with the size-driven walk")
+            sets = BS.track_playlist_sets(d)
+            self.assertEqual(len(BS.track_types(d)), len(sets) if sets else sized,
+                             f"{path.name}: one track_types entry per track")
             checked += 1
             if checked >= 25:
                 break
@@ -4700,7 +4705,9 @@ class TrackTypesUnnamedHeaderTests(unittest.TestCase):
         tried FIRST and the scan parser is reached only when it fails.
         """
         import ast, inspect
-        tree = ast.parse(inspect.getsource(BS.track_types).lstrip())
+        # The header walk -- and so this fallback -- lives in `playlist_headers` since 2026-10-15;
+        # `track_types` filters it to each track's active playlist.
+        tree = ast.parse(inspect.getsource(BS.playlist_headers).lstrip())
         fn = tree.body[0]
         if (fn.body and isinstance(fn.body[0], ast.Expr)
                 and isinstance(fn.body[0].value, ast.Constant)):

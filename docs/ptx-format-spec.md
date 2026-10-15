@@ -366,8 +366,8 @@ waveform data (see §5c).
 > corpus looks either perfect or refuted depending on which half you weight, and only the
 > sessions where the candidates DISAGREE carry information.
 >
-> Consistent with §12's finding that the `0x2015` ordinal indexes the flat `0x210B` playlist
-> list: the playlist, not the track, is the unit Pro Tools scaffolds per marker.
+> Consistent with §12's finding that the `0x2015` ordinal indexes the flat `0x210B` list -- whose
+> rows (corrected 2026-10-15) are Playlists-VIEW rows, not the playlist registry of §8.
 >
 > The exceptions are **not ragged** — every one factors exactly, with a multiplier 1, 2 or 4 larger
 > than the track count: `24840 = 138 × 180` (179 records), `26048 = 148 × 176` (175),
@@ -707,12 +707,12 @@ The name in a lane's head is not reliable:
   `COUNT`), and a name outside printable ASCII defeats a head scan (`00 PRINT_CLIX 105·5BPM_1`
   reads as `Z`).
 
-**Playlists.** A track with alternate playlists has a header — and a lane set — for each playlist
-that has lanes, named as Pro Tools names it (`BD in.04`, `BD in.07`, … `BD in`): the 126-playlist
-session of §6 has 113 headers for its 36 tracks, and their 154 channels are its 154 lanes. So the
-owner by position is the playlist. `track_playlists` groups the names by track, and the group's
-first name is the selected playlist — the one the track displays (10 of 10 multi-playlist groups
-there open with it). Every take is an ordinary clip.
+**Playlists.** A track with alternate playlists has a header -- and a lane set -- for each of its
+playlists, named as Pro Tools names it (`BD in.04`, `BD in.07`, … `BD in`): `SANTA CLAUS IS
+COMIN.bak.011` has 113 headers for its 33 audio/MIDI tracks, and their 154 channels are its 154 lanes.
+So the owner by position is the playlist; which TRACK owns that playlist, and which playlist a track
+plays, is the ownership list of the next section, not the order of anything. Every take is an
+ordinary clip.
 
 ### The `0x2428` placements are not clips (corpus-measured, 2026-10)
 
@@ -725,6 +725,129 @@ clips, one put a clip some ten million bars into the session (its timebase byte 
 What they place is not established. A reader enumerating placements takes the track lane list
 only: `clip_lanes`, `placement_lanes`, `clips`, `clip_positions` and `set_clip_position` skip
 this subtree, and `set_clip_position(lanes=None)` no longer writes a position into it.
+
+### Playlists: two registries and one ownership list per track (corpus-measured, 2026-10-15)
+
+A track owns one or more playlists and plays exactly one -- its ACTIVE playlist, whose name Pro Tools
+shows as the track name. Two structures carry this and nothing else does.
+
+**The registries.** Every playlist header sits in one flat list per kind: audio `0x1014` (children of
+`0x1015`, whose payload `+0` u32 is their count -- the number of HEADERS, 285 on `REMEMBER
+MAIN.bak.022`, not the number of tracks) and MIDI `0x1057` (children of `0x1058`). A playlist's
+position in its registry is its INDEX. An audio header reads:
+
+```
+<u32 len><name>  <u8 stem format>  <u32 channels>  <channels x u16 lane>
+00 00 00 00  2a 00 00 00  <8-byte GUID>  <7 bytes>  [block version >= 8: <channels x u32 lane>]  <trailer>
+```
+
+The format byte is 0 mono, 1 stereo, 3 quad, 10 for 7.1 (the byte just before the channel count, so
+reading "the channel byte" one byte early has always worked by luck). The lanes are indices into the
+track lane list (§8, the `0x1054` not under `0x2428`); in every Pro Tools session but one they are
+the cumulative channel count over the registry, both copies agreeing. The GUID is unique per playlist
+(285 for 285). A MIDI header is `<u32 len><name> <u32 placement count>` and then its placements: it
+is header and lane in one, and carries no GUID. Names can be empty, and need not be unique -- one show
+master has two alternates both called `gutter1` -- so identity is the GUID, never the name.
+
+**The ownership list.** Each audio, MIDI and instrument track container ends its fixed children with
+a raw field just before one particular child:
+
+| track | container | layout | followed by |
+|---|---|---|---|
+| audio | `0x261C` | `[u32 active][u16 n][n x u32 index][ff ff]` | `0x200B` |
+| MIDI | `0x2620` | `[u32 active][u32 n][n x u32 index][u8]` | `0x2611` |
+| instrument | `0x2621` | `[u32 active][u16 n][n x u32 index][u8]` | `0x2010` |
+
+The indices point into the registry of the track's kind (audio -> `0x1014`, MIDI and instrument ->
+`0x1057`); `active` is one of them. The list is kept in byte-wise name order with the active playlist
+wherever its name sorts (10,944 of 10,948 lists; the 4 exceptions, on two sessions, are left as
+written). On a one-playlist track it is `[k][1][k]` -- the "k/k-1 counters" §12b documents at fixed
+offsets in the synth unit templates are this list.
+
+Measured on 342 real sessions, 10,948 track containers: every list parses; exactly one layout fits
+each container type; no playlist is claimed by two tracks; and the lists account for every playlist
+except true **orphans** -- playlists no track owns, which Pro Tools keeps and loads (29 sessions, up
+to 22 of them, some holding clips: eight on a `DWTS PT 2603` master hold 16). On `REMEMBER
+MAIN.bak.022` (31 audio tracks, 285 playlists) the lists attribute `BC VOX` .. `.25` to the track now
+named `BC VERSE` and 23 `BC CHORUS*` playlists to `BC PRE` -- renames no name match could follow.
+
+**Canonical order.** Pro Tools saves each registry with the active playlists first, in track order,
+then the inactive ones sorted by name, and remaps every list to match. A switch therefore MOVES
+headers (and for audio, their lanes): `CHRISTMAS IN MY HEART` bak.000 -> .001 switches the
+instrument track `JK PNO` from `.01` to `.04`; the MIDI registry is re-saved `[JK PNO.04, JK PNO,
+JK PNO.01, …]`, the track's list goes from `[1,0,2,3,4,5,6]` to `[1,2,3,4,0,5,6]`, and its active
+index stays 0. Sessions written by other versions do not always follow it --
+`Christmas Time In Southern California` has its audio actives at registry 6, 8, 10, … behind six
+unnamed unowned playlists -- so a reader takes the active index from the list, never from a position.
+
+**Not the ownership record**, each tried first:
+
+- the `0x2107 > 0x210B` list -- Playlists-VIEW rows: a row per track of every kind, plus a row per
+  playlist of a track shown in Playlists view, plus `gutterN` rows. It enumerated the 113 playlists
+  of `SANTA CLAUS IS COMIN.bak.011` only because every multi-playlist track there was open in that
+  view; `REMEMBER MAIN.bak.022` has 36 rows for 285 playlists. The `0x2015` ordinal (§12b) indexes
+  THIS list, so it counts view rows, not playlists.
+- playlist names -- renames, typos and `.dup1` chains defeat any stem match.
+- the GUID maps at the end of a newer `0x261C`: after the last child, `<u32><u16 version>`, then
+  three maps keyed by `00 00 00 00 2a 00 00 00 <8-byte playlist GUID>` -- `<u16 n>` x (key, u32
+  ordinal), `<u16 n>` x (key, u32 view height: 43, 61, 79, 97, 116, …), `<u16 n>` x (key, u8 flag)
+  -- then the track's ordinal. Playlists-view lane state: present only once a track has been shown in
+  that view, and it omits playlists the ownership list includes (`MB PRE` in `REMEMBER`).
+
+**What a playlist edit changes**, read off Pro Tools' own saves:
+
+- *New Playlist* (`20230210 JON VH NOT YET` bak.010 -> .011): a fresh header (new GUID) takes the
+  active slot with a new empty lane at that slot's lane position; the old active header moves to its
+  name-sorted place among the inactive ones, its lane (and clips) with it; `0x1015` +1, `0x1054` +1;
+  the list becomes `[24][2][30, 24]`; and the TRACK is renamed in its `0x2519` entry and both
+  `0x251A` -- not in the old playlist's own header and lane, which keep their name.
+- *Switch* (the `CHRISTMAS` step above): the registry re-saved, every list remapped, the `0x202E`
+  records remapped, and the track renamed in `0x2519`, `0x210B` and both `0x251A`. "The track's
+  `0x210B`" is its OWN row -- the one its `0x2015` ordinal points at. A track shown in Playlists view
+  has a row per playlist after it, and matching rows by name also renamed the alternate's row
+  (`S3101 PT PREP`, where `EDIT IMPORTz REPLACED` has one); the editors rename the track's row and,
+  when the playlist switched to already has a row in the group, give that row the old name.
+- *Duplicate Playlist* (`CELEBRATE Pno OD Stagg 091018 COMP` bak.004 -> .005): as New, but the new
+  lanes hold byte-identical copies of the source's placements (9 of 9).
+- *Delete Track* with alternates (`REMEMBER MAIN WITH HALEY` bak.026 -> .027, the one such step in
+  2,918 backups): all ten alternates went with it.
+
+A lane is `<u32 len><name> <u32 placement count> <placements> <trailer>`, the trailer 1 byte in
+block version 2 and 2 bytes in version 3 (27,000 lanes); an empty lane is the same with count 0. In
+the master index the only references to playlist objects are two element lists, each in ascending
+offset order: the `0x1015` record's (the container, every header, its `0x4829` child) and the
+`0x1054` record's (the container, every lane, its `0x4828` child). Placements are not index targets,
+so lanes can move with their clips. Marker rows (`0x2506`) follow tracks, not playlists (rows equal
+the `0x2015` count on 210 of 230 sessions with markers), so a playlist edit leaves them alone.
+
+**Reading a MIDI list.** A u32 count can be mistaken for an index: `[1][2][1, 2]` also reads
+backwards as `[2][1][2]`, and 3 of 335 real MIDI-track lists fit two ways. A MIDI track's list is read
+FORWARD instead: it starts at the end of the container's `0x102D` child on all 335. The u16-count
+layouts cannot be fooled that way (a u16 read at the wrong length lands on the zero high half of an
+index), so they are read backward from their anchor.
+
+**In the library.** `track_playlist_sets` (per track: active playlist, owned playlists, lanes),
+`session_playlists`, `unassigned_playlists`, `playlist_names`, `track_playlists`; `track_types` is one
+entry per TRACK (until 2026-10-15 it returned every playlist header -- 285 "tracks" for 31 --
+which is `playlist_headers` now). Editors, audio and MIDI/instrument playlists alike:
+`new_playlist`, `duplicate_playlist`, `set_active_playlist`, `rename_playlist`, `delete_playlist`,
+and `remove_track` (which takes the track's alternates unless `keep_alternates=True`). Each keeps the
+canonical order when the session has it and refuses an audio lane layout that is not cumulative.
+
+Checked three ways. (1) Replaying Pro Tools' own edits from its backups reproduces its save in
+every playlist structure: the 23-track switch of `CHRISTMAS IN MY HEART` bak.007 -> .008 (all 154
+headers, all 238 lanes with their clips, every list, byte for byte), the instrument-track switch
+bak.000 -> .001 (the `0x1057` run, the lists and the `0x202E` records), and New Playlist on
+`JON VH NOT YET` (everything except the new playlist's random GUID and the clip Pro Tools recorded
+into it). (2) On 76 real sessions every edit and its inverse return the original bytes. (3) Pro
+Tools itself: pending, staged in `PTX_VERIFY_2026-10-15_PLAYLISTS`. Deleting a MIDI playlist that a
+`0x202E` record refers to is refused (what Pro Tools does with that record is not established);
+`remove_track` leaves such alternates unowned. Playlists are named by string or, where names repeat
+(two alternates called `gutter1` on one show master), by the `Playlist` record itself. A rename keeps
+the playlist's place in its track's list: Pro Tools' lists are not always in byte order
+(`DEREK MASTER CALSS` keeps `short.1` before `short.02`). `duplicate_track` / `remove_track` off the synth path
+now keep every list, the copy's lanes and every header's lane indices consistent; before, a
+duplicate left every track below the copy pointing one playlist up.
 
 ---
 
@@ -1098,15 +1221,15 @@ Pro Tools' own mono ladder names the field outright:
 | … | … |
 | `8 mono tracks` | `[0,0,0,0,0,0,0,1]` |
 
-> **The other `0x2015` field — playlists.** The `u32` after that block's `0x2434` child is a
+> **The other `0x2015` field — view rows.** The `u32` after that block's `0x2434` child is a
 > different thing entirely from the two selection flags: it is the **1-based index of the track's
-> first playlist** in the flat `0x2107` → `0x210B` list, so track `i` owns the half-open slice
-> `[ord[i], ord[i+1])`. Proven by name on `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126
-> playlists): track `BD in.04` claims indices 2..11, and those ten entries are `BD in.04`,
-> `BD in.07`, `BD in.06`, `BD in.05`, `BD in.08`, `BD in.01`, `BD in`, `BD in.02`, `BD in.03`,
-> `gutter1` — every playlist of `BD in` and nothing else. All 36 groups agree with their track's
-> name, and `sum(gaps) + 1 == 126`, the playlist count exactly. Read it with
-> `body_synth.track_playlists()`.
+> first row** in the flat `0x2107` → `0x210B` list, so track `i` owns the half-open slice
+> `[ord[i], ord[i+1])`. On `SANTA CLAUS IS COMIN.bak.011.ptx` (36 tracks, 126 rows) track
+> `BD in.04` claims rows 2..11: `BD in.04`, `BD in.07`, `BD in.06`, `BD in.05`, `BD in.08`,
+> `BD in.01`, `BD in`, `BD in.02`, `BD in.03`, `gutter1`. **Corrected 2026-10-15:** those rows are
+> Playlists-VIEW rows, not the playlists -- a track has one row unless it is shown in Playlists view,
+> where it has one per playlist plus a gutter. `REMEMBER MAIN.bak.022` has 36 rows for 285
+> playlists. The playlists and their owners are the registries and ownership lists of §8.
 
 — the just-created track, in **both** columns. Neither is a structural "is last" bit: `1..4 stereo
 tracks` have none set and `5 stereo tracks` has all five, which is what user-visible selection looks
@@ -1508,7 +1631,7 @@ All offsets below are payload-relative (= zmark + 9), i.e. relative to the first
   - +(12+name_len) u8[4] GUID tag = 2A 00 00 00 (constant).
   - +(16+name_len) u8[8] GUID (entities created together share prefix bytes).
   - +(24+name_len) u8[16] tail = all zeros (constant).
-- **notes:** Parent always 0x2107 (628/628), a registry that holds EXCLUSIVELY 0x210b children. NOT universal: appears in only 4 of 26 corpus projects (DWTS ×3 near-duplicate saves, MANOLITO, THE WIND) — feature/version-specific. This is the canonical name→GUID binding other blocks reference.
+- **notes:** Parent always 0x2107 (628/628), a registry that holds EXCLUSIVELY 0x210b children. NOT universal: appears in only 4 of 26 corpus projects (DWTS ×3 near-duplicate saves, MANOLITO, THE WIND) — feature/version-specific. **2026-10-15:** these are Playlists-VIEW rows (a row per track, plus one per playlist of a track shown in that view, plus `gutterN`), indexed by the `0x2015` ordinal -- NOT the playlist registry, which is `0x1014`/`0x1057` with per-track ownership lists (§8).
 - **confidence:** high for structure/offsets/parent/leaf/size; medium for flag SEMANTICS (aux/bus category is a strong but not perfectly clean split — Click appears under both 0x00 and 0x02); medium-low for generality (only 4 projects).
 
 ### 0x2036 — ordered-permutation item record
@@ -6040,7 +6163,7 @@ The failing rules are:
 | `0x2519-entry-ordinals` | **SOLVED 2026-07-25.** Not "repeated values" but a sentinel: `0` means *not numbered* (40.6% of entries), and the NONZERO ordinals in table order are exactly `1..k` — **300/300 random corpus sessions, no exceptions**. `[1,2,3,4,0,0,5,0,6,…]` is the normal shape. |
 | `0x251A-lane-ordinals` | **RESTART BOUNDARY SOLVED (2026-07-25):** the table is LANE-MAJOR and the sequence is `[1..N]` repeated once per lane index, so the run restarts every N where N = track count. Verified against Pro Tools' own sessions at **N = 99, 128 and 512** (`512 stereo tracks.ptx` = 1024 lane ordinals, exactly `[1..512]×2`), and the synth rule `(i%N)+1` reproduces all three EXACTLY. What remains open is only how the **zero sentinel** interacts in heterogeneous sessions — the `7/25` external-corpus mismatch is entirely sessions where zeros are present. |
 | `0x261C-C4` | **THE WRITE WAS LANDING INSIDE CHILD BLOCKS — fixed structurally 2026-07-25.** The fixed `end - 19` offset is inside the record's OWN bytes only in synth-shaped sessions: 709/709 across the PT-authored controls, but just 253 of 1479 in real ones, where **1226 (83%) fall inside a NESTED CHILD**. The 4-byte write therefore ran through that child's data — visible as writes at `end - 2` of a `0x200B`, overrunning it by two bytes — and that is what BOTH the `0x261C` and `0x200B` churn were. The write is now skipped unless the target is contained in the record itself; no theory about the field is needed, since writing into a child is wrong whatever it means. What C4 *means* in a real session is still UNPROVEN. |
-| `0x2015`/`0x200A`/`0x200B` | **SOLVED 2026-07-26: the 1-based index of the track's FIRST PLAYLIST** — `value[i] = 1 + Σ playlist_count(t)` over tracks before `i`. Proof: `SANTA CLAUS IS COMIN.bak.011.ptx`, 36 tracks / 126 `0x210B`, reads `[1, 2, 12, 22, …, 102, 103, …]`; the gaps are `[1, 10, 10, …, 1, 1, …]` (tracks 3–12 own ten playlists each) and `sum(gaps) + 1 == 126`, the `0x210B` count exactly. On a single-playlist session this degenerates to dense `1..N`, which is why it reads as a positional counter almost everywhere. **Two earlier readings here were wrong, both from too-narrow corpora — see the note below.** |
+| `0x2015`/`0x200A`/`0x200B` | **SOLVED 2026-07-26, corrected 2026-10-15: the 1-based index of the track's FIRST `0x210B` VIEW ROW** (one row per track, one per playlist while a track is shown in Playlists view; see §8 for the playlists themselves) — `value[i] = 1 + Σ playlist_count(t)` over tracks before `i`. Proof: `SANTA CLAUS IS COMIN.bak.011.ptx`, 36 tracks / 126 `0x210B`, reads `[1, 2, 12, 22, …, 102, 103, …]`; the gaps are `[1, 10, 10, …, 1, 1, …]` (tracks 3–12 own ten playlists each) and `sum(gaps) + 1 == 126`, the `0x210B` count exactly. On a single-playlist session this degenerates to dense `1..N`, which is why it reads as a positional counter almost everywhere. **Two earlier readings here were wrong, both from too-narrow corpora — see the note below.** |
 | `0x2589-view-chains` | chain count ≠ name-entry count. Low-word UNIQUENESS is the one universal invariant found (68/68). |
 
 The reader is NOT at fault: spot-checking a real session parses 10 name entries with sane names,
